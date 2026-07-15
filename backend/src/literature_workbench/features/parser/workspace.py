@@ -5,7 +5,9 @@ import hashlib
 import json
 import os
 from ctypes import wintypes
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from literature_workbench.features.library.models import ContentId
@@ -185,6 +187,43 @@ def _same_path(left: Path, right: Path) -> bool:
     )
 
 
+def _extended_windows_path(path: Path) -> str:
+    """Return a Win32 long-path spelling without changing the trusted identity."""
+    raw = os.path.abspath(path)
+    if raw.startswith("\\\\?\\"):
+        return raw
+    if raw.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + raw[2:]
+    return "\\\\?\\" + raw
+
+
+def _promotion_journal_payload(
+    content_id: ContentId,
+    run_id: UUID,
+    manifest_digest: str,
+    state: str,
+) -> bytes:
+    if state not in {
+        "copying",
+        "promoted",
+        "output_recorded",
+        "db_completed",
+        "published",
+    }:
+        raise ValueError("invalid_mineru_promotion_state")
+    return json.dumps(
+        {
+            "content_id": str(content_id),
+            "run_id": str(run_id),
+            "manifest_digest": manifest_digest,
+            "state": state,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
 def _rename_handle(handle: int, destination: Path, *, replace: bool = False) -> None:
     encoded = str(destination).encode("utf-16-le")
     offset = _FILE_RENAME_INFO.FileName.offset
@@ -256,6 +295,13 @@ class TrustedParserFile:
         ):
             raise UnsafeParserWorkspace("trusted_parser_file_identity_changed")
         return metadata
+
+    def current_metadata(self) -> HandleMetadata:
+        return _metadata_for_handle(self._require_handle())
+
+    def rebind_path(self, path: Path) -> None:
+        self._expected_path = Path(os.path.abspath(path))
+        self.metadata()
 
     def write(self, data: bytes) -> None:
         handle = self._require_handle()
@@ -336,6 +382,34 @@ class TrustedParserFile:
             raise ValueError("parser_workspace_file_too_large")
         return payload
 
+    def copy_to(
+        self,
+        destination: TrustedParserFile,
+        cancellation: object | None = None,
+    ) -> None:
+        handle = self._require_handle()
+        if not _SetFilePointerEx(wintypes.HANDLE(handle), 0, None, FILE_BEGIN):
+            _raise_last_error("SetFilePointerEx(parser copy source)")
+        while True:
+            if cancellation is not None:
+                cancellation.raise_if_cancelled()  # type: ignore[attr-defined]
+            buffer = ctypes.create_string_buffer(4 * 1024**2)
+            read = wintypes.DWORD()
+            if not _ReadFile(
+                wintypes.HANDLE(handle),
+                buffer,
+                len(buffer),
+                ctypes.byref(read),
+                None,
+            ):
+                _raise_last_error("ReadFile(parser copy source)")
+            if read.value == 0:
+                break
+            destination.write(buffer.raw[: read.value])
+        destination.flush()
+        if not _SetFilePointerEx(wintypes.HANDLE(handle), 0, None, FILE_BEGIN):
+            _raise_last_error("SetFilePointerEx(parser copy source)")
+
     def rename(self, destination: Path, *, replace: bool = False) -> None:
         destination = Path(os.path.abspath(destination))
         encoded = str(destination).encode("utf-16-le")
@@ -398,6 +472,108 @@ class TrustedParserFile:
         if self._handle is None:
             raise ValueError("trusted_parser_file_closed")
         return self._handle
+
+
+@dataclass(frozen=True, slots=True)
+class _ManifestFile:
+    relative_path: str
+    volume_id: str
+    file_id: str
+    size: int
+    sha256: str
+    handle: TrustedParserFile
+
+
+@dataclass(frozen=True, slots=True)
+class _ManifestDirectory:
+    relative_path: str
+    volume_id: str
+    file_id: str
+    handle: Win32OwnedFileHandle
+
+
+class TrustedMinerUResult:
+    def __init__(
+        self,
+        content_id: ContentId,
+        run_id: UUID,
+        directory: TrustedParserDirectory,
+        directories: tuple[_ManifestDirectory, ...],
+        files: tuple[_ManifestFile, ...],
+        manifest: TrustedParserFile,
+        manifest_digest: str,
+        journal: TrustedParserFile | None = None,
+    ) -> None:
+        self.content_id = content_id
+        self.run_id = run_id
+        self.directory = directory
+        self._directories = directories
+        self._files = files
+        self._manifest = manifest
+        self.manifest_digest = manifest_digest
+        self._journal = journal
+
+    @property
+    def path(self) -> Path:
+        return self.directory.path
+
+    def verify(self) -> None:
+        root = self.directory.metadata()
+        if root.is_reparse_point:
+            raise UnsafeParserWorkspace("mineru_result_root_unsafe")
+        if self._manifest.sha256() != self.manifest_digest:
+            raise UnsafeParserWorkspace("mineru_result_manifest_changed")
+        for directory_item in self._directories:
+            metadata = directory_item.handle.current_metadata()
+            expected = self.path.joinpath(*directory_item.relative_path.split("/"))
+            if (
+                not metadata.is_directory
+                or metadata.is_reparse_point
+                or not _same_path(metadata.final_path, expected)
+                or (metadata.volume_id, metadata.file_id)
+                != (directory_item.volume_id, directory_item.file_id)
+            ):
+                raise UnsafeParserWorkspace("mineru_result_directory_changed")
+        for file_item in self._files:
+            metadata = file_item.handle.metadata()
+            if (
+                metadata.hard_link_count != 1
+                or (metadata.volume_id, metadata.file_id, metadata.size)
+                != (file_item.volume_id, file_item.file_id, file_item.size)
+                or file_item.handle.sha256() != file_item.sha256
+            ):
+                raise UnsafeParserWorkspace("mineru_result_file_changed")
+
+    def rebind_after_promotion(self, destination: Path) -> None:
+        for file_item in self._files:
+            file_item.handle.rebind_path(
+                destination.joinpath(*file_item.relative_path.split("/"))
+            )
+        self._manifest.rebind_path(destination / "manifest.json")
+        self.verify()
+
+    def close(self) -> None:
+        if self._journal is not None:
+            self._journal.close()
+            self._journal = None
+        self._manifest.close()
+        for file_item in self._files:
+            file_item.handle.close()
+        for directory_item in reversed(self._directories):
+            directory_item.handle.close()
+        self.directory.close()
+
+    def update_journal(self, state: str) -> None:
+        if self._journal is None:
+            raise UnsafeParserWorkspace("mineru_promotion_journal_missing")
+        self._journal.replace_bytes(
+            _promotion_journal_payload(
+                self.content_id,
+                self.run_id,
+                self.manifest_digest,
+                state,
+            )
+        )
 
 
 class TrustedParserWorkspace:
@@ -548,6 +724,170 @@ class TrustedParserWorkspace:
         work.metadata()
         return work
 
+    def seal_mineru_work(
+        self,
+        content_id: ContentId,
+        run_id: UUID,
+        work: TrustedParserDirectory,
+    ) -> TrustedMinerUResult:
+        expected = self.mineru_work_directory / str(run_id)
+        if not _same_path(work.path, expected):
+            raise UnsafeParserWorkspace("mineru_work_path_mismatch")
+        directories: tuple[_ManifestDirectory, ...] = ()
+        files: tuple[_ManifestFile, ...] = ()
+        manifest: TrustedParserFile | None = None
+        try:
+            directories, files = self._open_manifest_tree(work.path)
+            payload = self._manifest_payload(content_id, run_id, files)
+            manifest_path = work.path / "manifest.json"
+            writable = self._open_file(
+                manifest_path,
+                create=True,
+                held_directories=(),
+            )
+            writable.replace_bytes(payload)
+            manifest_digest = hashlib.sha256(payload).hexdigest()
+            manifest = self.bind_staged_read_guard(writable, manifest_digest)
+            result = TrustedMinerUResult(
+                content_id,
+                run_id,
+                work,
+                directories,
+                files,
+                manifest,
+                manifest_digest,
+            )
+            result.verify()
+            return result
+        except BaseException:
+            if manifest is not None:
+                manifest.close()
+            for file_item in files:
+                file_item.handle.close()
+            for directory_item in reversed(directories):
+                directory_item.handle.close()
+            raise
+
+    def promote_sealed_mineru_result(
+        self,
+        result: TrustedMinerUResult,
+    ) -> TrustedMinerUResult:
+        result.verify()
+        content = self._held_child_directory(
+            self.parse_results_directory / str(result.content_id),
+            require_new=False,
+        )
+        destination = content.metadata.final_path / str(result.run_id)
+        destination_directory: TrustedParserDirectory | None = None
+        copied_directories: list[_ManifestDirectory] = []
+        copied_files: list[_ManifestFile] = []
+        manifest: TrustedParserFile | None = None
+        journal: TrustedParserFile | None = None
+        try:
+            journal = self._open_file(
+                content.metadata.final_path / f"{result.run_id}.promotion.json",
+                create=True,
+                held_directories=(),
+            )
+            journal.replace_bytes(
+                _promotion_journal_payload(
+                    result.content_id,
+                    result.run_id,
+                    result.manifest_digest,
+                    "copying",
+                )
+            )
+            destination_handle = self._held_child_directory(
+                destination, require_new=True
+            )
+            destination_directory = TrustedParserDirectory(
+                destination, destination_handle
+            )
+            destination_directory.hold_parent(content)
+            for source_directory in sorted(
+                result._directories,
+                key=lambda item: (item.relative_path.count("/"), item.relative_path),
+            ):
+                path = destination.joinpath(
+                    *source_directory.relative_path.split("/")
+                )
+                handle = self._held_child_directory(path, require_new=True)
+                metadata = handle.current_metadata()
+                copied_directories.append(
+                    _ManifestDirectory(
+                        source_directory.relative_path,
+                        metadata.volume_id,
+                        metadata.file_id,
+                        handle,
+                    )
+                )
+            for source_file in result._files:
+                path = destination.joinpath(*source_file.relative_path.split("/"))
+                writable = self._open_file(
+                    path,
+                    create=True,
+                    held_directories=(),
+                )
+                source_file.handle.copy_to(writable)
+                digest = writable.sha256()
+                guarded = self.bind_staged_read_guard(writable, digest)
+                metadata = guarded.metadata()
+                if metadata.hard_link_count != 1:
+                    guarded.close()
+                    raise UnsafeParserWorkspace("mineru_result_hard_linked_file")
+                copied_files.append(
+                    _ManifestFile(
+                        source_file.relative_path,
+                        metadata.volume_id,
+                        metadata.file_id,
+                        metadata.size,
+                        digest,
+                        guarded,
+                    )
+                )
+            payload = self._manifest_payload(
+                result.content_id, result.run_id, copied_files
+            )
+            manifest_writer = self._open_file(
+                destination / "manifest.json",
+                create=True,
+                held_directories=(),
+            )
+            manifest_writer.replace_bytes(payload)
+            manifest_digest = hashlib.sha256(payload).hexdigest()
+            manifest = self.bind_staged_read_guard(
+                manifest_writer, manifest_digest
+            )
+            promoted = TrustedMinerUResult(
+                result.content_id,
+                result.run_id,
+                destination_directory,
+                tuple(copied_directories),
+                tuple(copied_files),
+                manifest,
+                manifest_digest,
+                journal,
+            )
+            promoted.verify()
+            promoted.update_journal("promoted")
+            journal = None
+            result.close()
+            return promoted
+        except BaseException:
+            if journal is not None:
+                journal.close()
+            if manifest is not None:
+                manifest.close()
+            for file_item in copied_files:
+                file_item.handle.close()
+            for directory_item in reversed(copied_directories):
+                directory_item.handle.close()
+            if destination_directory is not None:
+                destination_directory.close()
+            else:
+                content.close()
+            raise
+
     def promote_mineru_work(
         self,
         content_id: ContentId,
@@ -584,14 +924,89 @@ class TrustedParserWorkspace:
             content.close()
             raise
 
+    def open_sealed_mineru_result(
+        self,
+        content_id: ContentId,
+        run_id: UUID,
+    ) -> TrustedMinerUResult:
+        directory = self.open_mineru_result(content_id, run_id)
+        manifest: TrustedParserFile | None = None
+        journal: TrustedParserFile | None = None
+        directories: tuple[_ManifestDirectory, ...] = ()
+        files: tuple[_ManifestFile, ...] = ()
+        try:
+            manifest = self._open_file(
+                directory.path / "manifest.json",
+                create=False,
+                held_directories=(),
+                writable=False,
+            )
+            payload = manifest.read_bounded(8 * 1024 * 1024)
+            parsed = json.loads(payload.decode("utf-8"))
+            directories, files = self._open_manifest_tree(directory.path)
+            expected = json.loads(
+                self._manifest_payload(content_id, run_id, files).decode("utf-8")
+            )
+            if parsed != expected:
+                raise UnsafeParserWorkspace("mineru_result_manifest_mismatch")
+            journal = self._open_file(
+                directory.path.parent / f"{run_id}.promotion.json",
+                create=False,
+                held_directories=(),
+            )
+            journal_record = json.loads(
+                journal.read_bounded(64 * 1024).decode("utf-8")
+            )
+            allowed_states = {
+                "promoted",
+                "output_recorded",
+                "db_completed",
+                "published",
+            }
+            manifest_digest = hashlib.sha256(payload).hexdigest()
+            if journal_record not in [
+                json.loads(
+                    _promotion_journal_payload(
+                        content_id, run_id, manifest_digest, state
+                    ).decode("utf-8")
+                )
+                for state in allowed_states
+            ]:
+                raise UnsafeParserWorkspace("mineru_promotion_journal_mismatch")
+            result = TrustedMinerUResult(
+                content_id,
+                run_id,
+                directory,
+                directories,
+                files,
+                manifest,
+                manifest_digest,
+                journal,
+            )
+            journal = None
+            result.verify()
+            return result
+        except BaseException:
+            if journal is not None:
+                journal.close()
+            if manifest is not None:
+                manifest.close()
+            for file_item in files:
+                file_item.handle.close()
+            for directory_item in reversed(directories):
+                directory_item.handle.close()
+            directory.close()
+            raise
+
     def publish_result_pointer(
         self,
         content_id: ContentId,
         run_id: UUID,
-        result: TrustedParserDirectory,
+        result: TrustedMinerUResult,
     ) -> None:
         expected = self.parse_results_directory / str(content_id) / str(run_id)
-        metadata = result.metadata()
+        result.verify()
+        metadata = result.directory.metadata()
         if not _same_path(result.path, expected) or metadata.is_reparse_point:
             raise UnsafeParserWorkspace("mineru_result_publish_identity_invalid")
         content = self._held_child_directory(expected.parent, require_new=False)
@@ -612,6 +1027,7 @@ class TrustedParserWorkspace:
                         "path_digest": hashlib.sha256(
                             relative.encode("utf-8")
                         ).hexdigest(),
+                        "manifest_digest": result.manifest_digest,
                     },
                     ensure_ascii=False,
                     separators=(",", ":"),
@@ -621,6 +1037,7 @@ class TrustedParserWorkspace:
                 temporary.path.with_name("current.json"), replace=True
             )
             _flush_directory(temporary.path.parent)
+            result.update_journal("published")
         except BaseException:
             if temporary is not None:
                 try:
@@ -631,6 +1048,107 @@ class TrustedParserWorkspace:
         finally:
             if temporary is not None:
                 temporary.close()
+
+    def _open_manifest_tree(
+        self,
+        root: Path,
+    ) -> tuple[tuple[_ManifestDirectory, ...], tuple[_ManifestFile, ...]]:
+        directories: list[_ManifestDirectory] = []
+        files: list[_ManifestFile] = []
+
+        def visit(current: Path, relative_parent: str) -> None:
+            for entry in sorted(
+                os.scandir(_extended_windows_path(current)), key=lambda item: item.name
+            ):
+                relative = (
+                    entry.name
+                    if not relative_parent
+                    else f"{relative_parent}/{entry.name}"
+                )
+                if relative == "manifest.json":
+                    continue
+                path = current / entry.name
+                if entry.is_symlink():
+                    raise UnsafeParserWorkspace("mineru_result_reparse_point")
+                if entry.is_dir(follow_symlinks=False):
+                    handle = Win32FileMetadataProvider().open_directory(
+                        path, share_delete=False
+                    )
+                    metadata = handle.current_metadata()
+                    if (
+                        not metadata.is_directory
+                        or metadata.is_reparse_point
+                        or not _same_path(metadata.final_path, path)
+                    ):
+                        handle.close()
+                        raise UnsafeParserWorkspace("mineru_result_directory_unsafe")
+                    directories.append(
+                        _ManifestDirectory(
+                            relative,
+                            metadata.volume_id,
+                            metadata.file_id,
+                            handle,
+                        )
+                    )
+                    visit(path, relative)
+                    continue
+                file = self._open_file(
+                    path,
+                    create=False,
+                    held_directories=(),
+                    writable=False,
+                )
+                metadata = file.metadata()
+                if metadata.hard_link_count != 1:
+                    file.close()
+                    raise UnsafeParserWorkspace("mineru_result_hard_linked_file")
+                files.append(
+                    _ManifestFile(
+                        relative,
+                        metadata.volume_id,
+                        metadata.file_id,
+                        metadata.size,
+                        file.sha256(),
+                        file,
+                    )
+                )
+
+        try:
+            visit(root, "")
+            return tuple(directories), tuple(files)
+        except BaseException:
+            for file_item in files:
+                file_item.handle.close()
+            for directory_item in reversed(directories):
+                directory_item.handle.close()
+            raise
+
+    @staticmethod
+    def _manifest_payload(
+        content_id: ContentId,
+        run_id: UUID,
+        files: tuple[_ManifestFile, ...] | list[_ManifestFile],
+    ) -> bytes:
+        payload: dict[str, Any] = {
+            "content_id": str(content_id),
+            "run_id": str(run_id),
+            "files": [
+                {
+                    "path": item.relative_path,
+                    "volume_id": item.volume_id,
+                    "file_id": item.file_id,
+                    "size": item.size,
+                    "sha256": item.sha256,
+                }
+                for item in sorted(files, key=lambda value: value.relative_path)
+            ],
+        }
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
 
     def cleanup_staged(
         self,
@@ -695,10 +1213,11 @@ class TrustedParserWorkspace:
         allow_rename: bool = False,
     ) -> Win32OwnedFileHandle:
         path = Path(os.path.abspath(path))
+        mkdir_path = Path(_extended_windows_path(path))
         if require_new:
-            path.mkdir()
+            mkdir_path.mkdir()
         else:
-            path.mkdir(exist_ok=True)
+            mkdir_path.mkdir(exist_ok=True)
         handle = self._open_directory(path, allow_rename=allow_rename)
         metadata = handle.metadata
         if (
@@ -718,10 +1237,10 @@ class TrustedParserWorkspace:
     ) -> Win32OwnedFileHandle:
         if not allow_rename:
             return Win32FileMetadataProvider().open_directory(
-                path, share_delete=False
+                Path(_extended_windows_path(path)), share_delete=False
             )
         raw = _CreateFileW(
-            str(path),
+            _extended_windows_path(path),
             FILE_LIST_DIRECTORY | DELETE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             None,
@@ -753,7 +1272,7 @@ class TrustedParserWorkspace:
         if writable:
             access |= GENERIC_WRITE | DELETE
         raw = _CreateFileW(
-            str(path),
+            _extended_windows_path(path),
             access,
             FILE_SHARE_READ,
             None,
@@ -811,7 +1330,7 @@ def open_trusted_relative_file(
             # A second read handle must therefore share that existing DELETE
             # access; nested components are then pinned without delete-share.
             handle = provider.open_directory(
-                current, share_delete=index == 0
+                Path(_extended_windows_path(current)), share_delete=index == 0
             )
             handles.append(handle)
             metadata = handle.metadata

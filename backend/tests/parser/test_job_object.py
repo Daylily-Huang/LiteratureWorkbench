@@ -5,6 +5,7 @@ import msvcrt
 import os
 import subprocess
 import sys
+import time
 from ctypes import wintypes
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,6 +114,73 @@ def test_parent_can_close_only_child_stdin_to_deliver_eof(tmp_path: Path) -> Non
 
     exit_code, _, _ = process.wait_and_collect()
     assert exit_code == 0
+
+
+def test_large_stdout_and_stderr_are_drained_without_deadlock_and_keep_tails(
+    tmp_path: Path,
+) -> None:
+    stdout_tail = b"STDOUT-TAIL-SENTINEL"
+    stderr_tail = b"STDERR-TAIL-SENTINEL"
+    probe = (
+        "import sys; "
+        "sys.stdout.buffer.write(b'o' * (256 * 1024) + b'STDOUT-TAIL-SENTINEL'); "
+        "sys.stdout.buffer.flush(); "
+        "sys.stderr.buffer.write(b'e' * (256 * 1024) + b'STDERR-TAIL-SENTINEL'); "
+        "sys.stderr.buffer.flush()"
+    )
+    args = (sys.executable, "-c", probe)
+    process = launch_suspended_in_job(
+        ProcessSpec(args=args, command_line=subprocess.list2cmdline(args), cwd=tmp_path),
+        uuid4(),
+        lambda _: None,
+    )
+
+    exit_code, stdout, stderr = process.wait_and_collect()
+
+    assert exit_code == 0
+    assert len(stdout) == job_object.MAX_CAPTURE_BYTES
+    assert len(stderr) == job_object.MAX_CAPTURE_BYTES
+    assert stdout.endswith(stdout_tail)
+    assert stderr.endswith(stderr_tail)
+
+
+def test_cancellation_closes_job_and_leaves_no_spawned_descendant(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "descendant.pid"
+    descendant = "import time; time.sleep(60)"
+    probe = (
+        "import pathlib,subprocess,sys; "
+        f"p=subprocess.Popen([sys.executable,'-c',{descendant!r}]); "
+        "pathlib.Path(sys.argv[1]).write_text(str(p.pid), encoding='ascii'); "
+        "sys.stdin.buffer.read()"
+    )
+    args = (sys.executable, "-c", probe, str(pid_file))
+    process = launch_suspended_in_job(
+        ProcessSpec(args=args, command_line=subprocess.list2cmdline(args), cwd=tmp_path),
+        uuid4(),
+        lambda _: None,
+    )
+    deadline = time.monotonic() + 5
+    while (
+        (not pid_file.exists() or pid_file.stat().st_size == 0)
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+    assert pid_file.exists()
+    descendant_pid = int(pid_file.read_text(encoding="ascii"))
+
+    process.cancel(process.identity, grace_seconds=1)
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    handle = kernel32.OpenProcess(0x00100000, False, descendant_pid)
+    if handle:
+        try:
+            assert kernel32.WaitForSingleObject(handle, 2000) == 0
+        finally:
+            kernel32.CloseHandle(handle)
 
 
 @dataclass(slots=True)

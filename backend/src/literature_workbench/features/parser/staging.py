@@ -127,6 +127,7 @@ def stage_verified_pdf(
     part: TrustedParserFile | None = None
     journal: TrustedParserFile | None = None
     succeeded = False
+    guarded = False
     checkpoint.record_copy_started(attempt_id)
     digest = hashlib.sha256()
     source.stream.seek(0)
@@ -156,6 +157,7 @@ def stage_verified_pdf(
             workspace.journal_payload(content_id, attempt_id, actual_hash, "renamed")
         )
         part = workspace.bind_staged_read_guard(part, actual_hash)
+        guarded = True
         relative_path = _relative_staging_name(content_id, attempt_id, ".pdf")
         checkpoint.record_staged(relative_path, actual_hash)
         staged = StagedPdf(
@@ -164,6 +166,24 @@ def stage_verified_pdf(
         succeeded = True
         return staged
     finally:
+        if part is not None and not succeeded and guarded:
+            if journal is not None:
+                journal.close()
+                journal = None
+            workspace.cleanup_staged(
+                part,
+                content_id,
+                attempt_id,
+                expected_hash,
+            )
+            part = None
+        elif part is not None and not succeeded:
+            try:
+                part.delete()
+                if journal is not None:
+                    journal.delete()
+            except (OSError, ValueError):
+                pass
         if journal is not None:
             journal.close()
         if part is not None and not succeeded:

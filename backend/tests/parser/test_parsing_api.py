@@ -156,6 +156,10 @@ def test_composed_parse_api_enqueues_bounded_requests_and_updates_preference(
                 "FROM documents WHERE id=?",
                 (str(document_id),),
             ).fetchone()
+            content = connection.execute(
+                "SELECT parse_request_revision FROM contents WHERE sha256=?",
+                (str(content_id),),
+            ).fetchone()
 
     assert default.status_code == 202
     assert forced.status_code == 202
@@ -167,9 +171,16 @@ def test_composed_parse_api_enqueues_bounded_requests_and_updates_preference(
         "content_id": str(content_id),
         "strategy": "auto",
         "ocr_language": None,
+        "request_revision": 1,
     }
     assert json.loads(jobs[1]["payload_json"])["strategy"] == "mineru"
     assert json.loads(jobs[1]["payload_json"])["ocr_language"] == "ch"
+    assert [json.loads(row["payload_json"])["request_revision"] for row in jobs] == [
+        1,
+        2,
+        3,
+    ]
+    assert content is not None and int(content["parse_request_revision"]) == 3
     assert document is not None
     assert tuple(document) == ("parse", "mineru", "ch")
     assert status.status_code == 200
@@ -193,7 +204,21 @@ def test_text_api_reads_only_current_completed_run_and_maps_physical_page(
     ) as client:
         document_id, content_id = _register_document(client, tmp_path)
         repository = ParseRunRepository(client.app.state.database)
-        run_id = repository.create_run(content_id, "pymupdf", "test-version")
+        with client.app.state.database.transaction() as connection:
+            allocated = connection.execute(
+                """
+                UPDATE contents SET parse_request_revision=parse_request_revision+1
+                WHERE sha256=? RETURNING parse_request_revision
+                """,
+                (str(content_id),),
+            ).fetchone()
+        assert allocated is not None
+        run_id = repository.create_run(
+            content_id,
+            "pymupdf",
+            "test-version",
+            request_revision=int(allocated["parse_request_revision"]),
+        )
         repository.complete_run(
             run_id,
             [_page(content_id, run_id, 0, "page one"), _page(content_id, run_id, 1, "page two")],
@@ -211,6 +236,46 @@ def test_text_api_reads_only_current_completed_run_and_maps_physical_page(
     assert "output_dir" not in response.text
     assert "staging" not in response.text
     assert missing_page.status_code == 404
+
+
+def test_text_api_uses_repository_document_page_snapshot_only(tmp_path: Path) -> None:
+    session = LocalSession()
+    app = create_app(
+        AppSettings(data_root=tmp_path / "data", allowed_hosts=("testserver",)),
+        local_session=session,
+        register_initial_library=False,
+    )
+    document_id = uuid4()
+    content_id = ContentId("a" * 64)
+    run_id = uuid4()
+    expected = _page(content_id, run_id, 0, "snapshot page")
+
+    class SnapshotRepository:
+        def read_document_current_page(
+            self, requested_document_id: UUID, physical_page: int
+        ) -> tuple[bool, ParsedPage | None]:
+            assert requested_document_id == document_id
+            assert physical_page == 1
+            return True, expected
+
+        def read_current_page(self, *_args: object) -> ParsedPage | None:
+            raise AssertionError("split content/page snapshot must not be used")
+
+    with TestClient(
+        app,
+        base_url="http://testserver",
+        cookies={"lw_session": session.session_cookie},
+    ) as client:
+        original_database = client.app.state.database
+        client.app.state.database = object()
+        client.app.state.parse_run_repository = SnapshotRepository()
+        try:
+            response = client.get(f"/api/documents/{document_id}/pages/1/text")
+        finally:
+            client.app.state.database = original_database
+
+    assert response.status_code == 200
+    assert response.json()["normalized_text"] == "snapshot page"
 
 
 def test_parse_api_rejects_unbounded_values_and_requires_composed_route(

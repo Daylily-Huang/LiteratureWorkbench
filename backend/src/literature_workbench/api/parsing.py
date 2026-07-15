@@ -191,18 +191,13 @@ def update_parse_preference(
 def page_text(request: Request, document_id: UUID, physical_page: int) -> Response:
     if physical_page < 1:
         return JSONResponse({"code": "page_not_found"}, status_code=404)
-    with request.app.state.database.connect() as connection:
-        document = connection.execute(
-            "SELECT content_sha256 FROM documents WHERE id=?",
-            (str(document_id),),
-        ).fetchone()
-    if document is None:
-        return JSONResponse({"code": "document_not_found"}, status_code=404)
-    if document["content_sha256"] is None:
-        return JSONResponse({"code": "page_not_found"}, status_code=404)
-    page = request.app.state.parse_run_repository.read_current_page(
-        ContentId(str(document["content_sha256"])), physical_page
+    document_exists, page = (
+        request.app.state.parse_run_repository.read_document_current_page(
+            document_id, physical_page
+        )
     )
+    if not document_exists:
+        return JSONResponse({"code": "document_not_found"}, status_code=404)
     if page is None:
         return JSONResponse({"code": "page_not_found"}, status_code=404)
     return JSONResponse(page.model_dump(mode="json"))

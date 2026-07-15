@@ -5,7 +5,9 @@ import hashlib
 import json
 import os
 import threading
+from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from conftest import ParserLibraryFixture
@@ -13,7 +15,7 @@ from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.parser.mineru import ProcessOutcome
 from literature_workbench.features.parser.models import ParsedPage
 from literature_workbench.features.parser.normalizer import ParseRunRepository
-from literature_workbench.features.parser.worker import ParseWorkerService
+from literature_workbench.features.parser.worker import ParseJobFailure, ParseWorkerService
 from literature_workbench.features.parser.workspace import TrustedParserWorkspace
 from literature_workbench.worker import Worker, parser_job_handlers
 
@@ -73,6 +75,51 @@ def test_worker_direct_pipeline_uses_staging_and_switches_complete_pointer(
     assert list((parser_library.data_root / "staging" / registered.content_id).glob("*")) == []
 
 
+def test_worker_passes_cancellation_into_staging_copy(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    registered = parser_library.register("cancel-copy.pdf", _pdf_bytes())
+    queue = _queue(parser_library)
+    queue.enqueue(
+        "parse_pdf",
+        f"cancel-copy:{registered.content_id}",
+        {"content_id": str(registered.content_id)},
+    )
+    job = queue.lease_next("cancel-copy", 30)
+    assert job is not None
+
+    class CancelOnSecondCheck:
+        is_cancelled = False
+
+        def __init__(self) -> None:
+            self.checks = 0
+            self.checkpoints: list[str] = []
+
+        def raise_if_cancelled(self) -> None:
+            self.checks += 1
+            if self.checks == 2:
+                raise RuntimeError("cancel_during_staging_copy")
+
+        def require_current_lease(self, connection: object) -> None:
+            assert connection.in_transaction  # type: ignore[attr-defined]
+
+        def checkpoint(self, stage: str, payload: object) -> None:
+            del payload
+            self.checkpoints.append(stage)
+
+    cancellation = CancelOnSecondCheck()
+    service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+    )
+
+    with pytest.raises(ParseJobFailure, match="parse_internal_error"):
+        service.process(job, cancellation)  # type: ignore[arg-type]
+
+    assert cancellation.checkpoints == ["staging_copy_started"]
+
+
 def test_forced_mineru_uses_only_staging_and_creates_trailing_blank_page(
     parser_library: ParserLibraryFixture,
 ) -> None:
@@ -127,6 +174,86 @@ def test_forced_mineru_uses_only_staging_and_creates_trailing_blank_page(
     assert job is not None
     checkpoint = json.loads(job["checkpoint_json"])
     assert str(registered.path) not in json.dumps(checkpoint)
+
+
+def test_mineru_result_files_remain_immutable_from_validation_through_publish(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    registered = parser_library.register("immutable-result.pdf", _pdf_bytes(text=False))
+    run_id = uuid4()
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    work = workspace.create_mineru_work(run_id)
+    output = work.path / "paper" / "auto"
+    output.mkdir(parents=True)
+    content_list = output / "paper_content_list.json"
+    content_list.write_text("[]", encoding="utf-8")
+    sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
+    promoted = workspace.promote_sealed_mineru_result(sealed)
+
+    with pytest.raises(PermissionError):
+        content_list = promoted.path / "paper" / "auto" / "paper_content_list.json"
+        content_list.write_text("changed", encoding="utf-8")
+    workspace.publish_result_pointer(registered.content_id, run_id, promoted)
+
+    pointer_path = (
+        parser_library.data_root
+        / "parse-results"
+        / registered.content_id
+        / "current.json"
+    )
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    manifest_path = pointer_path.parent / str(run_id) / "manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    assert pointer["manifest_digest"] == hashlib.sha256(manifest_bytes).hexdigest()
+    promoted.close()
+    workspace.close()
+
+
+def test_mineru_result_tree_rejects_hard_linked_files(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    registered = parser_library.register("hard-linked-result.pdf", _pdf_bytes(text=False))
+
+    class HardLinkedMinerU:
+        def run(self, staged: object, output: Path, language: str) -> ProcessOutcome:
+            del language
+            staged_path = staged.path  # type: ignore[attr-defined]
+            result = output / staged_path.stem / "auto"
+            result.mkdir(parents=True)
+            content_list = result / f"{staged_path.stem}_content_list.json"
+            content_list.write_text("[]", encoding="utf-8")
+            os.link(content_list, result / "alias.json")
+            return ProcessOutcome(0, b"", b"")
+
+    queue = _queue(parser_library)
+    job_id = queue.enqueue(
+        "parse_pdf",
+        f"hard-link:{registered.content_id}",
+        {
+            "document_id": str(registered.document_id),
+            "content_id": str(registered.content_id),
+            "strategy": "mineru",
+        },
+    )
+    service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+        mineru_factory=lambda _record: HardLinkedMinerU(),  # type: ignore[arg-type]
+    )
+
+    assert asyncio.run(
+        Worker(queue, "hard-link-result", parser_job_handlers(service)).run_once()
+    ) is True
+
+    with parser_library.database.connect() as connection:
+        job = connection.execute(
+            "SELECT status,error_code FROM jobs WHERE id=?", (str(job_id),)
+        ).fetchone()
+    assert job is not None and tuple(job) == (
+        "failed",
+        "mineru_unsafe_result_tree",
+    )
 
 
 def test_failed_mineru_attempt_preserves_previous_pointer_and_reports_fixed_error(
@@ -358,6 +485,7 @@ def test_retry_rebuilds_pointer_after_crash_between_db_complete_and_publish(
         "mineru",
         "mineru-test",
         source_job_id=job_id,
+        request_revision=1,
     )
     output_relative = f"parse-results/{registered.content_id}/{run_id}"
     repository.set_output_dir(run_id, output_relative)
@@ -383,7 +511,8 @@ def test_retry_rebuilds_pointer_after_crash_between_db_complete_and_publish(
     workspace = TrustedParserWorkspace.create(parser_library.data_root)
     work = workspace.create_mineru_work(run_id)
     (work.path / "validated.marker").write_text("ok", encoding="utf-8")
-    result = workspace.promote_mineru_work(registered.content_id, run_id, work)
+    sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
+    result = workspace.promote_sealed_mineru_result(sealed)
     result.close()
     workspace.close()
     pointer = (
@@ -416,6 +545,129 @@ def test_retry_rebuilds_pointer_after_crash_between_db_complete_and_publish(
     assert job is not None and tuple(job) == ("completed", None)
 
 
+@pytest.mark.parametrize(
+    ("failure_method", "expected_stage", "expected_journal_state"),
+    [
+        ("set_output_dir", "mineru_promoted", "promoted"),
+        ("complete_run", "mineru_output_recorded", "output_recorded"),
+    ],
+)
+def test_retry_recovers_promoted_manifest_after_database_failure(
+    parser_library: ParserLibraryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_method: str,
+    expected_stage: str,
+    expected_journal_state: str,
+) -> None:
+    registered = parser_library.register("promoted-recovery.pdf", _pdf_bytes(text=False))
+
+    class FakeMinerU:
+        def run(self, staged: object, output: Path, language: str) -> ProcessOutcome:
+            del language
+            staged_path = staged.path  # type: ignore[attr-defined]
+            result = output / staged_path.stem / "auto"
+            result.mkdir(parents=True)
+            (result / f"{staged_path.stem}_content_list.json").write_text(
+                "[]", encoding="utf-8"
+            )
+            return ProcessOutcome(0, b"", b"")
+
+    class RecordingCancellation:
+        is_cancelled = False
+
+        def __init__(self) -> None:
+            self.stage = "pending"
+            self.state: dict[str, object] = {}
+
+        def raise_if_cancelled(self) -> None:
+            return None
+
+        def require_current_lease(self, connection: object) -> None:
+            assert connection.in_transaction  # type: ignore[attr-defined]
+
+        def checkpoint(self, stage: str, payload: object) -> None:
+            self.stage = stage
+            self.state = dict(payload)  # type: ignore[arg-type]
+
+    queue = _queue(parser_library)
+    queue.enqueue(
+        "parse_pdf",
+        f"promoted-recovery:{registered.content_id}",
+        {
+            "document_id": str(registered.document_id),
+            "content_id": str(registered.content_id),
+            "strategy": "mineru",
+        },
+    )
+    job = queue.lease_next("promoted-recovery", 30)
+    assert job is not None
+    cancellation = RecordingCancellation()
+    original_method = getattr(ParseRunRepository, failure_method)
+    failed_once = False
+
+    def fail_once(
+        self: ParseRunRepository,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise RuntimeError(f"injected_{failure_method}_failure")
+        return original_method(self, *args, **kwargs)
+
+    monkeypatch.setattr(ParseRunRepository, failure_method, fail_once)
+    first_service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+        mineru_factory=lambda _record: FakeMinerU(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(ParseJobFailure, match="parse_internal_error"):
+        first_service.process(job, cancellation)  # type: ignore[arg-type]
+
+    assert cancellation.stage == expected_stage
+    assert cancellation.state["mineru_manifest_digest"]
+    run_id = str(cancellation.state["parse_run_id"])
+    journal = (
+        parser_library.data_root
+        / "parse-results"
+        / registered.content_id
+        / f"{run_id}.promotion.json"
+    )
+    assert (
+        json.loads(journal.read_text(encoding="utf-8"))["state"]
+        == expected_journal_state
+    )
+
+    class MustNotRerunMinerU:
+        def run(self, *_args: object) -> ProcessOutcome:
+            raise AssertionError("promoted immutable result must be recovered")
+
+    recovery = replace(job, checkpoint=cancellation.state, stage=cancellation.stage)
+    second_service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+        mineru_factory=lambda _record: MustNotRerunMinerU(),  # type: ignore[arg-type]
+    )
+    second_service.process(recovery, RecordingCancellation())  # type: ignore[arg-type]
+
+    current = ParseRunRepository(parser_library.database).current_run_id(
+        registered.content_id
+    )
+    assert current is not None and str(current) == run_id
+    pointer = json.loads(
+        (
+            parser_library.data_root
+            / "parse-results"
+            / registered.content_id
+            / "current.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert pointer["manifest_digest"] == cancellation.state["mineru_manifest_digest"]
+
+
 def test_stale_completed_job_cannot_publish_over_newer_current_result(
     parser_library: ParserLibraryFixture,
 ) -> None:
@@ -431,19 +683,23 @@ def test_stale_completed_job_cannot_publish_over_newer_current_result(
         f"old:{registered.content_id}",
         {"content_id": str(registered.content_id), "strategy": "mineru"},
     )
-    new_job = queue.enqueue(
-        "parse_pdf",
-        f"new:{registered.content_id}",
-        {"content_id": str(registered.content_id), "strategy": "mineru"},
-    )
     repository = ParseRunRepository(parser_library.database)
 
     def complete(job_id: object, text: str) -> tuple[object, object]:
+        with parser_library.database.connect() as connection:
+            job_row = connection.execute(
+                "SELECT payload_json FROM jobs WHERE id=?", (str(job_id),)
+            ).fetchone()
+        assert job_row is not None
+        request_revision = int(
+            json.loads(job_row["payload_json"])["request_revision"]
+        )
         run_id = repository.create_run(
             registered.content_id,
             "mineru",
             "mineru-test",
             source_job_id=job_id,  # type: ignore[arg-type]
+            request_revision=request_revision,
         )
         repository.set_output_dir(
             run_id, f"parse-results/{registered.content_id}/{run_id}"
@@ -470,16 +726,22 @@ def test_stale_completed_job_cannot_publish_over_newer_current_result(
         workspace = TrustedParserWorkspace.create(parser_library.data_root)
         work = workspace.create_mineru_work(run_id)
         (work.path / "validated.marker").write_text(text, encoding="utf-8")
-        result = workspace.promote_mineru_work(registered.content_id, run_id, work)
+        sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
+        result = workspace.promote_sealed_mineru_result(sealed)
         workspace.close()
         return run_id, result
 
     old_run, old_result = complete(old_job, "old")
     old_result.close()  # type: ignore[attr-defined]
+    new_job = queue.enqueue(
+        "parse_pdf",
+        f"new:{registered.content_id}",
+        {"content_id": str(registered.content_id), "strategy": "mineru"},
+    )
     new_run, new_result = complete(new_job, "new")
     new_result.close()  # type: ignore[attr-defined]
     new_workspace = TrustedParserWorkspace.create(parser_library.data_root)
-    reopened = new_workspace.open_mineru_result(registered.content_id, new_run)  # type: ignore[arg-type]
+    reopened = new_workspace.open_sealed_mineru_result(registered.content_id, new_run)  # type: ignore[arg-type]
     new_workspace.publish_result_pointer(registered.content_id, new_run, reopened)  # type: ignore[arg-type]
     reopened.close()
     new_workspace.close()

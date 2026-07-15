@@ -28,9 +28,12 @@ class ParseRunRepository:
         output_dir: str | None = None,
         cancellation: object | None = None,
         source_job_id: UUID | str | None = None,
+        request_revision: int,
     ) -> UUID:
         if parser_name not in {"pymupdf", "mineru"}:
             raise ValueError("invalid_parser_name")
+        if request_revision <= 0:
+            raise ValueError("invalid_parse_request_revision")
         run_id = uuid4()
         timestamp = datetime.now(UTC).isoformat()
         with self._database.transaction() as connection:
@@ -41,11 +44,8 @@ class ParseRunRepository:
             ).fetchone()
             if content is None:
                 raise ValueError("parse_content_not_found")
-            request_revision = int(content["parse_request_revision"]) + 1
-            connection.execute(
-                "UPDATE contents SET parse_request_revision=? WHERE sha256=?",
-                (request_revision, str(content_id)),
-            )
+            if int(content["parse_request_revision"]) != request_revision:
+                raise ValueError("stale_parse_request")
             connection.execute(
                 """
                 INSERT INTO parse_runs(
@@ -227,23 +227,57 @@ class ParseRunRepository:
             ).fetchone()
         if row is None:
             return None
-        raw_blocks = json.loads(str(row["blocks_json"]))
-        if not isinstance(raw_blocks, list):
-            raise ValueError("stored_parse_blocks_invalid")
-        return ParsedPage(
-            content_id=ContentId(str(row["content_sha256"])),
-            page_index=int(row["page_index"]),
-            physical_page=int(row["physical_page"]),
-            parse_run_id=UUID(str(row["parse_run_id"])),
-            parser_name=cast(str, row["parser_name"]),  # type: ignore[arg-type]
-            parser_version=str(row["parser_version"]),
-            normalized_text=str(row["normalized_text"]),
-            raw_text=str(row["raw_text"]),
-            width_points=float(row["width_points"]),
-            height_points=float(row["height_points"]),
-            coordinate_reliable=bool(row["coordinate_reliable"]),
-            blocks=[ParsedBlock.model_validate(block) for block in raw_blocks],
-        )
+        return _parsed_page_from_row(row)
+
+    def read_document_current_page(
+        self,
+        document_id: UUID,
+        physical_page: int,
+    ) -> tuple[bool, ParsedPage | None]:
+        """Resolve document existence and its current page in one DB snapshot."""
+        if physical_page < 1:
+            return False, None
+        with self._database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT d.id AS requested_document_id,p.*,r.parser_name,r.parser_version
+                FROM documents AS d
+                LEFT JOIN contents AS c ON c.sha256=d.content_sha256
+                LEFT JOIN parse_runs AS r
+                  ON r.id=c.current_parse_run_id AND r.status='completed'
+                LEFT JOIN pages AS p
+                  ON p.parse_run_id=r.id
+                 AND p.content_sha256=c.sha256
+                 AND p.page_index=?
+                WHERE d.id=?
+                """,
+                (physical_page - 1, str(document_id)),
+            ).fetchone()
+        if row is None:
+            return False, None
+        if row["parse_run_id"] is None:
+            return True, None
+        return True, _parsed_page_from_row(row)
+
+
+def _parsed_page_from_row(row: sqlite3.Row) -> ParsedPage:
+    raw_blocks = json.loads(str(row["blocks_json"]))
+    if not isinstance(raw_blocks, list):
+        raise ValueError("stored_parse_blocks_invalid")
+    return ParsedPage(
+        content_id=ContentId(str(row["content_sha256"])),
+        page_index=int(row["page_index"]),
+        physical_page=int(row["physical_page"]),
+        parse_run_id=UUID(str(row["parse_run_id"])),
+        parser_name=cast(str, row["parser_name"]),  # type: ignore[arg-type]
+        parser_version=str(row["parser_version"]),
+        normalized_text=str(row["normalized_text"]),
+        raw_text=str(row["raw_text"]),
+        width_points=float(row["width_points"]),
+        height_points=float(row["height_points"]),
+        coordinate_reliable=bool(row["coordinate_reliable"]),
+        blocks=[ParsedBlock.model_validate(block) for block in raw_blocks],
+    )
 
 
 def extract_pymupdf_pages(staged: StagedPdf, parse_run_id: UUID) -> list[ParsedPage]:

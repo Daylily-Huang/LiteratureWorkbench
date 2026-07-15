@@ -251,22 +251,26 @@ def test_staging_copy_checks_cancellation_between_bounded_chunks(tmp_path: Path)
     )
     source = VerifiedHandle(identity=identity, stream=BytesIO(payload))
     cancellation = CancelCopyAfterFirstChunk()
+    attempt_id = uuid4()
 
     with pytest.raises(RuntimeError, match="copy_cancelled"):
         stage_verified_pdf(
             tmp_path,
             content_id,
             source,
-            uuid4(),
+            attempt_id,
             CheckpointRecorder(),
             chunk_size=8,
             cancellation=cancellation,
         )
 
     assert cancellation.checks == 2
+    assert not (
+        tmp_path / "staging" / content_id / f"{attempt_id}.part"
+    ).exists()
 
 
-def test_checkpoint_failure_after_rename_leaves_exact_promotion_journal(
+def test_checkpoint_failure_after_rename_cleans_only_owned_pdf_and_journal(
     tmp_path: Path,
 ) -> None:
     payload = b"%PDF-journal"
@@ -293,15 +297,10 @@ def test_checkpoint_failure_after_rename_leaves_exact_promotion_journal(
             FailRenamedCheckpoint(),
         )
 
-    journal = tmp_path / "staging" / content_id / f"{attempt_id}.promotion.json"
-    assert journal.is_file()
-    record = __import__("json").loads(journal.read_text(encoding="utf-8"))
-    assert record == {
-        "attempt_id": str(attempt_id),
-        "content_id": str(content_id),
-        "sha256": str(content_id),
-        "state": "renamed",
-    }
+    directory = tmp_path / "staging" / content_id
+    assert not (directory / f"{attempt_id}.part").exists()
+    assert not (directory / f"{attempt_id}.pdf").exists()
+    assert not (directory / f"{attempt_id}.promotion.json").exists()
 
 
 def test_changed_source_is_reconciled_and_creates_no_staging_bytes(
@@ -344,7 +343,7 @@ def test_injected_hash_mismatch_never_promotes_part_file(tmp_path: Path) -> None
     assert not (tmp_path / "staging" / expected / f"{attempt_id}.pdf").exists()
 
 
-def test_interrupted_copy_leaves_only_exact_checkpointed_part(tmp_path: Path) -> None:
+def test_interrupted_copy_cleans_exact_owned_part(tmp_path: Path) -> None:
     class InterruptedStream(BytesIO):
         reads = 0
 
@@ -379,7 +378,7 @@ def test_interrupted_copy_leaves_only_exact_checkpointed_part(tmp_path: Path) ->
         )
 
     part = tmp_path / "staging" / content_id / f"{attempt_id}.part"
-    assert part.read_bytes() == payload[:5]
+    assert not part.exists()
     assert not part.with_suffix(".pdf").exists()
 
 

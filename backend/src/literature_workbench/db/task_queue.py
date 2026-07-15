@@ -59,6 +59,35 @@ class TaskQueue:
         payload: Mapping[str, JsonValue],
         stage: str = "pending",
     ) -> JobId:
+        effective_payload = dict(payload)
+        if kind == "parse_pdf" and "request_revision" not in effective_payload:
+            content_id = effective_payload.get("content_id")
+            if not isinstance(content_id, str):
+                content_id = effective_payload.get("content_sha256")
+            if isinstance(content_id, str):
+                active = connection.execute(
+                    """
+                    SELECT id FROM jobs
+                    WHERE dedup_key=? AND status IN ('queued','running')
+                    """,
+                    (dedup_key,),
+                ).fetchone()
+                if active is not None:
+                    return JobId(str(active["id"]))
+                allocated = connection.execute(
+                    """
+                    UPDATE contents
+                    SET parse_request_revision=parse_request_revision+1
+                    WHERE sha256=?
+                    RETURNING parse_request_revision
+                    """,
+                    (content_id,),
+                ).fetchone()
+                if allocated is None:
+                    raise ValueError("parse_content_not_found")
+                effective_payload["request_revision"] = int(
+                    allocated["parse_request_revision"]
+                )
         job_id = JobId(str(uuid4()))
         timestamp = self._timestamp(self._now_utc())
         try:
@@ -72,7 +101,11 @@ class TaskQueue:
                     job_id,
                     kind,
                     dedup_key,
-                    json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                    json.dumps(
+                        effective_payload,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
                     stage,
                     timestamp,
                     timestamp,

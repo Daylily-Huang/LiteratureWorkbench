@@ -186,14 +186,17 @@ def validate_mineru_output(
     parse_run_id: UUID,
     attempt_output_dir: Path,
     parser_version: str,
+    *,
+    output_stem: str | None = None,
 ) -> list[ParsedPage]:
     if staged.page_count is None or staged.page_count <= 0:
         raise MinerUFailed("mineru_invalid_staged_page_count")
+    result_stem = output_stem or staged.path.stem
     try:
         raw_blocks = _read_result_json(
             attempt_output_dir,
-            staged.path.stem,
-            f"{staged.path.stem}_content_list.json",
+            result_stem,
+            f"{result_stem}_content_list.json",
         )
     except FileNotFoundError as error:
         raise MinerUFailed("mineru_output_missing") from error
@@ -204,8 +207,8 @@ def validate_mineru_output(
     try:
         metadata = _read_result_json(
             attempt_output_dir,
-            staged.path.stem,
-            f"{staged.path.stem}_metadata.json",
+            result_stem,
+            f"{result_stem}_metadata.json",
         )
     except FileNotFoundError:
         metadata = None
@@ -301,8 +304,9 @@ def promote_mineru_result(
         if Path(os.path.abspath(attempt_output_dir)) != Path(os.path.abspath(expected)):
             raise ValueError("mineru_work_path_mismatch")
         work = workspace.open_mineru_work(attempt_id)
-        result = workspace.promote_mineru_work(content_id, attempt_id, work)
+        sealed = workspace.seal_mineru_work(content_id, attempt_id, work)
         work = None
+        result = workspace.promote_sealed_mineru_result(sealed)
         return result.path
     finally:
         if work is not None:
@@ -325,7 +329,7 @@ def publish_mineru_result(
         workspace.close()
         raise ValueError("mineru_promoted_path_mismatch")
     try:
-        result = workspace.open_mineru_result(content_id, attempt_id)
+        result = workspace.open_sealed_mineru_result(content_id, attempt_id)
         workspace.publish_result_pointer(content_id, attempt_id, result)
     finally:
         if result is not None:
