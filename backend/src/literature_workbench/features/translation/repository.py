@@ -79,6 +79,27 @@ def normalize_selection(value: str) -> str:
     return re.sub(r"\s+", " ", value, flags=re.UNICODE).strip()
 
 
+def _current_page_text_candidates(row: sqlite3.Row) -> list[str]:
+    candidates = [
+        normalize_selection(str(row["normalized_text"] or row["raw_text"])),
+        normalize_selection(str(row["raw_text"])),
+    ]
+    try:
+        raw_blocks = json.loads(str(row["blocks_json"]))
+    except (json.JSONDecodeError, TypeError):
+        raw_blocks = []
+    block_texts = [
+        normalize_selection(block["text"])
+        for block in raw_blocks
+        if isinstance(block, dict) and isinstance(block.get("text"), str)
+    ] if isinstance(raw_blocks, list) else []
+    candidates.extend(text for text in block_texts if text)
+    joined_blocks = normalize_selection(" ".join(block_texts))
+    if joined_blocks:
+        candidates.append(joined_blocks)
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
+
 class TranslationRepository:
     def __init__(self, database: Database, now: Callable[[], datetime]) -> None:
         self._database = database
@@ -100,7 +121,7 @@ class TranslationRepository:
         with self._database.connect() as connection:
             row = connection.execute(
                 """
-                SELECT p.raw_text,p.normalized_text
+                SELECT p.raw_text,p.normalized_text,p.blocks_json
                 FROM documents AS d
                 JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
                 JOIN document_versions AS v
@@ -132,16 +153,19 @@ class TranslationRepository:
             ).fetchone()
         if row is None:
             raise SelectionRejected("selection_not_current")
-        normalized_page = normalize_selection(str(row["normalized_text"] or row["raw_text"]))
-        position = normalized_page.find(normalized_selection)
-        if position < 0:
-            raw_page = normalize_selection(str(row["raw_text"]))
-            position = raw_page.find(normalized_selection)
-            normalized_page = raw_page
-        if position < 0:
+        matching_text = next(
+            (
+                candidate
+                for candidate in _current_page_text_candidates(row)
+                if normalized_selection in candidate
+            ),
+            None,
+        )
+        if matching_text is None:
             raise SelectionRejected("selection_not_current")
-        before = normalized_page[:position].rstrip()
-        after = normalized_page[position + len(normalized_selection) :].lstrip()
+        position = matching_text.find(normalized_selection)
+        before = matching_text[:position].rstrip()
+        after = matching_text[position + len(normalized_selection) :].lstrip()
         return VerifiedSelection(
             document_id=document_id,
             document_version_id=document_version_id,
