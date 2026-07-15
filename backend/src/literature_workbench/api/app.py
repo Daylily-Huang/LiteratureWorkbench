@@ -7,6 +7,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from literature_workbench.api.health import router as health_router
 from literature_workbench.api.imports import router as imports_router
+from literature_workbench.api.pdf_files import router as pdf_files_router
 from literature_workbench.api.libraries import NativeFolderDialog
 from literature_workbench.api.libraries import router as libraries_router
 from literature_workbench.api.documents import router as documents_router
@@ -151,5 +152,6 @@ def create_app(
     app.include_router(settings_router)
     app.include_router(libraries_router)
     app.include_router(documents_router)
+    app.include_router(pdf_files_router)
     app.include_router(imports_router)
     return app
