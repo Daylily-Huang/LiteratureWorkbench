@@ -30,7 +30,7 @@ dev = [
 ]
 
 [project.scripts]
-literature-workbench = "literature_workbench.main:main"
+literature-workbench = "literature_workbench.launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
