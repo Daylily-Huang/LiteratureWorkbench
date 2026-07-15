@@ -37,6 +37,10 @@ FILE_BEGIN = 0
 FILE_END = 2
 FILE_RENAME_INFO_CLASS = 3
 FILE_DISPOSITION_INFO_CLASS = 4
+PROMOTION_JOURNAL_MAX_FRAME_BYTES = 64 * 1024
+PROMOTION_JOURNAL_MAX_ENTRIES = 8192
+PROMOTION_JOURNAL_MAX_BYTES = 8 * 1024 * 1024
+PROMOTION_JOURNAL_MAX_FRAMES = PROMOTION_JOURNAL_MAX_ENTRIES + 16
 
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -169,8 +173,7 @@ class TrustedParserDirectory:
         if (
             moved.is_reparse_point
             or not _same_path(moved.final_path, destination)
-            or (moved.volume_id, moved.file_id)
-            != (before.volume_id, before.file_id)
+            or (moved.volume_id, moved.file_id) != (before.volume_id, before.file_id)
         ):
             raise UnsafeParserWorkspace("mineru_result_identity_changed")
         self.path = destination
@@ -221,7 +224,10 @@ def _promotion_journal_payload(
     request_revision: int | None = None,
     root_volume_id: str | None = None,
     root_file_id: str | None = None,
-    entries: list[dict[str, Any]] | None = None,
+    *,
+    sequence: int,
+    previous_frame_digest: str | None,
+    entry: dict[str, Any] | None = None,
 ) -> bytes:
     if state not in {
         "copying",
@@ -241,15 +247,52 @@ def _promotion_journal_payload(
             "request_revision": request_revision,
             "root_volume_id": root_volume_id,
             "root_file_id": root_file_id,
-            "entries": []
-            if entries is None
-            else sorted(entries, key=lambda item: (str(item["path"]), str(item["kind"]))),
+            "sequence": sequence,
+            "previous_frame_digest": previous_frame_digest,
+            "entry": entry,
             "state": state,
         },
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
+
+
+def _append_promotion_journal_frame(
+    journal: TrustedParserFile,
+    content_id: ContentId,
+    run_id: UUID,
+    manifest_digest: str,
+    state: str,
+    input_stem: str | None,
+    source_job_id: UUID | str | None,
+    request_revision: int | None,
+    root_volume_id: str | None,
+    root_file_id: str | None,
+    sequence: int,
+    previous_frame_digest: str | None,
+    entry: dict[str, Any] | None = None,
+) -> tuple[int, str]:
+    payload = _promotion_journal_payload(
+        content_id,
+        run_id,
+        manifest_digest,
+        state,
+        input_stem,
+        source_job_id,
+        request_revision,
+        root_volume_id,
+        root_file_id,
+        sequence=sequence,
+        previous_frame_digest=previous_frame_digest,
+        entry=entry,
+    )
+    journal.append_journal_record(
+        payload,
+        maximum_frame_bytes=PROMOTION_JOURNAL_MAX_FRAME_BYTES,
+        maximum_total_bytes=PROMOTION_JOURNAL_MAX_BYTES,
+    )
+    return sequence + 1, hashlib.sha256(payload).hexdigest()
 
 
 def _rename_handle(handle: int, destination: Path, *, replace: bool = False) -> None:
@@ -352,15 +395,31 @@ class TrustedParserFile:
         self.write(data)
         self.flush()
 
-    def append_journal_record(self, payload: bytes) -> None:
+    def append_journal_record(
+        self,
+        payload: bytes,
+        *,
+        maximum_frame_bytes: int | None = None,
+        maximum_total_bytes: int | None = None,
+    ) -> None:
         """Append a checksummed state record; a torn final record is ignorable."""
         if b"\n" in payload or b"\r" in payload:
             raise ValueError("journal_payload_must_be_single_line")
-        first_record = self.metadata().size == 0
+        frame = (
+            hashlib.sha256(payload).hexdigest().encode("ascii") + b":" + payload + b"\n"
+        )
+        current_size = self.metadata().size
+        if maximum_frame_bytes is not None and len(frame) > maximum_frame_bytes:
+            raise ValueError("parser_journal_frame_too_large")
+        if (
+            maximum_total_bytes is not None
+            and current_size + len(frame) > maximum_total_bytes
+        ):
+            raise ValueError("parser_journal_too_large")
+        first_record = current_size == 0
         handle = self._require_handle()
         if not _SetFilePointerEx(wintypes.HANDLE(handle), 0, None, FILE_END):
             _raise_last_error("SetFilePointerEx(parser journal append)")
-        frame = hashlib.sha256(payload).hexdigest().encode("ascii") + b":" + payload + b"\n"
         self.write(frame)
         self.flush()
         if first_record:
@@ -390,6 +449,69 @@ class TrustedParserFile:
         if latest is None:
             raise ValueError("parser_journal_record_missing")
         return latest
+
+    def read_journal_frames(
+        self,
+        *,
+        maximum_frame_bytes: int,
+        maximum_frames: int,
+        maximum_total_bytes: int,
+    ) -> list[tuple[dict[str, Any], str]]:
+        """Stream all durable frames, ignoring only an unterminated tail."""
+        metadata = self.metadata()
+        if metadata.size > maximum_total_bytes:
+            raise ValueError("parser_journal_too_large")
+        handle = self._require_handle()
+        if not _SetFilePointerEx(wintypes.HANDLE(handle), 0, None, FILE_BEGIN):
+            _raise_last_error("SetFilePointerEx(parser journal read)")
+        frames: list[tuple[dict[str, Any], str]] = []
+        pending = bytearray()
+        total_read = 0
+        while True:
+            buffer = ctypes.create_string_buffer(64 * 1024)
+            read = wintypes.DWORD()
+            if not _ReadFile(
+                wintypes.HANDLE(handle),
+                buffer,
+                len(buffer),
+                ctypes.byref(read),
+                None,
+            ):
+                _raise_last_error("ReadFile(parser journal)")
+            if read.value == 0:
+                break
+            total_read += int(read.value)
+            if total_read > maximum_total_bytes:
+                raise ValueError("parser_journal_too_large")
+            pending.extend(buffer.raw[: read.value])
+            while True:
+                newline = pending.find(b"\n")
+                if newline < 0:
+                    break
+                line = bytes(pending[:newline])
+                del pending[: newline + 1]
+                if len(line) + 1 > maximum_frame_bytes:
+                    raise ValueError("parser_journal_frame_too_large")
+                try:
+                    checksum, payload = line.split(b":", 1)
+                    payload_digest = hashlib.sha256(payload).hexdigest()
+                    if checksum.decode("ascii") != payload_digest:
+                        raise ValueError("parser_journal_checksum_invalid")
+                    record = json.loads(payload.decode("utf-8"))
+                    if not isinstance(record, dict):
+                        raise ValueError("parser_journal_record_invalid")
+                except (ValueError, UnicodeError, json.JSONDecodeError) as error:
+                    raise ValueError("parser_journal_record_invalid") from error
+                frames.append((record, payload_digest))
+                if len(frames) > maximum_frames:
+                    raise ValueError("parser_journal_too_many_frames")
+            if len(pending) >= maximum_frame_bytes:
+                raise ValueError("parser_journal_frame_too_large")
+        if not _SetFilePointerEx(wintypes.HANDLE(handle), 0, None, FILE_BEGIN):
+            _raise_last_error("SetFilePointerEx(parser journal read)")
+        if not frames:
+            raise ValueError("parser_journal_record_missing")
+        return frames
 
     def flush(self) -> None:
         if not _FlushFileBuffers(wintypes.HANDLE(self._require_handle())):
@@ -510,7 +632,9 @@ class TrustedParserFile:
         self._flush_parent_on_close = True
 
     def close(self) -> None:
-        flush_parent = self._expected_path.parent if self._flush_parent_on_close else None
+        flush_parent = (
+            self._expected_path.parent if self._flush_parent_on_close else None
+        )
         if self._handle is not None:
             _CloseHandle(wintypes.HANDLE(self._handle))
             self._handle = None
@@ -565,6 +689,160 @@ class _ManifestDirectory:
     handle: Win32OwnedFileHandle
 
 
+@dataclass(frozen=True, slots=True)
+class _PromotionJournalSnapshot:
+    latest: dict[str, Any]
+    entries: dict[tuple[str, str], dict[str, Any]]
+    next_sequence: int
+    previous_frame_digest: str
+
+
+def _normalized_promotion_entry(entry: object) -> dict[str, Any]:
+    if not isinstance(entry, dict):
+        raise ValueError("mineru_promotion_entry_invalid")
+    path = entry.get("path")
+    kind = entry.get("kind")
+    if not isinstance(path, str) or not path or not isinstance(kind, str):
+        raise ValueError("mineru_promotion_entry_invalid")
+    parts = path.split("/")
+    if (
+        path.startswith("/")
+        or "\\" in path
+        or any(part in {"", ".", ".."} for part in parts)
+        or "/".join(parts) != path
+    ):
+        raise ValueError("mineru_promotion_entry_invalid")
+    common = {"path", "kind", "volume_id", "file_id"}
+    expected = common if kind == "directory" else common | {"size", "sha256"}
+    if kind not in {"directory", "file"} or set(entry) != expected:
+        raise ValueError("mineru_promotion_entry_invalid")
+    if not isinstance(entry["volume_id"], str) or not isinstance(entry["file_id"], str):
+        raise ValueError("mineru_promotion_entry_invalid")
+    if kind == "file":
+        size = entry["size"]
+        digest = entry["sha256"]
+        if (
+            not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+            or not isinstance(digest, str)
+            or len(digest) != 64
+        ):
+            raise ValueError("mineru_promotion_entry_invalid")
+        try:
+            bytes.fromhex(digest)
+        except ValueError as error:
+            raise ValueError("mineru_promotion_entry_invalid") from error
+    return dict(entry)
+
+
+def _read_promotion_journal(
+    journal: TrustedParserFile,
+) -> _PromotionJournalSnapshot:
+    frames = journal.read_journal_frames(
+        maximum_frame_bytes=PROMOTION_JOURNAL_MAX_FRAME_BYTES,
+        maximum_frames=PROMOTION_JOURNAL_MAX_FRAMES,
+        maximum_total_bytes=PROMOTION_JOURNAL_MAX_BYTES,
+    )
+    expected_keys = {
+        "content_id",
+        "run_id",
+        "manifest_digest",
+        "input_stem",
+        "source_job_id",
+        "request_revision",
+        "root_volume_id",
+        "root_file_id",
+        "sequence",
+        "previous_frame_digest",
+        "entry",
+        "state",
+    }
+    stable_keys = {
+        "content_id",
+        "run_id",
+        "input_stem",
+        "source_job_id",
+        "request_revision",
+    }
+    allowed_states = {
+        "copying": 0,
+        "promoted": 1,
+        "output_recorded": 2,
+        "db_completed": 3,
+        "published": 4,
+    }
+    first = frames[0][0]
+    baseline = {key: first.get(key) for key in stable_keys}
+    copying_manifest_digest = first.get("manifest_digest")
+    promoted_manifest_digest: object | None = None
+    root_identity: tuple[object, object] | None = None
+    entries: dict[tuple[str, str], dict[str, Any]] = {}
+    paths: set[str] = set()
+    previous_digest: str | None = None
+    previous_state_rank = 0
+    for sequence, (record, payload_digest) in enumerate(frames):
+        if set(record) != expected_keys:
+            raise ValueError("mineru_promotion_journal_invalid")
+        if record["sequence"] != sequence or isinstance(record["sequence"], bool):
+            raise ValueError("mineru_promotion_journal_sequence_invalid")
+        if record["previous_frame_digest"] != previous_digest:
+            raise ValueError("mineru_promotion_journal_chain_invalid")
+        if any(record[key] != baseline[key] for key in stable_keys):
+            raise ValueError("mineru_promotion_journal_binding_changed")
+        state = record["state"]
+        if state not in allowed_states:
+            raise ValueError("mineru_promotion_journal_state_invalid")
+        state_rank = allowed_states[state]
+        if state_rank < previous_state_rank:
+            raise ValueError("mineru_promotion_journal_state_invalid")
+        previous_state_rank = state_rank
+        root = (record["root_volume_id"], record["root_file_id"])
+        if sequence == 0:
+            if (
+                state != "copying"
+                or root != (None, None)
+                or record["entry"] is not None
+            ):
+                raise ValueError("mineru_promotion_journal_initial_frame_invalid")
+        else:
+            if not all(isinstance(value, str) and value for value in root):
+                raise ValueError("mineru_promotion_journal_root_invalid")
+            if root_identity is None:
+                if sequence != 1 or record["entry"] is not None:
+                    raise ValueError("mineru_promotion_journal_root_invalid")
+                root_identity = root
+            elif root != root_identity:
+                raise ValueError("mineru_promotion_journal_root_changed")
+        if state == "copying":
+            if record["manifest_digest"] != copying_manifest_digest:
+                raise ValueError("mineru_promotion_journal_binding_changed")
+            if record["entry"] is not None:
+                normalized = _normalized_promotion_entry(record["entry"])
+                key = (normalized["path"], normalized["kind"])
+                if normalized["path"] in paths or key in entries:
+                    raise ValueError("mineru_promotion_journal_duplicate_path")
+                entries[key] = normalized
+                paths.add(normalized["path"])
+                if len(entries) > PROMOTION_JOURNAL_MAX_ENTRIES:
+                    raise ValueError("mineru_promotion_journal_too_many_entries")
+        else:
+            if record["entry"] is not None:
+                raise ValueError("mineru_promotion_journal_entry_after_copying")
+            if promoted_manifest_digest is None:
+                promoted_manifest_digest = record["manifest_digest"]
+            elif record["manifest_digest"] != promoted_manifest_digest:
+                raise ValueError("mineru_promotion_journal_binding_changed")
+        previous_digest = payload_digest
+    assert previous_digest is not None
+    return _PromotionJournalSnapshot(
+        latest=frames[-1][0],
+        entries=entries,
+        next_sequence=len(frames),
+        previous_frame_digest=previous_digest,
+    )
+
+
 class TrustedMinerUResult:
     def __init__(
         self,
@@ -581,6 +859,8 @@ class TrustedMinerUResult:
         request_revision: int | None = None,
         promotion_root_volume_id: str | None = None,
         promotion_root_file_id: str | None = None,
+        promotion_journal_sequence: int | None = None,
+        promotion_journal_previous_digest: str | None = None,
     ) -> None:
         self.content_id = content_id
         self.run_id = run_id
@@ -595,6 +875,8 @@ class TrustedMinerUResult:
         self.request_revision = request_revision
         self.promotion_root_volume_id = promotion_root_volume_id
         self.promotion_root_file_id = promotion_root_file_id
+        self._promotion_journal_sequence = promotion_journal_sequence
+        self._promotion_journal_previous_digest = promotion_journal_previous_digest
 
     @property
     def path(self) -> Path:
@@ -643,7 +925,9 @@ class TrustedMinerUResult:
                 )
                 if relative == "manifest.json":
                     continue
-                attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+                attributes = getattr(
+                    entry.stat(follow_symlinks=False), "st_file_attributes", 0
+                )
                 if entry.is_symlink() or attributes & 0x00000400:
                     raise UnsafeParserWorkspace("mineru_result_entry_set_changed")
                 path = current / entry.name
@@ -680,10 +964,15 @@ class TrustedMinerUResult:
         self.directory.close()
 
     def update_journal(self, state: str) -> None:
-        if self._journal is None:
+        if (
+            self._journal is None
+            or self._promotion_journal_sequence is None
+            or self._promotion_journal_previous_digest is None
+        ):
             raise UnsafeParserWorkspace("mineru_promotion_journal_missing")
-        self._journal.append_journal_record(
-            _promotion_journal_payload(
+        self._promotion_journal_sequence, self._promotion_journal_previous_digest = (
+            _append_promotion_journal_frame(
+                self._journal,
                 self.content_id,
                 self.run_id,
                 self.manifest_digest,
@@ -693,6 +982,8 @@ class TrustedMinerUResult:
                 self.request_revision,
                 self.promotion_root_volume_id,
                 self.promotion_root_file_id,
+                self._promotion_journal_sequence,
+                self._promotion_journal_previous_digest,
             )
         )
 
@@ -779,11 +1070,11 @@ class TrustedParserWorkspace:
             guarded.adopt_owner(owner)
         try:
             after = guarded.metadata()
-            if (
-                (after.volume_id, after.file_id, after.size)
-                != (before.volume_id, before.file_id, before.size)
-                or guarded.sha256() != expected_sha256
-            ):
+            if (after.volume_id, after.file_id, after.size) != (
+                before.volume_id,
+                before.file_id,
+                before.size,
+            ) or guarded.sha256() != expected_sha256:
                 raise UnsafeParserWorkspace("staged_identity_changed_during_guard_bind")
         except BaseException:
             guarded.close()
@@ -833,9 +1124,7 @@ class TrustedParserWorkspace:
 
     def create_mineru_work(self, run_id: UUID) -> TrustedParserDirectory:
         path = self.mineru_work_directory / str(run_id)
-        handle = self._held_child_directory(
-            path, require_new=True, allow_rename=True
-        )
+        handle = self._held_child_directory(path, require_new=True, allow_rename=True)
         return TrustedParserDirectory(path, handle)
 
     def create_mineru_work_journal(
@@ -1034,16 +1323,16 @@ class TrustedParserWorkspace:
                     for state in {"created", "runner_finished", "sealed"}
                     if record
                     == json.loads(
-                    self.mineru_work_journal_payload(
-                        content_id,
-                        run_id,
-                        source_job_id,
-                        request_revision,
-                        input_stem,
-                        root.volume_id,
-                        root.file_id,
-                        state,
-                    ).decode("utf-8")
+                        self.mineru_work_journal_payload(
+                            content_id,
+                            run_id,
+                            source_job_id,
+                            request_revision,
+                            input_stem,
+                            root.volume_id,
+                            root.file_id,
+                            state,
+                        ).decode("utf-8")
                     )
                 ),
                 None,
@@ -1198,23 +1487,28 @@ class TrustedParserWorkspace:
         journal: TrustedParserFile | None = None
         pending_file: TrustedParserFile | None = None
         destination_deleted = False
-        copy_entries: list[dict[str, Any]] = []
+        journal_sequence = 0
+        journal_previous_digest: str | None = None
+        copied_entry_count = 0
         try:
             journal = self._open_file(
                 content.metadata.final_path / f"{result.run_id}.promotion.json",
                 create=True,
                 held_directories=(),
             )
-            journal.append_journal_record(
-                _promotion_journal_payload(
-                    result.content_id,
-                    result.run_id,
-                    result.manifest_digest,
-                    "copying",
-                    result.input_stem,
-                    result.source_job_id,
-                    result.request_revision,
-                )
+            journal_sequence, journal_previous_digest = _append_promotion_journal_frame(
+                journal,
+                result.content_id,
+                result.run_id,
+                result.manifest_digest,
+                "copying",
+                result.input_stem,
+                result.source_job_id,
+                result.request_revision,
+                None,
+                None,
+                journal_sequence,
+                journal_previous_digest,
             )
             destination_handle = self._held_child_directory(
                 destination, require_new=True, allow_rename=True
@@ -1224,27 +1518,25 @@ class TrustedParserWorkspace:
             )
             destination_directory.hold_parent(content)
             destination_metadata = destination_directory.metadata()
-            journal.append_journal_record(
-                _promotion_journal_payload(
-                    result.content_id,
-                    result.run_id,
-                    result.manifest_digest,
-                    "copying",
-                    result.input_stem,
-                    result.source_job_id,
-                    result.request_revision,
-                    destination_metadata.volume_id,
-                    destination_metadata.file_id,
-                    copy_entries,
-                )
+            journal_sequence, journal_previous_digest = _append_promotion_journal_frame(
+                journal,
+                result.content_id,
+                result.run_id,
+                result.manifest_digest,
+                "copying",
+                result.input_stem,
+                result.source_job_id,
+                result.request_revision,
+                destination_metadata.volume_id,
+                destination_metadata.file_id,
+                journal_sequence,
+                journal_previous_digest,
             )
             for source_directory in sorted(
                 result._directories,
                 key=lambda item: (item.relative_path.count("/"), item.relative_path),
             ):
-                path = destination.joinpath(
-                    *source_directory.relative_path.split("/")
-                )
+                path = destination.joinpath(*source_directory.relative_path.split("/"))
                 handle = self._held_child_directory(
                     path, require_new=True, allow_rename=True
                 )
@@ -1257,16 +1549,12 @@ class TrustedParserWorkspace:
                         handle,
                     )
                 )
-                copy_entries.append(
-                    {
-                        "path": source_directory.relative_path,
-                        "kind": "directory",
-                        "volume_id": metadata.volume_id,
-                        "file_id": metadata.file_id,
-                    }
-                )
-                journal.append_journal_record(
-                    _promotion_journal_payload(
+                copied_entry_count += 1
+                if copied_entry_count > PROMOTION_JOURNAL_MAX_ENTRIES:
+                    raise UnsafeParserWorkspace("mineru_promotion_too_many_entries")
+                journal_sequence, journal_previous_digest = (
+                    _append_promotion_journal_frame(
+                        journal,
                         result.content_id,
                         result.run_id,
                         result.manifest_digest,
@@ -1276,7 +1564,14 @@ class TrustedParserWorkspace:
                         result.request_revision,
                         destination_metadata.volume_id,
                         destination_metadata.file_id,
-                        copy_entries,
+                        journal_sequence,
+                        journal_previous_digest,
+                        {
+                            "path": source_directory.relative_path,
+                            "kind": "directory",
+                            "volume_id": metadata.volume_id,
+                            "file_id": metadata.file_id,
+                        },
                     )
                 )
             for source_file in result._files:
@@ -1304,18 +1599,12 @@ class TrustedParserWorkspace:
                         guarded,
                     )
                 )
-                copy_entries.append(
-                    {
-                        "path": source_file.relative_path,
-                        "kind": "file",
-                        "volume_id": metadata.volume_id,
-                        "file_id": metadata.file_id,
-                        "size": metadata.size,
-                        "sha256": digest,
-                    }
-                )
-                journal.append_journal_record(
-                    _promotion_journal_payload(
+                copied_entry_count += 1
+                if copied_entry_count > PROMOTION_JOURNAL_MAX_ENTRIES:
+                    raise UnsafeParserWorkspace("mineru_promotion_too_many_entries")
+                journal_sequence, journal_previous_digest = (
+                    _append_promotion_journal_frame(
+                        journal,
                         result.content_id,
                         result.run_id,
                         result.manifest_digest,
@@ -1325,7 +1614,16 @@ class TrustedParserWorkspace:
                         result.request_revision,
                         destination_metadata.volume_id,
                         destination_metadata.file_id,
-                        copy_entries,
+                        journal_sequence,
+                        journal_previous_digest,
+                        {
+                            "path": source_file.relative_path,
+                            "kind": "file",
+                            "volume_id": metadata.volume_id,
+                            "file_id": metadata.file_id,
+                            "size": metadata.size,
+                            "sha256": digest,
+                        },
                     )
                 )
             payload = self._manifest_payload(
@@ -1344,11 +1642,24 @@ class TrustedParserWorkspace:
             )
             manifest_writer.replace_bytes(payload)
             manifest_digest = hashlib.sha256(payload).hexdigest()
-            manifest = self.bind_staged_read_guard(
-                manifest_writer, manifest_digest
-            )
+            manifest = self.bind_staged_read_guard(manifest_writer, manifest_digest)
             manifest_metadata = manifest.metadata()
-            copy_entries.append(
+            copied_entry_count += 1
+            if copied_entry_count > PROMOTION_JOURNAL_MAX_ENTRIES:
+                raise UnsafeParserWorkspace("mineru_promotion_too_many_entries")
+            journal_sequence, journal_previous_digest = _append_promotion_journal_frame(
+                journal,
+                result.content_id,
+                result.run_id,
+                result.manifest_digest,
+                "copying",
+                result.input_stem,
+                result.source_job_id,
+                result.request_revision,
+                destination_metadata.volume_id,
+                destination_metadata.file_id,
+                journal_sequence,
+                journal_previous_digest,
                 {
                     "path": "manifest.json",
                     "kind": "file",
@@ -1356,21 +1667,7 @@ class TrustedParserWorkspace:
                     "file_id": manifest_metadata.file_id,
                     "size": manifest_metadata.size,
                     "sha256": manifest_digest,
-                }
-            )
-            journal.append_journal_record(
-                _promotion_journal_payload(
-                    result.content_id,
-                    result.run_id,
-                    result.manifest_digest,
-                    "copying",
-                    result.input_stem,
-                    result.source_job_id,
-                    result.request_revision,
-                    destination_metadata.volume_id,
-                    destination_metadata.file_id,
-                    copy_entries,
-                )
+                },
             )
             promoted = TrustedMinerUResult(
                 result.content_id,
@@ -1386,6 +1683,8 @@ class TrustedParserWorkspace:
                 result.request_revision,
                 destination_metadata.volume_id,
                 destination_metadata.file_id,
+                journal_sequence,
+                journal_previous_digest,
             )
             promoted.verify()
             promoted.update_journal("promoted")
@@ -1448,14 +1747,14 @@ class TrustedParserWorkspace:
         root: TrustedParserDirectory | None = None
         files: list[tuple[str, TrustedParserFile]] = []
         directories: list[tuple[str, TrustedParserDirectory]] = []
-        observed_entries: list[dict[str, Any]] = []
+        observed_entries: dict[tuple[str, str], dict[str, Any]] = {}
         try:
             journal = self._open_file(
                 content / f"{source.run_id}.promotion.json",
                 create=False,
                 held_directories=(),
             )
-            record = journal.read_latest_journal_record(64 * 1024)
+            snapshot = _read_promotion_journal(journal)
             root_handle = self._open_directory(destination, allow_rename=True)
             root = TrustedParserDirectory(destination, root_handle)
             metadata = root.metadata()
@@ -1482,14 +1781,13 @@ class TrustedParserWorkspace:
                         directory.metadata()
                         child_metadata = directory.metadata()
                         directories.append((relative, directory))
-                        observed_entries.append(
-                            {
-                                "path": relative,
-                                "kind": "directory",
-                                "volume_id": child_metadata.volume_id,
-                                "file_id": child_metadata.file_id,
-                            }
-                        )
+                        observed_entry: dict[str, Any] = {
+                            "path": relative,
+                            "kind": "directory",
+                            "volume_id": child_metadata.volume_id,
+                            "file_id": child_metadata.file_id,
+                        }
+                        observed_entries[(relative, "directory")] = observed_entry
                         visit(path, relative)
                     else:
                         if relative not in allowed_files:
@@ -1501,33 +1799,30 @@ class TrustedParserWorkspace:
                             raise UnsafeParserWorkspace("mineru_copying_cleanup_unsafe")
                         file_metadata = file.metadata()
                         files.append((relative, file))
-                        observed_entries.append(
-                            {
-                                "path": relative,
-                                "kind": "file",
-                                "volume_id": file_metadata.volume_id,
-                                "file_id": file_metadata.file_id,
-                                "size": file_metadata.size,
-                                "sha256": file.sha256(),
-                            }
-                        )
+                        observed_entry = {
+                            "path": relative,
+                            "kind": "file",
+                            "volume_id": file_metadata.volume_id,
+                            "file_id": file_metadata.file_id,
+                            "size": file_metadata.size,
+                            "sha256": file.sha256(),
+                        }
+                        observed_entries[(relative, "file")] = observed_entry
 
             visit(destination, "")
-            expected = json.loads(
-                _promotion_journal_payload(
-                    source.content_id,
-                    source.run_id,
-                    source.manifest_digest,
-                    "copying",
-                    source.input_stem,
-                    source.source_job_id,
-                    source.request_revision,
-                    metadata.volume_id,
-                    metadata.file_id,
-                    observed_entries,
-                ).decode("utf-8")
-            )
-            if record != expected:
+            latest = snapshot.latest
+            if (
+                latest["state"] != "copying"
+                or latest["content_id"] != str(source.content_id)
+                or latest["run_id"] != str(source.run_id)
+                or latest["manifest_digest"] != source.manifest_digest
+                or latest["input_stem"] != source.input_stem
+                or latest["source_job_id"] != source.source_job_id
+                or latest["request_revision"] != source.request_revision
+                or latest["root_volume_id"] != metadata.volume_id
+                or latest["root_file_id"] != metadata.file_id
+                or snapshot.entries != observed_entries
+            ):
                 return False
             for _, file in files:
                 file.delete()
@@ -1633,7 +1928,8 @@ class TrustedParserWorkspace:
                 create=False,
                 held_directories=(),
             )
-            journal_record = journal.read_latest_journal_record(64 * 1024)
+            journal_snapshot = _read_promotion_journal(journal)
+            journal_record = journal_snapshot.latest
             allowed_states = {
                 "promoted",
                 "output_recorded",
@@ -1642,22 +1938,17 @@ class TrustedParserWorkspace:
             }
             manifest_digest = hashlib.sha256(payload).hexdigest()
             root_metadata = directory.metadata()
-            if journal_record not in [
-                json.loads(
-                    _promotion_journal_payload(
-                        content_id,
-                        run_id,
-                        manifest_digest,
-                        state,
-                        input_stem,
-                        source_job_id,
-                        request_revision,
-                        root_metadata.volume_id,
-                        root_metadata.file_id,
-                    ).decode("utf-8")
-                )
-                for state in allowed_states
-            ]:
+            if (
+                journal_record["state"] not in allowed_states
+                or journal_record["content_id"] != str(content_id)
+                or journal_record["run_id"] != str(run_id)
+                or journal_record["manifest_digest"] != manifest_digest
+                or journal_record["input_stem"] != input_stem
+                or journal_record["source_job_id"] != source_job_id
+                or journal_record["request_revision"] != request_revision
+                or journal_record["root_volume_id"] != root_metadata.volume_id
+                or journal_record["root_file_id"] != root_metadata.file_id
+            ):
                 raise UnsafeParserWorkspace("mineru_promotion_journal_mismatch")
             result = TrustedMinerUResult(
                 content_id,
@@ -1673,6 +1964,8 @@ class TrustedParserWorkspace:
                 request_revision,
                 root_metadata.volume_id,
                 root_metadata.file_id,
+                journal_snapshot.next_sequence,
+                journal_snapshot.previous_frame_digest,
             )
             journal = None
             result.verify()
@@ -1724,9 +2017,7 @@ class TrustedParserWorkspace:
                     separators=(",", ":"),
                 ).encode("utf-8")
             )
-            temporary.rename(
-                temporary.path.with_name("current.json"), replace=True
-            )
+            temporary.rename(temporary.path.with_name("current.json"), replace=True)
             _flush_directory(temporary.path.parent)
             result.update_journal("published")
         except BaseException:
@@ -1868,9 +2159,7 @@ class TrustedParserWorkspace:
             if guarded.sha256() != expected_sha256:
                 return False
             directories, owner = guarded.release_context()
-            journal = self.open_staging_file(
-                content_id, attempt_id, ".promotion.json"
-            )
+            journal = self.open_staging_file(content_id, attempt_id, ".promotion.json")
             record = journal.read_latest_journal_record(64 * 1024)
             if record != json.loads(
                 self.journal_payload(
@@ -1885,11 +2174,11 @@ class TrustedParserWorkspace:
             )
             directories = ()
             after = writable.metadata()
-            if (
-                (after.volume_id, after.file_id, after.size)
-                != (before.volume_id, before.file_id, before.size)
-                or writable.sha256() != expected_sha256
-            ):
+            if (after.volume_id, after.file_id, after.size) != (
+                before.volume_id,
+                before.file_id,
+                before.size,
+            ) or writable.sha256() != expected_sha256:
                 return False
             writable.delete()
             journal.delete()

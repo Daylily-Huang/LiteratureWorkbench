@@ -16,7 +16,10 @@ from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.parser.mineru import ProcessOutcome
 from literature_workbench.features.parser.models import ParsedPage
 from literature_workbench.features.parser.normalizer import ParseRunRepository
-from literature_workbench.features.parser.worker import ParseJobFailure, ParseWorkerService
+from literature_workbench.features.parser.worker import (
+    ParseJobFailure,
+    ParseWorkerService,
+)
 from literature_workbench.features.parser.workspace import (
     TrustedParserFile,
     TrustedParserDirectory,
@@ -79,7 +82,10 @@ def test_worker_direct_pipeline_uses_staging_and_switches_complete_pointer(
     assert page.parser_name == "pymupdf"
     assert "direct extraction" in page.normalized_text
     assert hashlib.sha256(registered.path.read_bytes()).hexdigest() == before
-    assert list((parser_library.data_root / "staging" / registered.content_id).glob("*")) == []
+    assert (
+        list((parser_library.data_root / "staging" / registered.content_id).glob("*"))
+        == []
+    )
 
 
 def test_worker_passes_cancellation_into_staging_copy(
@@ -144,7 +150,14 @@ def test_forced_mineru_uses_only_staging_and_creates_trailing_blank_page(
             result.mkdir(parents=True)
             (result / f"{staged_path.stem}_content_list.json").write_text(
                 json.dumps(
-                    [{"page_idx": 0, "type": "text", "text": "OCR 第一页", "bbox": [0, 0, 500, 100]}],
+                    [
+                        {
+                            "page_idx": 0,
+                            "type": "text",
+                            "text": "OCR 第一页",
+                            "bbox": [0, 0, 500, 100],
+                        }
+                    ],
                     ensure_ascii=False,
                 ),
                 encoding="utf-8",
@@ -173,7 +186,10 @@ def test_forced_mineru_uses_only_staging_and_creates_trailing_blank_page(
     assert asyncio.run(worker.run_once()) is True
 
     repository = ParseRunRepository(parser_library.database)
-    assert repository.read_current_page(registered.content_id, 1).normalized_text == "OCR 第一页"  # type: ignore[union-attr]
+    assert (
+        repository.read_current_page(registered.content_id, 1).normalized_text
+        == "OCR 第一页"
+    )  # type: ignore[union-attr]
     assert repository.read_current_page(registered.content_id, 2).normalized_text == ""  # type: ignore[union-attr]
     assert len(observed_inputs) == 1
     assert list((parser_library.data_root / "mineru-work").iterdir()) == []
@@ -254,7 +270,9 @@ def test_copying_failure_removes_only_held_partial_result_and_journal(
     (work.path / "result.json").write_text("{}", encoding="utf-8")
     sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
 
-    def fail_copy(self: TrustedParserFile, destination: TrustedParserFile, **_: object) -> None:
+    def fail_copy(
+        self: TrustedParserFile, destination: TrustedParserFile, **_: object
+    ) -> None:
         destination.write(b"partial")
         raise OSError("injected_copy_failure")
 
@@ -262,9 +280,7 @@ def test_copying_failure_removes_only_held_partial_result_and_journal(
     with pytest.raises(OSError, match="injected_copy_failure"):
         workspace.promote_sealed_mineru_result(sealed)
 
-    result_parent = (
-        parser_library.data_root / "parse-results" / registered.content_id
-    )
+    result_parent = parser_library.data_root / "parse-results" / registered.content_id
     assert not (result_parent / str(run_id)).exists()
     assert not (result_parent / f"{run_id}.promotion.json").exists()
     sealed.close()
@@ -275,14 +291,18 @@ def test_copying_failure_preserves_journal_when_destination_root_delete_fails(
     parser_library: ParserLibraryFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    registered = parser_library.register("copy-root-failure.pdf", _pdf_bytes(text=False))
+    registered = parser_library.register(
+        "copy-root-failure.pdf", _pdf_bytes(text=False)
+    )
     run_id = uuid4()
     workspace = TrustedParserWorkspace.create(parser_library.data_root)
     work = workspace.create_mineru_work(run_id)
     (work.path / "result.json").write_text("{}", encoding="utf-8")
     sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
 
-    def fail_copy(self: TrustedParserFile, destination: TrustedParserFile, **_: object) -> None:
+    def fail_copy(
+        self: TrustedParserFile, destination: TrustedParserFile, **_: object
+    ) -> None:
         destination.write(b"partial")
         raise OSError("copy failed")
 
@@ -376,10 +396,257 @@ def test_copying_recovery_uses_complete_identity_ledger(
     workspace.close()
 
 
+def test_copying_journal_scales_linearly_and_recovers_512_entries(
+    parser_library: ParserLibraryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered = parser_library.register(
+        "large-copy-ledger.pdf", _pdf_bytes(text=False)
+    )
+    run_id = uuid4()
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    work = workspace.create_mineru_work(run_id)
+    entry_count = 512
+    for index in range(entry_count):
+        (work.path / f"entry-{index:04d}.json").write_text(
+            f'{{"index":{index}}}', encoding="utf-8"
+        )
+    sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
+    original_update = TrustedMinerUResult.update_journal
+    original_file_delete = TrustedParserFile.delete
+    original_directory_delete = TrustedParserDirectory.delete
+
+    def crash_before_promoted(self: TrustedMinerUResult, state: str) -> None:
+        if state == "promoted":
+            raise OSError("crash before promoted frame")
+        original_update(self, state)
+
+    def preserve_destination_file(self: TrustedParserFile) -> None:
+        if str(run_id) in self.path.parts:
+            raise OSError("simulate hard crash")
+        original_file_delete(self)
+
+    def preserve_destination_directory(self: TrustedParserDirectory) -> None:
+        if str(run_id) in self.path.parts:
+            raise OSError("simulate hard crash")
+        original_directory_delete(self)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(TrustedMinerUResult, "update_journal", crash_before_promoted)
+        scoped.setattr(TrustedParserFile, "delete", preserve_destination_file)
+        scoped.setattr(TrustedParserDirectory, "delete", preserve_destination_directory)
+        with pytest.raises(OSError, match="crash before promoted frame"):
+            workspace.promote_sealed_mineru_result(sealed)
+
+    parent = parser_library.data_root / "parse-results" / registered.content_id
+    journal_path = parent / f"{run_id}.promotion.json"
+    journal_bytes = journal_path.read_bytes()
+    assert len(journal_bytes) <= (entry_count + 4) * 2048
+    assert len(journal_bytes) <= 8 * 1024 * 1024
+
+    previous_digest: str | None = None
+    frames = journal_bytes.splitlines()
+    assert len(frames) == entry_count + 3  # intent, root, files, manifest
+    for sequence, frame in enumerate(frames):
+        checksum, payload = frame.split(b":", 1)
+        assert checksum.decode("ascii") == hashlib.sha256(payload).hexdigest()
+        record = json.loads(payload)
+        assert record["state"] == "copying"
+        assert record["sequence"] == sequence
+        assert record["previous_frame_digest"] == previous_digest
+        assert "entries" not in record
+        assert record.get("entry") is None or isinstance(record["entry"], dict)
+        previous_digest = hashlib.sha256(payload).hexdigest()
+
+    assert workspace.cleanup_interrupted_promotion(sealed) is True
+    assert not (parent / str(run_id)).exists()
+    assert not journal_path.exists()
+    sealed.close()
+    workspace.close()
+
+
+@pytest.mark.parametrize(
+    ("tamper", "expected_cleanup"),
+    [
+        ("torn_tail", True),
+        ("middle_checksum", False),
+        ("broken_chain", False),
+        ("duplicate_path", False),
+    ],
+)
+def test_copying_journal_rejects_corruption_but_ignores_torn_tail(
+    parser_library: ParserLibraryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: str,
+    expected_cleanup: bool,
+) -> None:
+    registered = parser_library.register(
+        f"copy-chain-{tamper}.pdf", _pdf_bytes(text=False)
+    )
+    run_id = uuid4()
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    work = workspace.create_mineru_work(run_id)
+    (work.path / "result.json").write_text("original", encoding="utf-8")
+    sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
+    original_update = TrustedMinerUResult.update_journal
+    original_file_delete = TrustedParserFile.delete
+    original_directory_delete = TrustedParserDirectory.delete
+
+    def crash_before_promoted(self: TrustedMinerUResult, state: str) -> None:
+        if state == "promoted":
+            raise OSError("crash before promoted frame")
+        original_update(self, state)
+
+    def preserve_destination_file(self: TrustedParserFile) -> None:
+        if str(run_id) in self.path.parts:
+            raise OSError("simulate hard crash")
+        original_file_delete(self)
+
+    def preserve_destination_directory(self: TrustedParserDirectory) -> None:
+        if str(run_id) in self.path.parts:
+            raise OSError("simulate hard crash")
+        original_directory_delete(self)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(TrustedMinerUResult, "update_journal", crash_before_promoted)
+        scoped.setattr(TrustedParserFile, "delete", preserve_destination_file)
+        scoped.setattr(TrustedParserDirectory, "delete", preserve_destination_directory)
+        with pytest.raises(OSError, match="crash before promoted frame"):
+            workspace.promote_sealed_mineru_result(sealed)
+
+    parent = parser_library.data_root / "parse-results" / registered.content_id
+    journal_path = parent / f"{run_id}.promotion.json"
+    frames = journal_path.read_bytes().splitlines()
+
+    def decode(frame: bytes) -> tuple[dict[str, object], bytes]:
+        _, payload = frame.split(b":", 1)
+        return json.loads(payload), payload
+
+    def encode(record: dict[str, object]) -> bytes:
+        payload = json.dumps(
+            record,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest().encode("ascii") + b":" + payload
+
+    if tamper == "torn_tail":
+        journal_path.write_bytes(journal_path.read_bytes() + b"0" * 64 + b':{"state":')
+    elif tamper == "middle_checksum":
+        damaged = bytearray(frames[1])
+        damaged[-1] ^= 1
+        frames[1] = bytes(damaged)
+        journal_path.write_bytes(b"\n".join(frames) + b"\n")
+    elif tamper == "broken_chain":
+        record, _ = decode(frames[-1])
+        record["previous_frame_digest"] = "0" * 64
+        frames[-1] = encode(record)
+        journal_path.write_bytes(b"\n".join(frames) + b"\n")
+    else:
+        entry_record: dict[str, object] | None = None
+        for frame in frames:
+            candidate, _ = decode(frame)
+            entry = candidate.get("entry")
+            if isinstance(entry, dict) and entry.get("path") == "result.json":
+                entry_record = candidate
+                break
+        assert entry_record is not None
+        latest, latest_payload = decode(frames[-1])
+        latest["sequence"] = int(latest["sequence"]) + 1  # type: ignore[arg-type]
+        latest["previous_frame_digest"] = hashlib.sha256(latest_payload).hexdigest()
+        latest["entry"] = entry_record["entry"]
+        journal_path.write_bytes(b"\n".join([*frames, encode(latest)]) + b"\n")
+
+    assert workspace.cleanup_interrupted_promotion(sealed) is expected_cleanup
+    if not expected_cleanup:
+        assert (parent / str(run_id)).exists()
+        assert journal_path.exists()
+    sealed.close()
+    workspace.close()
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expected_error"),
+    [
+        ("frame", "parser_journal_frame_too_large"),
+        ("entries", "mineru_promotion_journal_too_many_entries"),
+        ("total", "parser_journal_too_large"),
+    ],
+)
+def test_promotion_journal_reader_enforces_all_bounds(
+    parser_library: ParserLibraryFixture,
+    boundary: str,
+    expected_error: str,
+) -> None:
+    registered = parser_library.register(f"journal-{boundary}.pdf", _pdf_bytes())
+    run_id = uuid4()
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    journal = workspace.create_journal(registered.content_id, uuid4())
+
+    def frame(payload: bytes) -> bytes:
+        return (
+            hashlib.sha256(payload).hexdigest().encode("ascii") + b":" + payload + b"\n"
+        )
+
+    if boundary == "total":
+        journal.write(b"x" * (8 * 1024 * 1024 + 1))
+    else:
+        sequence = 0
+        previous_digest: str | None = None
+        payloads: list[bytes] = []
+
+        def add(entry: dict[str, object] | None, *, root: bool) -> None:
+            nonlocal sequence, previous_digest
+            payload = parser_workspace._promotion_journal_payload(
+                registered.content_id,
+                run_id,
+                "manifest",
+                "copying",
+                "x" * (64 * 1024) if boundary == "frame" else None,
+                None,
+                None,
+                "volume" if root else None,
+                "root" if root else None,
+                sequence=sequence,
+                previous_frame_digest=previous_digest,
+                entry=entry,
+            )
+            payloads.append(payload)
+            previous_digest = hashlib.sha256(payload).hexdigest()
+            sequence += 1
+
+        add(None, root=False)
+        if boundary == "entries":
+            add(None, root=True)
+            for index in range(8193):
+                add(
+                    {
+                        "path": f"entry-{index:04d}.json",
+                        "kind": "file",
+                        "volume_id": "volume",
+                        "file_id": f"file-{index}",
+                        "size": 1,
+                        "sha256": "0" * 64,
+                    },
+                    root=True,
+                )
+        journal.write(b"".join(frame(payload) for payload in payloads))
+    journal.flush()
+
+    with pytest.raises(ValueError, match=expected_error):
+        parser_workspace._read_promotion_journal(journal)
+
+    journal.close()
+    workspace.close()
+
+
 def test_mineru_result_tree_rejects_hard_linked_files(
     parser_library: ParserLibraryFixture,
 ) -> None:
-    registered = parser_library.register("hard-linked-result.pdf", _pdf_bytes(text=False))
+    registered = parser_library.register(
+        "hard-linked-result.pdf", _pdf_bytes(text=False)
+    )
 
     class HardLinkedMinerU:
         def run(self, staged: object, output: Path, language: str) -> ProcessOutcome:
@@ -409,9 +676,12 @@ def test_mineru_result_tree_rejects_hard_linked_files(
         mineru_factory=lambda _record: HardLinkedMinerU(),  # type: ignore[arg-type]
     )
 
-    assert asyncio.run(
-        Worker(queue, "hard-link-result", parser_job_handlers(service)).run_once()
-    ) is True
+    assert (
+        asyncio.run(
+            Worker(queue, "hard-link-result", parser_job_handlers(service)).run_once()
+        )
+        is True
+    )
 
     with parser_library.database.connect() as connection:
         job = connection.execute(
@@ -429,14 +699,19 @@ def test_failed_mineru_attempt_preserves_previous_pointer_and_reports_fixed_erro
     registered = parser_library.register("retry.pdf", _pdf_bytes())
     queue = _queue(parser_library)
     first_id = queue.enqueue(
-        "parse_pdf", f"first:{registered.content_id}", {"content_id": str(registered.content_id)}
+        "parse_pdf",
+        f"first:{registered.content_id}",
+        {"content_id": str(registered.content_id)},
     )
     direct_service = ParseWorkerService(
         parser_library.database, parser_library.inspector, parser_library.data_root
     )
-    assert asyncio.run(
-        Worker(queue, "direct", parser_job_handlers(direct_service)).run_once()
-    ) is True
+    assert (
+        asyncio.run(
+            Worker(queue, "direct", parser_job_handlers(direct_service)).run_once()
+        )
+        is True
+    )
     old_pointer = ParseRunRepository(parser_library.database).current_run_id(
         registered.content_id
     )
@@ -445,7 +720,9 @@ def test_failed_mineru_attempt_preserves_previous_pointer_and_reports_fixed_erro
     class MissingOutputMinerU:
         def run(self, staged: object, output: Path, language: str) -> ProcessOutcome:
             output.mkdir(parents=True, exist_ok=True)
-            return ProcessOutcome(0, b"SENTINEL document text", b"SENTINEL document text")
+            return ProcessOutcome(
+                0, b"SENTINEL document text", b"SENTINEL document text"
+            )
 
     failed_id = queue.enqueue(
         "parse_pdf",
@@ -463,15 +740,19 @@ def test_failed_mineru_attempt_preserves_previous_pointer_and_reports_fixed_erro
         parser_library.data_root,
         mineru_factory=lambda _record: MissingOutputMinerU(),  # type: ignore[arg-type]
     )
-    assert asyncio.run(
-        Worker(queue, "failed", parser_job_handlers(failed_service)).run_once()
-    ) is True
+    assert (
+        asyncio.run(
+            Worker(queue, "failed", parser_job_handlers(failed_service)).run_once()
+        )
+        is True
+    )
 
     repository = ParseRunRepository(parser_library.database)
     assert repository.current_run_id(registered.content_id) == old_pointer
     with parser_library.database.connect() as connection:
         failed_job = connection.execute(
-            "SELECT status,error_code,checkpoint_json FROM jobs WHERE id=?", (failed_id,)
+            "SELECT status,error_code,checkpoint_json FROM jobs WHERE id=?",
+            (failed_id,),
         ).fetchone()
         failed_run = connection.execute(
             "SELECT status,error_code FROM parse_runs ORDER BY rowid DESC LIMIT 1"
@@ -495,19 +776,25 @@ def test_read_only_suppresses_automatic_parse_without_staging(
         )
     queue = _queue(parser_library)
     queue.enqueue(
-        "parse_pdf", f"auto:{registered.content_id}", {"content_id": str(registered.content_id)}
+        "parse_pdf",
+        f"auto:{registered.content_id}",
+        {"content_id": str(registered.content_id)},
     )
     service = ParseWorkerService(
         parser_library.database, parser_library.inspector, parser_library.data_root
     )
 
-    assert asyncio.run(
-        Worker(queue, "read-only", parser_job_handlers(service)).run_once()
-    ) is True
+    assert (
+        asyncio.run(Worker(queue, "read-only", parser_job_handlers(service)).run_once())
+        is True
+    )
 
-    assert ParseRunRepository(parser_library.database).current_run_id(
-        registered.content_id
-    ) is None
+    assert (
+        ParseRunRepository(parser_library.database).current_run_id(
+            registered.content_id
+        )
+        is None
+    )
     assert not (parser_library.data_root / "staging").exists()
 
 
@@ -526,9 +813,12 @@ def test_same_content_cloud_eligibility_revalidates_each_authorized_single_link_
         parser_library.database, parser_library.inspector, parser_library.data_root
     )
 
-    assert asyncio.run(
-        Worker(queue, "cloud-worker", parser_job_handlers(service)).run_once()
-    ) is True
+    assert (
+        asyncio.run(
+            Worker(queue, "cloud-worker", parser_job_handlers(service)).run_once()
+        )
+        is True
+    )
 
     with parser_library.database.connect() as connection:
         rows = connection.execute(
@@ -575,9 +865,12 @@ def test_auto_ocr_language_uses_bounded_extracted_body_not_only_metadata(
         mineru_factory=lambda _record: FakeMinerU(),  # type: ignore[arg-type]
     )
 
-    assert asyncio.run(
-        Worker(queue, "language-worker", parser_job_handlers(service)).run_once()
-    ) is True
+    assert (
+        asyncio.run(
+            Worker(queue, "language-worker", parser_job_handlers(service)).run_once()
+        )
+        is True
+    )
     assert observed_languages == ["ch"]
 
 
@@ -617,9 +910,10 @@ def test_real_mineru_work_directory_swap_is_blocked_during_subprocess(
         mineru_factory=lambda _record: RaceMinerU(),  # type: ignore[arg-type]
     )
 
-    assert asyncio.run(
-        Worker(queue, "work-race", parser_job_handlers(service)).run_once()
-    ) is True
+    assert (
+        asyncio.run(Worker(queue, "work-race", parser_job_handlers(service)).run_once())
+        is True
+    )
     with parser_library.database.connect() as connection:
         job = connection.execute(
             "SELECT status,error_code FROM jobs WHERE id=?", (str(job_id),)
@@ -700,9 +994,12 @@ def test_retry_rebuilds_pointer_after_crash_between_db_complete_and_publish(
         parser_library.data_root,
         mineru_factory=lambda _record: MustNotRerunMinerU(),  # type: ignore[arg-type]
     )
-    assert asyncio.run(
-        Worker(queue, "crash-recovery", parser_job_handlers(service)).run_once()
-    ) is True
+    assert (
+        asyncio.run(
+            Worker(queue, "crash-recovery", parser_job_handlers(service)).run_once()
+        )
+        is True
+    )
 
     assert json.loads(pointer.read_text(encoding="utf-8"))["attempt_id"] == str(run_id)
     with parser_library.database.connect() as connection:
@@ -726,7 +1023,9 @@ def test_retry_recovers_promoted_manifest_after_database_failure(
     expected_stage: str,
     expected_journal_state: str,
 ) -> None:
-    registered = parser_library.register("promoted-recovery.pdf", _pdf_bytes(text=False))
+    registered = parser_library.register(
+        "promoted-recovery.pdf", _pdf_bytes(text=False)
+    )
 
     class FakeMinerU:
         def run(self, staged: object, output: Path, language: str) -> ProcessOutcome:
@@ -942,9 +1241,12 @@ def test_empty_checkpoint_recovers_finished_work_without_rerunning_mineru(
     )
     service.process(recovery, Cancellation())  # type: ignore[arg-type]
 
-    assert ParseRunRepository(parser_library.database).current_run_id(
-        registered.content_id
-    ) == run_id
+    assert (
+        ParseRunRepository(parser_library.database).current_run_id(
+            registered.content_id
+        )
+        == run_id
+    )
     assert list((parser_library.data_root / "mineru-work").iterdir()) == []
 
 
@@ -1044,9 +1346,7 @@ def test_stale_completed_job_cannot_publish_over_newer_current_result(
                 "SELECT payload_json FROM jobs WHERE id=?", (str(job_id),)
             ).fetchone()
         assert job_row is not None
-        request_revision = int(
-            json.loads(job_row["payload_json"])["request_revision"]
-        )
+        request_revision = int(json.loads(job_row["payload_json"])["request_revision"])
         run_id = repository.create_run(
             registered.content_id,
             "mineru",
@@ -1108,9 +1408,12 @@ def test_stale_completed_job_cannot_publish_over_newer_current_result(
     service = ParseWorkerService(
         parser_library.database, parser_library.inspector, parser_library.data_root
     )
-    assert asyncio.run(
-        Worker(queue, "stale-publish", parser_job_handlers(service)).run_once()
-    ) is True
+    assert (
+        asyncio.run(
+            Worker(queue, "stale-publish", parser_job_handlers(service)).run_once()
+        )
+        is True
+    )
 
     assert json.loads(pointer.read_text(encoding="utf-8"))["attempt_id"] == str(new_run)
     assert repository.current_run_id(registered.content_id) == new_run
@@ -1190,7 +1493,9 @@ def test_older_normal_mineru_path_cannot_publish_after_newer_run_wins(
     old_thread = threading.Thread(
         target=lambda: old_result.append(
             asyncio.run(
-                Worker(queue, "publish-old", parser_job_handlers(old_service)).run_once()
+                Worker(
+                    queue, "publish-old", parser_job_handlers(old_service)
+                ).run_once()
             )
         )
     )
@@ -1212,9 +1517,12 @@ def test_older_normal_mineru_path_cannot_publish_after_newer_run_wins(
         parser_library.data_root,
         mineru_factory=lambda _record: FakeMinerU("new"),  # type: ignore[arg-type]
     )
-    assert asyncio.run(
-        Worker(queue, "publish-new", parser_job_handlers(new_service)).run_once()
-    ) is True
+    assert (
+        asyncio.run(
+            Worker(queue, "publish-new", parser_job_handlers(new_service)).run_once()
+        )
+        is True
+    )
     let_old_publish.set()
     old_thread.join(10)
     assert not old_thread.is_alive()
@@ -1223,7 +1531,9 @@ def test_older_normal_mineru_path_cannot_publish_after_newer_run_wins(
     repository = ParseRunRepository(parser_library.database)
     current = repository.current_run_id(registered.content_id)
     assert current is not None
-    assert repository.read_current_page(registered.content_id, 1).normalized_text == "new"  # type: ignore[union-attr]
+    assert (
+        repository.read_current_page(registered.content_id, 1).normalized_text == "new"
+    )  # type: ignore[union-attr]
     pointer = json.loads(
         (
             parser_library.data_root
