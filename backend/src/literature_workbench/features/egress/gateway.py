@@ -112,7 +112,7 @@ class DeepSeekGateway:
                 WHERE d.id=?
                   AND d.content_sha256=?
                   AND d.format='pdf'
-                  AND d.status='active'
+                  AND d.status IN ('active','candidate_pdf','valid_pdf')
                 """,
                 (
                     str(proof.document_version_id),
@@ -173,7 +173,14 @@ class DeepSeekGateway:
                 ) as response:
                     self._check_total_deadline(attempt, deadline, started)
                     if response.status_code < 200 or response.status_code >= 300:
-                        self._fail(attempt, "deepseek_http_error", started)
+                        if response.status_code in {401, 403}:
+                            self._fail(attempt, "deepseek_authorization_failed", started)
+                        if (
+                            response.status_code in {408, 425, 429}
+                            or response.status_code >= 500
+                        ):
+                            self._fail(attempt, "deepseek_http_error", started)
+                        self._fail(attempt, "deepseek_request_rejected", started)
                     raw = bytearray()
                     for chunk in response.iter_bytes():
                         self._check_total_deadline(attempt, deadline, started)

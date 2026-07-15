@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 
 import { LibraryPanel } from "../features/library/LibraryPanel";
 import { PdfReader, type ReaderDocument } from "../features/reader/PdfReader";
+import type { SelectedText } from "../features/reader/selection";
+import { SettingsDialog } from "../features/settings/SettingsDialog";
+import { TranslationPopover } from "../features/translation/TranslationPopover";
 
 
 type DocumentResponse = {
@@ -18,6 +21,7 @@ function CurrentReader() {
   const initialPage = Number(params.get("page") ?? "1");
   const [document, setDocument] = useState<ReaderDocument | null>(null);
   const [error, setError] = useState(false);
+  const [translationSelection, setTranslationSelection] = useState<SelectedText | null>(null);
 
   useEffect(() => {
     if (documentId === null) return;
@@ -49,10 +53,25 @@ function CurrentReader() {
   if (documentId === null) return <h2>PDF 阅读器</h2>;
   if (error) return <p role="alert">文献信息暂时无法读取</p>;
   if (document === null) return <p>正在读取文献信息</p>;
-  return <PdfReader {...document} initialPage={Number.isInteger(initialPage) ? initialPage : 1} />;
+  return (
+    <>
+      <PdfReader
+        {...document}
+        initialPage={Number.isInteger(initialPage) ? initialPage : 1}
+        onTranslateSelection={setTranslationSelection}
+      />
+      {translationSelection !== null && (
+        <TranslationPopover
+          onClose={() => setTranslationSelection(null)}
+          selected={translationSelection}
+        />
+      )}
+    </>
+  );
 }
 
 export function Workbench() {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div className="workbench">
       <aside aria-label="文献库" className="workbench__library">
@@ -63,7 +82,10 @@ export function Workbench() {
       </main>
       <aside aria-label="研究助手" className="workbench__assistant">
         <h2>研究助手</h2>
+        <p>RAG/网络检索将在 v0.2</p>
+        <button onClick={() => setSettingsOpen(true)} type="button">翻译设置</button>
       </aside>
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

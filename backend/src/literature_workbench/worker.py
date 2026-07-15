@@ -11,6 +11,7 @@ from literature_workbench.features.library.import_service import (
     ImportValidator,
 )
 from literature_workbench.features.parser.worker import ParseJobFailure, ParseWorkerService
+from literature_workbench.features.translation.service import TranslationService
 
 
 class JobCancellation:
@@ -109,6 +110,20 @@ def parser_job_handlers(parser: ParseWorkerService) -> Mapping[str, JobHandler]:
         cancellation.raise_if_cancelled()
 
     return {"parse_pdf": parse_pdf}
+
+
+def translation_job_handlers(service: TranslationService) -> Mapping[str, JobHandler]:
+    async def translate_selection(job: Job, cancellation: JobCancellation) -> None:
+        raw_task_id = job.payload.get("task_id")
+        if not isinstance(raw_task_id, str):
+            raise ValueError("invalid_translation_task_id")
+        from uuid import UUID
+
+        cancellation.raise_if_cancelled()
+        await asyncio.to_thread(service.process_task, UUID(raw_task_id))
+        cancellation.raise_if_cancelled()
+
+    return {"translate_selection": translate_selection}
 
 
 class Worker:
