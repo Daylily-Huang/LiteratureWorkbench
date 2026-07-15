@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import time
+from threading import Event, enumerate as enumerate_threads
 
 import httpx
 import pytest
@@ -83,6 +85,30 @@ def test_response_over_2_mib_is_sanitized() -> None:
         QwenLocalClient(transport=httpx.MockTransport(handler)).translate("fixed")
     assert str(caught.value) == "qwen_response_too_large"
     assert sentinel not in str(caught.value)
+
+
+def test_slow_drip_response_is_closed_at_monotonic_total_deadline() -> None:
+    closed = Event()
+
+    class SlowDrip(httpx.SyncByteStream):
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            while not closed.wait(0.2):
+                yield b" "
+
+        def close(self) -> None:
+            closed.set()
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, stream=SlowDrip(), request=request)
+    )
+    started = time.monotonic()
+
+    with pytest.raises(QwenLocalError, match="qwen_total_timeout"):
+        QwenLocalClient(transport=transport, total_timeout_seconds=0.02).translate("fixed")
+
+    assert time.monotonic() - started < 0.15
+    assert closed.wait(0.1)
+    assert not any(thread.name == "qwen-http-deadline" for thread in enumerate_threads())
 
 
 @pytest.mark.parametrize(

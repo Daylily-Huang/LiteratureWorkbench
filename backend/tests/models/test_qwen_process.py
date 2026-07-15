@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event, enumerate as enumerate_threads
+from types import SimpleNamespace
 
 import httpx
 import psutil
 import pytest
+
+import literature_workbench.features.models.qwen_process as qwen_process_module
 
 from literature_workbench.features.models.qwen_process import (
     ProcessIdentity,
@@ -76,6 +81,7 @@ def test_existing_expected_service_is_borrowed_and_never_stopped(tmp_path: Path)
         transport=healthy_transport(calls),
         launcher=lambda args, log: launches.append(args) or 321,
         identity_lookup=lambda pid: expected_identity(pid),
+        listener_owner=lambda host, port: expected_identity(),
         stopper=stops.append,
     )
 
@@ -86,6 +92,53 @@ def test_existing_expected_service_is_borrowed_and_never_stopped(tmp_path: Path)
     assert launches == []
     assert stops == []
     assert [request.url.path for request in calls] == ["/health", "/v1/models"]
+
+
+def test_healthy_service_with_unprovable_listener_owner_fails_closed(
+    tmp_path: Path,
+) -> None:
+    launches: list[tuple[str, ...]] = []
+    stops: list[int] = []
+    manager = QwenProcessManager(
+        tmp_path / "qwen",
+        transport=healthy_transport([]),
+        launcher=lambda args, log: launches.append(args) or 321,
+        listener_owner=lambda host, port: None,
+        stopper=stops.append,
+    )
+
+    with pytest.raises(QwenProcessError, match="qwen_port_identity_mismatch"):
+        manager.ensure_running()
+
+    assert launches == []
+    assert stops == []
+
+
+def test_windows_listener_owner_resolver_uses_exact_loopback_endpoint_and_pid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connections = [
+        SimpleNamespace(
+            status=psutil.CONN_LISTEN,
+            pid=321,
+            laddr=("127.0.0.1", 18080),
+        ),
+        SimpleNamespace(
+            status=psutil.CONN_LISTEN,
+            pid=999,
+            laddr=("127.0.0.1", 18081),
+        ),
+    ]
+    monkeypatch.setattr(psutil, "net_connections", lambda **_: connections)
+    monkeypatch.setattr(
+        qwen_process_module,
+        "_lookup_identity",
+        lambda pid: expected_identity(pid),
+    )
+
+    assert qwen_process_module._resolve_listener_owner(
+        "127.0.0.1", 18080
+    ) == expected_identity()
 
 
 def test_unknown_service_on_fixed_port_fails_closed(tmp_path: Path) -> None:
@@ -261,6 +314,38 @@ def test_prelaunch_probe_rejects_oversized_response_body(tmp_path: Path, path: s
     assert launches == []
 
 
+def test_prelaunch_probe_closes_slow_drip_response_at_total_deadline(
+    tmp_path: Path,
+) -> None:
+    closed = Event()
+
+    class SlowDrip(httpx.SyncByteStream):
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            while not closed.wait(0.2):
+                yield b" "
+
+        def close(self) -> None:
+            closed.set()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=SlowDrip(), request=request)
+
+    manager = QwenProcessManager(
+        tmp_path / "qwen",
+        transport=httpx.MockTransport(handler),
+        probe_timeout_seconds=0.02,
+        launcher=lambda args, log: pytest.fail("deadline failure must not launch Qwen"),
+    )
+    started = time.monotonic()
+
+    with pytest.raises(QwenProcessError, match="qwen_probe_timeout"):
+        manager.ensure_running()
+
+    assert time.monotonic() - started < 0.15
+    assert closed.wait(0.1)
+    assert not any(thread.name == "qwen-http-deadline" for thread in enumerate_threads())
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -425,3 +510,32 @@ def test_runtime_creation_and_process_stop_errors_are_sanitized(
     with pytest.raises(QwenProcessError) as caught:
         manager.stop_owned()
     assert str(caught.value) == "qwen_stop_failed"
+
+
+def test_stop_owned_keeps_evidence_when_stopper_does_not_end_exact_process(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "qwen"
+    runtime.mkdir(parents=True)
+    record_path = runtime / "owned-process.json"
+    record_path.write_text(
+        json.dumps(
+            {
+                "pid": 321,
+                "create_time": 1234.5,
+                "exe": str(EXPECTED_EXE),
+                "model": str(EXPECTED_MODEL),
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager = QwenProcessManager(
+        runtime,
+        identity_lookup=lambda pid: expected_identity(pid),
+        stopper=lambda pid: None,
+    )
+
+    with pytest.raises(QwenProcessError, match="qwen_stop_failed"):
+        manager.stop_owned()
+
+    assert record_path.exists()

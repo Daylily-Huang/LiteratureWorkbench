@@ -370,6 +370,7 @@ def stop_running_instance(
     health_probe: HealthProbe = _health_probe,
     control_request: ControlRequest = _control_request,
     locks_released: Callable[[Path], bool] | None = None,
+    qwen_manager_factory: Callable[[Path], QwenProcessManager] = QwenProcessManager,
     timeout_seconds: float = 15.0,
 ) -> bool:
     try:
@@ -380,6 +381,8 @@ def stop_running_instance(
             return False
         if not health_probe(f"http://127.0.0.1:{manifest.port}/api/health"):
             return False
+        qwen_manager = qwen_manager_factory(manifest_path.parent.parent / "qwen")
+        owned_qwen = qwen_manager.owned_identity()
         control_request(manifest.port, manifest.control_token, "stop")
         lock_probe = locks_released or _runtime_locks_released
         deadline = time.monotonic() + timeout_seconds
@@ -395,11 +398,12 @@ def stop_running_instance(
                 and worker_gone
                 and not manifest_path.exists()
                 and lock_probe(manifest_path.parent)
+                and qwen_manager.owned_identity_absent(owned_qwen)
             ):
                 return True
             time.sleep(0.05)
         return False
-    except (OSError, ValueError, httpx.HTTPError):
+    except (OSError, ValueError, httpx.HTTPError, QwenProcessError):
         return False
 
 
@@ -686,6 +690,13 @@ def _wait_until_healthy(port: int, thread: Thread, timeout_seconds: float = 15.0
     raise RuntimeError("loopback_server_not_ready")
 
 
+def _stop_owned_qwen(runtime_dir: Path) -> None:
+    try:
+        QwenProcessManager(runtime_dir).stop_owned()
+    except QwenProcessError:
+        raise RuntimeError("owned_qwen_cleanup_failed") from None
+
+
 def run_supervisor(
     settings: AppSettings,
     web_dist: Path,
@@ -756,13 +767,17 @@ def run_supervisor(
         server_thread.join(timeout=10)
         if worker is not None:
             _stop_exact_process(worker, worker_identity)
+        qwen_cleanup_failed = False
         try:
-            QwenProcessManager(settings.qwen_runtime_dir).stop_owned()
-        except QwenProcessError:
-            pass
+            _stop_owned_qwen(settings.qwen_runtime_dir)
+        except RuntimeError:
+            qwen_cleanup_failed = True
         bootstrap_path.unlink(missing_ok=True)
         ready_path.unlink(missing_ok=True)
-        manifest_path.unlink(missing_ok=True)
+        if not qwen_cleanup_failed:
+            manifest_path.unlink(missing_ok=True)
+        if qwen_cleanup_failed:
+            raise RuntimeError("owned_qwen_cleanup_failed") from None
 
 
 def run_bound_worker(
@@ -850,14 +865,17 @@ def run_bound_worker(
         )
     finally:
         ready_path.unlink(missing_ok=True)
+        qwen_cleanup_failed = False
         if qwen_process is not None:
             try:
                 qwen_process.stop_owned()
             except QwenProcessError:
-                pass
+                qwen_cleanup_failed = True
         if trusted_root is not None:
             trusted_root.close()
         worker_lock.release()
+        if qwen_cleanup_failed:
+            raise RuntimeError("owned_qwen_cleanup_failed") from None
 
 
 def _runtime_paths(settings: AppSettings) -> tuple[Path, Path]:

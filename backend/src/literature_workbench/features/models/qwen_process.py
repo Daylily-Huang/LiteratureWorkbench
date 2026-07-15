@@ -10,6 +10,8 @@ from typing import Protocol, cast
 import httpx
 import psutil  # type: ignore[import-untyped]
 
+from literature_workbench.features.models.qwen_http import MonotonicResponseDeadline
+
 
 QWEN_HOST = "127.0.0.1"
 QWEN_PORT = 18080
@@ -25,6 +27,7 @@ QWEN_MMPROJ = Path(
     r"\mmproj-Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-f16.gguf"
 )
 STARTUP_TIMEOUT_SECONDS = 120.0
+PROBE_TIMEOUT_SECONDS = 2.0
 MAX_PROBE_RESPONSE_BYTES = 64 * 1024
 _OWNERSHIP_FILE = "owned-process.json"
 
@@ -57,6 +60,10 @@ class IdentityLookup(Protocol):
 
 class Stopper(Protocol):
     def __call__(self, pid: int) -> None: ...
+
+
+class ListenerOwner(Protocol):
+    def __call__(self, host: str, port: int) -> ProcessIdentity | None: ...
 
 
 class Clock(Protocol):
@@ -97,6 +104,34 @@ def _lookup_identity(pid: int) -> ProcessIdentity | None:
             exe=process.exe(),
             cmdline=tuple(process.cmdline()),
         )
+    except psutil.NoSuchProcess:
+        return None
+
+
+def _resolve_listener_owner(host: str, port: int) -> ProcessIdentity | None:
+    try:
+        connections = psutil.net_connections(kind="tcp")
+    except (psutil.Error, OSError):
+        return None
+    listener_pids: set[int] = set()
+    for connection in connections:
+        if connection.status != psutil.CONN_LISTEN or connection.pid is None:
+            continue
+        local = connection.laddr
+        if not local:
+            continue
+        if hasattr(local, "ip") and hasattr(local, "port"):
+            local_host = local.ip
+            local_port = local.port
+        else:
+            local_host = local[0]
+            local_port = local[1]
+        if local_host == host and local_port == port:
+            listener_pids.add(connection.pid)
+    if len(listener_pids) != 1:
+        return None
+    try:
+        return _lookup_identity(listener_pids.pop())
     except (psutil.Error, OSError):
         return None
 
@@ -121,19 +156,26 @@ class QwenProcessManager:
         transport: httpx.BaseTransport | None = None,
         launcher: Launcher = _launch_hidden,
         identity_lookup: IdentityLookup = _lookup_identity,
+        listener_owner: ListenerOwner = _resolve_listener_owner,
         stopper: Stopper = _stop_process,
         clock: Clock | None = None,
+        probe_timeout_seconds: float = PROBE_TIMEOUT_SECONDS,
     ) -> None:
         self.runtime_dir = runtime_dir
         self.mmproj = QWEN_MMPROJ
         self._transport = transport
         self._launcher = launcher
         self._identity_lookup = identity_lookup
+        self._listener_owner = listener_owner
         self._stopper = stopper
         self._clock = clock or _SystemClock()
+        self._probe_timeout_seconds = probe_timeout_seconds
 
     def ensure_running(self) -> QwenLease:
         if self._probe_expected_service(prelaunch=True):
+            owner = self._listener_owner(QWEN_HOST, QWEN_PORT)
+            if owner is None or not self._matches_fixed_process(owner):
+                raise QwenProcessError("qwen_port_identity_mismatch")
             return QwenLease(borrowed=True, pid=None)
 
         try:
@@ -173,10 +215,27 @@ class QwenProcessManager:
             self._clock.sleep(1.0)
 
     def stop_owned(self) -> bool:
+        identity = self.owned_identity()
+        if identity is None:
+            return False
+        try:
+            self._stopper(identity.pid)
+        except (psutil.Error, OSError):
+            raise QwenProcessError("qwen_stop_failed") from None
+        try:
+            current = self._identity_lookup(identity.pid)
+        except (psutil.Error, OSError):
+            raise QwenProcessError("qwen_process_inspection_failed") from None
+        if self._same_process_instance(identity, current):
+            raise QwenProcessError("qwen_stop_failed")
+        self._remove_ownership_files()
+        return True
+
+    def owned_identity(self) -> ProcessIdentity | None:
         record_path = self.runtime_dir / _OWNERSHIP_FILE
         try:
             if not record_path.is_file():
-                return False
+                return None
             loaded: object = json.loads(record_path.read_text(encoding="utf-8"))
             if not isinstance(loaded, dict):
                 raise TypeError
@@ -214,12 +273,18 @@ class QwenProcessManager:
             or not self._matches_fixed_process(identity)
         ):
             raise QwenProcessError("qwen_owned_process_mismatch")
+        return identity
+
+    def owned_identity_absent(self, expected: ProcessIdentity | None) -> bool:
         try:
-            self._stopper(pid)
-            record_path.unlink(missing_ok=True)
+            if (self.runtime_dir / _OWNERSHIP_FILE).exists():
+                return False
+            if expected is None:
+                return True
+            current = self._identity_lookup(expected.pid)
         except (psutil.Error, OSError):
-            raise QwenProcessError("qwen_stop_failed") from None
-        return True
+            return False
+        return not self._same_process_instance(expected, current)
 
     def _probe_expected_service(self, *, prelaunch: bool) -> bool:
         try:
@@ -243,18 +308,32 @@ class QwenProcessManager:
         except (httpx.HTTPError, json.JSONDecodeError, ValueError, TypeError):
             return self._not_ready(prelaunch)
 
-    @staticmethod
-    def _read_probe(client: httpx.Client, path: str) -> tuple[int, object | None]:
-        with client.stream("GET", f"{QWEN_BASE_URL}{path}") as response:
-            if response.status_code != 200:
-                return response.status_code, None
-            raw = bytearray()
-            for chunk in response.iter_bytes():
-                if len(raw) + len(chunk) > MAX_PROBE_RESPONSE_BYTES:
-                    raise QwenProcessError("qwen_probe_response_too_large")
-                raw.extend(chunk)
+    def _read_probe(self, client: httpx.Client, path: str) -> tuple[int, object | None]:
+        deadline: MonotonicResponseDeadline | None = None
+        try:
+            with MonotonicResponseDeadline(
+                client, self._probe_timeout_seconds
+            ) as deadline:
+                with client.stream("GET", f"{QWEN_BASE_URL}{path}") as response:
+                    deadline.attach(response)
+                    status_code = response.status_code
+                    if status_code != 200:
+                        return status_code, None
+                    raw = bytearray()
+                    for chunk in response.iter_bytes():
+                        deadline.raise_if_expired()
+                        if len(raw) + len(chunk) > MAX_PROBE_RESPONSE_BYTES:
+                            raise QwenProcessError("qwen_probe_response_too_large")
+                        raw.extend(chunk)
+                    deadline.raise_if_expired()
+        except QwenProcessError:
+            raise
+        except (httpx.HTTPError, OSError):
+            if deadline is not None and deadline.expired:
+                raise QwenProcessError("qwen_probe_timeout") from None
+            raise
         payload: object = json.loads(raw)
-        return response.status_code, payload
+        return status_code, payload
 
     @staticmethod
     def _not_ready(prelaunch: bool) -> bool:
@@ -304,6 +383,16 @@ class QwenProcessManager:
             and self._has_exact_option(identity.cmdline, "--host", QWEN_HOST)
             and self._has_exact_option(identity.cmdline, "--port", str(QWEN_PORT))
             and self._has_exact_option(identity.cmdline, "--alias", QWEN_ALIAS)
+        )
+
+    @staticmethod
+    def _same_process_instance(
+        expected: ProcessIdentity, current: ProcessIdentity | None
+    ) -> bool:
+        return (
+            current is not None
+            and current.pid == expected.pid
+            and current.create_time == expected.create_time
         )
 
     def _cleanup_launched(self, launched: ProcessIdentity) -> None:

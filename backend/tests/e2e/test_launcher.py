@@ -371,6 +371,75 @@ def test_stop_waits_for_exact_processes_manifest_and_locks_before_success(
     )
 
 
+def test_stop_fails_when_captured_owned_qwen_is_not_verified_gone(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / "runtime" / "launcher" / "launcher.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest = RuntimeManifest(
+        port=58380,
+        supervisor=ProcessIdentity(101, 10.5, r"C:\Python\pythonw.exe"),
+        worker=ProcessIdentity(202, 11.5, r"C:\Python\python.exe"),
+        control_token="c" * 43,
+        generation="generation",
+    )
+    manifest_path.write_text(json.dumps(manifest.to_json()), encoding="utf-8")
+    stopped = False
+    captured_qwen = object()
+    manager_paths: list[Path] = []
+
+    class QwenStillRunning:
+        def owned_identity(self) -> object:
+            return captured_qwen
+
+        def owned_identity_absent(self, expected: object) -> bool:
+            assert expected is captured_qwen
+            return False
+
+    def manager_factory(path: Path) -> QwenStillRunning:
+        manager_paths.append(path)
+        return QwenStillRunning()
+
+    def control(*_: object) -> str:
+        nonlocal stopped
+        stopped = True
+        manifest_path.unlink()
+        return "stopping"
+
+    assert not stop_running_instance(
+        manifest_path,
+        identity_lookup=lambda pid: None if stopped else (
+            manifest.supervisor if pid == 101 else manifest.worker
+        ),
+        health_probe=lambda _: True,
+        control_request=control,
+        locks_released=lambda _: stopped,
+        qwen_manager_factory=manager_factory,
+        timeout_seconds=0.02,
+    )
+    assert manager_paths == [tmp_path / "runtime" / "qwen"]
+
+
+def test_owned_qwen_cleanup_failure_is_propagated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FailingQwenManager:
+        def stop_owned(self) -> bool:
+            raise launcher_module.QwenProcessError("private_qwen_failure")
+
+    monkeypatch.setattr(
+        launcher_module,
+        "QwenProcessManager",
+        lambda _: FailingQwenManager(),
+    )
+
+    with pytest.raises(RuntimeError) as caught:
+        launcher_module._stop_owned_qwen(tmp_path / "qwen")
+
+    assert str(caught.value) == "owned_qwen_cleanup_failed"
+    assert "private_qwen_failure" not in str(caught.value)
+
+
 def test_dying_instance_releases_lock_and_immediate_start_becomes_supervisor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
