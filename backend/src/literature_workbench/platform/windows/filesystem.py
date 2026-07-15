@@ -7,6 +7,8 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Callable
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import BinaryIO, NoReturn, Protocol
 from uuid import UUID
 
@@ -186,9 +188,11 @@ class OwnedFileHandle(Protocol):
 
 
 class FileMetadataProvider(Protocol):
-    def open_directory(self, path: Path) -> OwnedFileHandle: ...
+    def open_directory(
+        self, path: Path, *, share_delete: bool = True
+    ) -> OwnedFileHandle: ...
 
-    def open_file(self, path: Path) -> OwnedFileHandle: ...
+    def open_file(self, path: Path, *, share_delete: bool = True) -> OwnedFileHandle: ...
 
 
 class SafeFileInspector(Protocol):
@@ -197,6 +201,10 @@ class SafeFileInspector(Protocol):
     def inspect_directory_under_root(
         self, candidate: Path, root: LibraryRoot
     ) -> RootIdentity: ...
+
+    def hold_directory_for_enumeration(
+        self, candidate: Path, root: LibraryRoot
+    ) -> AbstractContextManager[RootIdentity]: ...
 
     def inspect_under_root(self, candidate: Path, root: LibraryRoot) -> FileIdentity: ...
 
@@ -435,6 +443,43 @@ class SafeWindowsFileInspector:
             )
         finally:
             root_handle.close()
+
+    @contextmanager
+    def hold_directory_for_enumeration(
+        self, candidate: Path, root: LibraryRoot
+    ) -> Iterator[RootIdentity]:
+        candidate = Path(os.path.abspath(candidate))
+        root_path = Path(os.path.abspath(root.canonical_path))
+        self._require_lexically_contained(candidate, root_path)
+        held_handles: list[OwnedFileHandle] = []
+        try:
+            root_handle = self._provider.open_directory(root_path, share_delete=False)
+            held_handles.append(root_handle)
+            root_final = self._require_registered_root(root_handle.metadata, root)
+            final_metadata = root_handle.metadata
+            relative = Path(os.path.relpath(candidate, root_path))
+            current = root_path
+            for component in (() if str(relative) == "." else relative.parts):
+                current /= component
+                component_handle = self._provider.open_directory(
+                    current, share_delete=False
+                )
+                held_handles.append(component_handle)
+                final_metadata = component_handle.metadata
+                if not final_metadata.is_directory:
+                    raise UnsafePath("intermediate_not_directory")
+                if final_metadata.is_reparse_point:
+                    raise UnsafePath("reparse_point")
+                if not self._is_contained(final_metadata.final_path, root_final):
+                    raise UnsafePath("outside_registered_root")
+            yield RootIdentity(
+                canonical_path=final_metadata.final_path,
+                volume_id=final_metadata.volume_id,
+                file_id=final_metadata.file_id,
+            )
+        finally:
+            for handle in reversed(held_handles):
+                handle.close()
 
     def inspect_regular_file(self, candidate: Path, root: LibraryRoot) -> FileIdentity:
         identity, handle = self._inspect_candidate(candidate, root, require_pdf=False)

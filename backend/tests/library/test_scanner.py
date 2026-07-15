@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -184,6 +185,275 @@ def test_unchanged_validated_single_link_pdf_preserves_task8_cloud_state(
     assert content["status"] == "valid_pdf"
 
 
+@pytest.mark.parametrize("stale_status", ["missing", "incomplete"])
+def test_successful_rediscovery_recovers_pdf_and_non_pdf_status(
+    scanner_env: tuple[LibraryScanner, Database, LibraryRepository, TaskQueue],
+    tmp_path: Path,
+    stale_status: str,
+) -> None:
+    scanner, database, repository, _queue = scanner_env
+    root = tmp_path / "library"
+    root.mkdir()
+    (root / "paper.pdf").write_bytes(_pdf(b"same"))
+    (root / "notes.docx").write_bytes(b"metadata-only")
+    library = _register(repository, root)
+    scanner.scan_library(library.id)
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE documents SET status = ?, auto_cloud_eligible = 0", (stale_status,)
+        )
+
+    scanner.scan_library(library.id)
+
+    with database.connect() as connection:
+        rows = {
+            row["display_name"]: row
+            for row in connection.execute("SELECT * FROM documents").fetchall()
+        }
+    assert rows["paper.pdf"]["status"] == "candidate_pdf"
+    assert rows["paper.pdf"]["auto_cloud_eligible"] == 0
+    assert rows["notes.docx"]["status"] == "unsupported_v01"
+    assert rows["notes.docx"]["auto_cloud_eligible"] == 0
+
+
+def test_last_root_check_failure_discards_every_discovered_candidate(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    root.mkdir()
+    (root / "existing.pdf").write_bytes(_pdf(b"existing"))
+    delegate = SafeWindowsFileInspector()
+    root_identity = delegate.inspect_root_directory(root)
+    database = Database.open(tmp_path / "db.sqlite3")
+    run_migrations(database)
+    repository = LibraryRepository(database)
+    library = repository.register(
+        root_identity, recursive=True, authorization_source="native_picker_confirmed"
+    )
+    baseline = LibraryScanner(
+        database, repository, delegate, TaskQueue(database, lambda: datetime.now(UTC))
+    )
+    baseline.scan_library(library.id)
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE documents SET status = 'valid_pdf', auto_cloud_eligible = 1"
+        )
+    (root / "new.pdf").write_bytes(_pdf(b"new"))
+    checks = 0
+
+    class LastCheckFails:
+        def __getattr__(self, name: str):
+            return getattr(delegate, name)
+
+        def inspect_root_directory(self, candidate: Path) -> RootIdentity:
+            nonlocal checks
+            checks += 1
+            if checks == 2:
+                raise UnsafePath("final_root_identity_failed")
+            return delegate.inspect_root_directory(candidate)
+
+    scanner = LibraryScanner(
+        database,
+        repository,
+        LastCheckFails(),
+        TaskQueue(database, lambda: datetime.now(UTC)),
+    )
+
+    summary = scanner.scan_library(library.id)
+
+    assert summary.unsafe_paths >= 1
+    with database.connect() as connection:
+        rows = connection.execute("SELECT * FROM documents").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["display_name"] == "existing.pdf"
+    assert rows[0]["status"] == "incomplete"
+    assert rows[0]["auto_cloud_eligible"] == 0
+
+
+def test_incremental_scan_status_remains_full_library_aggregate(
+    scanner_env: tuple[LibraryScanner, Database, LibraryRepository, TaskQueue],
+    tmp_path: Path,
+) -> None:
+    scanner, database, repository, _queue = scanner_env
+    root = tmp_path / "library"
+    root.mkdir()
+    paths = [root / f"{index}.pdf" for index in range(3)]
+    for index, path in enumerate(paths):
+        path.write_bytes(_pdf(str(index).encode()))
+    library = _register(repository, root)
+    scanner.scan_library(library.id)
+    paths[0].write_bytes(_pdf(b"changed"))
+
+    scanner.reconcile_path(library.id, paths[0])
+
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT value_json FROM app_settings WHERE key = ?",
+            (f"library_scan_status:{library.id}",),
+        ).fetchone()
+    status = json.loads(row["value_json"])
+    assert status["pdf_paths"] == 3
+    assert status["unique_contents"] == 3
+    assert status["duplicate_groups"] == 0
+
+
+def test_deleted_hardlink_refreshes_active_peer_and_never_resurrects_missing_history(
+    scanner_env: tuple[LibraryScanner, Database, LibraryRepository, TaskQueue],
+    tmp_path: Path,
+) -> None:
+    scanner, database, repository, _queue = scanner_env
+    root = tmp_path / "library"
+    root.mkdir()
+    a = root / "a.pdf"
+    b = root / "b.pdf"
+    c = root / "c.pdf"
+    a.write_bytes(_pdf(b"hardlink"))
+    os.link(a, b)
+    library = _register(repository, root)
+    scanner.scan_library(library.id)
+
+    b.unlink()
+    scanner.reconcile_path(library.id, b)
+    with database.connect() as connection:
+        rows = {
+            row["display_name"]: row
+            for row in connection.execute("SELECT * FROM documents").fetchall()
+        }
+    assert rows["b.pdf"]["status"] == "missing"
+    assert rows["a.pdf"]["hard_link_count"] == 1
+    assert rows["a.pdf"]["status"] == "candidate_pdf"
+    assert rows["a.pdf"]["auto_cloud_eligible"] == 0
+
+    os.link(a, c)
+    scanner.reconcile_path(library.id, c)
+    with database.connect() as connection:
+        rows = {
+            row["display_name"]: row
+            for row in connection.execute("SELECT * FROM documents").fetchall()
+        }
+    assert rows["b.pdf"]["status"] == "missing"
+    assert rows["b.pdf"]["hard_link_count"] == 2
+    assert rows["a.pdf"]["hard_link_count"] == 2
+    assert rows["c.pdf"]["hard_link_count"] == 2
+    assert rows["a.pdf"]["status"] == "candidate_pdf"
+    assert rows["c.pdf"]["status"] == "candidate_pdf"
+
+
+def test_scandir_runs_only_while_directory_chain_is_held(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    root.mkdir()
+    root_identity = SafeWindowsFileInspector().inspect_root_directory(root)
+    held = False
+    scandir_calls = 0
+
+    class HoldingInspector:
+        def inspect_root_directory(self, _candidate: Path) -> RootIdentity:
+            return root_identity
+
+        @contextmanager
+        def hold_directory_for_enumeration(self, _candidate: Path, _root):
+            nonlocal held
+            held = True
+            try:
+                yield
+            finally:
+                held = False
+
+        def inspect_under_root(self, _candidate: Path, _root):
+            raise AssertionError("empty library")
+
+        def inspect_regular_file(self, _candidate: Path, _root):
+            raise AssertionError("empty library")
+
+        def open_registered_pdf(self, _document):
+            raise AssertionError("empty library")
+
+    class EmptyEntries:
+        def __enter__(self):
+            nonlocal scandir_calls
+            scandir_calls += 1
+            assert held, "scandir must not run after verification handles close"
+            return iter(())
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    database = Database.open(tmp_path / "db.sqlite3")
+    run_migrations(database)
+    repository = LibraryRepository(database)
+    library = repository.register(
+        root_identity, recursive=True, authorization_source="native_picker_confirmed"
+    )
+    scanner = LibraryScanner(
+        database,
+        repository,
+        HoldingInspector(),
+        TaskQueue(database, lambda: datetime.now(UTC)),
+    )
+    original_scandir = scanner_module.os.scandir
+    scanner_module.os.scandir = lambda _path: EmptyEntries()
+    try:
+        scanner.scan_library(library.id)
+    finally:
+        scanner_module.os.scandir = original_scandir
+
+    assert scandir_calls == 1
+
+
+def test_real_held_directory_chain_blocks_swap_before_scandir(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    nested = root / "nested"
+    outside = tmp_path / "outside"
+    nested.mkdir(parents=True)
+    outside.mkdir()
+    (nested / "inside.pdf").write_bytes(_pdf(b"inside"))
+    (outside / "outside.pdf").write_bytes(_pdf(b"outside"))
+    database = Database.open(tmp_path / "db.sqlite3")
+    run_migrations(database)
+    inspector = SafeWindowsFileInspector()
+    repository = LibraryRepository(database)
+    library = repository.register(
+        inspector.inspect_root_directory(root),
+        recursive=True,
+        authorization_source="native_picker_confirmed",
+    )
+    scanner = LibraryScanner(
+        database,
+        repository,
+        inspector,
+        TaskQueue(database, lambda: datetime.now(UTC)),
+    )
+    original_scandir = scanner_module.os.scandir
+    race_attempted = False
+    swap_succeeded = False
+    parked = root / "parked"
+
+    def racing_scandir(path: Path):
+        nonlocal race_attempted, swap_succeeded
+        if Path(path) == nested and not race_attempted:
+            race_attempted = True
+            try:
+                nested.rename(parked)
+            except OSError:
+                pass
+            else:  # pragma: no cover - would expose a Windows sharing-mode regression
+                swap_succeeded = True
+                parked.rename(nested)
+        return original_scandir(path)
+
+    scanner_module.os.scandir = racing_scandir
+    try:
+        scanner.scan_library(library.id)
+    finally:
+        scanner_module.os.scandir = original_scandir
+
+    assert race_attempted
+    assert not swap_succeeded
+    with database.connect() as connection:
+        names = {
+            row["display_name"] for row in connection.execute("SELECT * FROM documents")
+        }
+    assert names == {"inside.pdf"}
+
+
 def test_incremental_reconcile_hashes_only_changed_paths(tmp_path: Path) -> None:
     class CountingInspector:
         def __init__(self) -> None:
@@ -198,6 +468,9 @@ def test_incremental_reconcile_hashes_only_changed_paths(tmp_path: Path) -> None
 
         def inspect_regular_file(self, candidate: Path, root):
             return self.delegate.inspect_regular_file(candidate, root)
+
+        def hold_directory_for_enumeration(self, candidate: Path, root):
+            return self.delegate.hold_directory_for_enumeration(candidate, root)
 
         def open_registered_pdf(self, document):
             self.opened.append(document.path)
@@ -309,6 +582,10 @@ def test_persisted_pdf_metadata_comes_from_stably_hashed_verified_handle(
         def inspect_regular_file(self, _candidate: Path, _root):
             return actual
 
+        @contextmanager
+        def hold_directory_for_enumeration(self, _candidate: Path, _root):
+            yield root_identity
+
         def open_registered_pdf(self, _document):
             return VerifiedHandle(actual, BytesIO(payload))
 
@@ -361,6 +638,10 @@ def test_hash_change_between_verified_reads_is_incomplete_and_persists_nothing(
 
         def inspect_regular_file(self, _candidate: Path, _root):
             return identity
+
+        @contextmanager
+        def hold_directory_for_enumeration(self, _candidate: Path, _root):
+            yield root_identity
 
         def open_registered_pdf(self, _document):
             return VerifiedHandle(identity, BytesIO(next(payloads)))
@@ -416,6 +697,10 @@ def test_verified_metadata_change_during_hash_is_incomplete(tmp_path: Path) -> N
         def inspect_regular_file(self, _candidate: Path, _root):
             return during
 
+        @contextmanager
+        def hold_directory_for_enumeration(self, _candidate: Path, _root):
+            yield root_identity
+
         def open_registered_pdf(self, _document):
             return VerifiedHandle(next(identities), BytesIO(payload))
 
@@ -458,6 +743,10 @@ def test_non_pdf_revalidation_rejects_root_or_intermediate_swap(
 
         def inspect_regular_file(self, _candidate: Path, _root):
             raise UnsafePath(swap)
+
+        @contextmanager
+        def hold_directory_for_enumeration(self, _candidate: Path, _root):
+            yield root_identity
 
         def open_registered_pdf(self, _document):
             raise AssertionError("PDF open not expected")
@@ -598,6 +887,10 @@ def test_root_replacement_after_enumeration_is_incomplete_and_preserves_known_ro
         def inspect_regular_file(self, _candidate: Path, _root):
             raise AssertionError("empty enumeration must inspect no files")
 
+        @contextmanager
+        def hold_directory_for_enumeration(self, _candidate: Path, _root):
+            yield root_identity
+
         def open_registered_pdf(self, _document):
             raise AssertionError("empty enumeration must open no files")
 
@@ -638,8 +931,11 @@ def test_intermediate_replacement_after_empty_enumeration_preserves_known_rows(
         def inspect_root_directory(self, candidate: Path) -> RootIdentity:
             return delegate.inspect_root_directory(candidate)
 
-        def inspect_directory_under_root(self, _candidate: Path, _root):
-            raise UnsafePath("intermediate_replaced_after_enumeration")
+        @contextmanager
+        def hold_directory_for_enumeration(self, candidate: Path, _root):
+            if candidate == nested:
+                raise UnsafePath("intermediate_replaced_after_enumeration")
+            yield delegate.inspect_root_directory(root)
 
         def inspect_under_root(self, _candidate: Path, _root):
             raise AssertionError("empty enumeration must inspect no files")

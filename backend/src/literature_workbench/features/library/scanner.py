@@ -76,11 +76,16 @@ class LibraryScanner:
         enumerated, unsafe_paths, incomplete, incomplete_paths = self._enumerate(
             library, library.canonical_path, recursive=library.recursive
         )
+        final_root_failed = False
         try:
             self._require_current_root(library)
         except (OSError, UnsafePath):
             unsafe_paths += 1
             incomplete = True
+            final_root_failed = True
+        if final_root_failed:
+            enumerated = []
+            incomplete_paths = [library.canonical_path]
         return self._scan_candidates(
             library,
             enumerated,
@@ -117,6 +122,7 @@ class LibraryScanner:
             try:
                 metadata = os.lstat(candidate)
             except FileNotFoundError:
+                candidates.extend(self._active_peer_paths_for_missing(library, candidate))
                 continue
             except OSError:
                 unsafe_paths += 1
@@ -291,6 +297,35 @@ class LibraryScanner:
         ):
             raise UnsafePath("root_identity_changed")
 
+    def _active_peer_paths_for_missing(
+        self, library: LibraryRoot, missing_path: Path
+    ) -> list[Path]:
+        path_key = os.path.normcase(os.path.abspath(missing_path))
+        with self._database.connect() as connection:
+            missing = connection.execute(
+                """
+                SELECT volume_id, file_id FROM documents
+                WHERE library_id = ? AND path_key = ?
+                """,
+                (str(library.id), path_key),
+            ).fetchone()
+            if missing is None:
+                return []
+            peers = connection.execute(
+                """
+                SELECT path FROM documents
+                WHERE library_id = ? AND volume_id = ? AND file_id = ?
+                  AND path_key <> ? AND status <> 'missing'
+                """,
+                (
+                    str(library.id),
+                    str(missing["volume_id"]),
+                    str(missing["file_id"]),
+                    path_key,
+                ),
+            ).fetchall()
+        return [Path(str(row["path"])) for row in peers]
+
     def _enumerate(
         self,
         library: LibraryRoot,
@@ -306,56 +341,36 @@ class LibraryScanner:
         while pending:
             directory = pending.pop()
             try:
-                self._verify_enumerated_directory(directory, library)
-            except (OSError, UnsafePath):
-                unsafe_paths += 1
-                incomplete = True
-                incomplete_paths.append(directory)
-                continue
-            try:
-                with os.scandir(directory) as entries:
-                    for entry in entries:
-                        try:
-                            metadata = entry.stat(follow_symlinks=False)
-                        except OSError:
-                            unsafe_paths += 1
-                            incomplete = True
-                            entry_path = getattr(entry, "path", None)
-                            if entry_path is not None:
-                                incomplete_paths.append(Path(entry_path))
-                            continue
-                        attributes = int(getattr(metadata, "st_file_attributes", 0))
-                        if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
-                            unsafe_paths += 1
-                            incomplete = True
-                            incomplete_paths.append(Path(entry.path))
-                            continue
-                        path = Path(entry.path)
-                        if stat.S_ISDIR(metadata.st_mode):
-                            if recursive:
-                                pending.append(path)
-                        elif stat.S_ISREG(metadata.st_mode):
-                            files.append(path)
-            except OSError:
-                unsafe_paths += 1
-                incomplete = True
-                incomplete_paths.append(directory)
-            try:
-                self._verify_enumerated_directory(directory, library)
+                with self._inspector.hold_directory_for_enumeration(directory, library):
+                    with os.scandir(directory) as entries:
+                        for entry in entries:
+                            try:
+                                metadata = entry.stat(follow_symlinks=False)
+                            except OSError:
+                                unsafe_paths += 1
+                                incomplete = True
+                                entry_path = getattr(entry, "path", None)
+                                if entry_path is not None:
+                                    incomplete_paths.append(Path(entry_path))
+                                continue
+                            attributes = int(getattr(metadata, "st_file_attributes", 0))
+                            if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                                unsafe_paths += 1
+                                incomplete = True
+                                incomplete_paths.append(Path(entry.path))
+                                continue
+                            path = Path(entry.path)
+                            if stat.S_ISDIR(metadata.st_mode):
+                                if recursive:
+                                    pending.append(path)
+                            elif stat.S_ISREG(metadata.st_mode):
+                                files.append(path)
             except (OSError, UnsafePath):
                 unsafe_paths += 1
                 incomplete = True
                 incomplete_paths.append(directory)
         files.sort(key=lambda path: path.as_posix().casefold())
         return files, unsafe_paths, incomplete, incomplete_paths
-
-    def _verify_enumerated_directory(self, directory: Path, library: LibraryRoot) -> None:
-        if os.path.normcase(os.path.abspath(directory)) == os.path.normcase(
-            os.path.abspath(library.canonical_path)
-        ):
-            self._require_current_root(library)
-            return
-        self._inspector.inspect_directory_under_root(directory, library)
 
     def _reconcile(
         self,
@@ -469,7 +484,11 @@ class LibraryScanner:
                             int(row["hard_link_count"]) != item.hard_link_count,
                         )
                     )
-                    preserve_observation = not version_changed
+                    preserve_observation = not version_changed and str(row["status"]) in {
+                        "candidate_pdf",
+                        "valid_pdf",
+                        "unsupported_v01",
+                    }
                     target_status = (
                         str(row["status"]) if preserve_observation else item.status
                     )
@@ -532,6 +551,7 @@ class LibraryScanner:
                         if (
                             str(peer["id"]) == document_id
                             or str(peer["path_key"]) in discovered_keys
+                            or str(peer["status"]) == "missing"
                         ):
                             continue
                         peer_changed = any(
@@ -613,16 +633,40 @@ class LibraryScanner:
                 "SELECT revision FROM app_settings WHERE key = ?", (status_key,)
             ).fetchone()
             status_revision = 1 if status_row is None else int(status_row["revision"]) + 1
+            inventory = connection.execute(
+                """
+                SELECT
+                  SUM(CASE WHEN format = 'pdf' THEN 1 ELSE 0 END) AS pdf_paths,
+                  COUNT(DISTINCT CASE WHEN format = 'pdf' THEN content_sha256 END)
+                    AS unique_contents,
+                  SUM(CASE WHEN format <> 'pdf' THEN 1 ELSE 0 END) AS unsupported_paths
+                FROM documents
+                WHERE library_id = ? AND status NOT IN ('missing', 'incomplete')
+                """,
+                (str(library.id),),
+            ).fetchone()
+            duplicate_row = connection.execute(
+                """
+                SELECT COUNT(*) AS duplicate_groups FROM (
+                  SELECT content_sha256 FROM documents
+                  WHERE library_id = ? AND format = 'pdf'
+                    AND status NOT IN ('missing', 'incomplete')
+                    AND content_sha256 IS NOT NULL
+                  GROUP BY content_sha256 HAVING COUNT(*) > 1
+                )
+                """,
+                (str(library.id),),
+            ).fetchone()
             warnings: list[str] = []
             if unsafe_paths:
                 warnings.append("unsafe_paths_skipped")
             if incomplete:
                 warnings.append("incomplete_scan")
             status_value = {
-                "pdf_paths": pdf_paths,
-                "unique_contents": unique_contents,
-                "duplicate_groups": duplicate_groups,
-                "unsupported_paths": unsupported_paths,
+                "pdf_paths": int(inventory["pdf_paths"] or 0),
+                "unique_contents": int(inventory["unique_contents"] or 0),
+                "duplicate_groups": int(duplicate_row["duplicate_groups"] or 0),
+                "unsupported_paths": int(inventory["unsupported_paths"] or 0),
                 "unsafe_paths": unsafe_paths,
                 "warnings": warnings,
             }
