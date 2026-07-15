@@ -25,6 +25,7 @@ from literature_workbench.platform.windows.credentials import SecretStore
 DEEPSEEK_CHAT_COMPLETIONS_URL = "https://api.deepseek.com/chat/completions"
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+TOTAL_REQUEST_TIMEOUT_SECONDS = 30.0
 _FIXED_PROBE_PROMPT = "Reply with exactly: model configuration ok"
 
 
@@ -56,7 +57,7 @@ class DeepSeekGateway:
         )
         body = self._serialize(proof.model, prompt)
         attempt = self._audit.start(
-            task_id=proof.task_id,
+            task_id=str(proof.task_id),
             authorization_type="registered_library",
             document_id=str(proof.document_id),
             content_sha256=proof.content_sha256,
@@ -146,6 +147,7 @@ class DeepSeekGateway:
         expected_response: str | None = None,
     ) -> str:
         started = time.monotonic()
+        deadline = started + TOTAL_REQUEST_TIMEOUT_SECONDS
         try:
             secret = self._secret_store.get_deepseek_key()
         except (OSError, RuntimeError):
@@ -169,10 +171,12 @@ class DeepSeekGateway:
                     },
                     content=body,
                 ) as response:
+                    self._check_total_deadline(attempt, deadline, started)
                     if response.status_code < 200 or response.status_code >= 300:
                         self._fail(attempt, "deepseek_http_error", started)
                     raw = bytearray()
                     for chunk in response.iter_bytes():
+                        self._check_total_deadline(attempt, deadline, started)
                         if len(raw) + len(chunk) > MAX_RESPONSE_BYTES:
                             self._fail(attempt, "deepseek_response_too_large", started)
                         raw.extend(chunk)
@@ -184,6 +188,7 @@ class DeepSeekGateway:
             result = self._adapter.parse_response(bytes(raw))
         except InvalidDeepSeekResponse:
             self._fail(attempt, "invalid_deepseek_response", started)
+        self._check_total_deadline(attempt, deadline, started)
         if expected_response is not None and result.strip() != expected_response:
             self._fail(attempt, "configuration_probe_failed", started)
         latency = max(0, int((time.monotonic() - started) * 1000))
@@ -194,6 +199,15 @@ class DeepSeekGateway:
             latency_ms=latency,
         )
         return expected_response if expected_response is not None else result
+
+    def _check_total_deadline(
+        self,
+        attempt: AuditAttempt,
+        deadline: float,
+        started: float,
+    ) -> None:
+        if time.monotonic() >= deadline:
+            self._fail(attempt, "deepseek_total_timeout", started)
 
     def _fail(self, attempt: AuditAttempt, code: str, started: float) -> NoReturn:
         latency = max(0, int((time.monotonic() - started) * 1000))

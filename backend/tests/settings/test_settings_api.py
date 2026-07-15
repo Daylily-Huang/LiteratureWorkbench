@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 from fastapi.testclient import TestClient
 
+from literature_workbench.api.settings import probe_deepseek
 from literature_workbench.features.settings.repository import SettingsRepository
 
 
@@ -157,6 +160,10 @@ def test_deepseek_probe_accepts_no_caller_prompt_or_url_and_returns_sanitized_re
     assert response.status_code == 200
     assert response.json() == {"result": "model configuration ok"}
     assert calls == ["deepseek-v4-flash"]
+
+
+def test_deepseek_probe_route_is_sync_for_threadpool_execution() -> None:
+    assert inspect.iscoroutinefunction(probe_deepseek) is False
 
 
 def test_deepseek_probe_runtime_failure_does_not_echo_sensitive_detail(
