@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import literature_workbench.features.parser.workspace as parser_workspace
 from conftest import ParserLibraryFixture
 from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.parser.mineru import ProcessOutcome
@@ -18,6 +19,7 @@ from literature_workbench.features.parser.normalizer import ParseRunRepository
 from literature_workbench.features.parser.worker import ParseJobFailure, ParseWorkerService
 from literature_workbench.features.parser.workspace import (
     TrustedParserFile,
+    TrustedParserDirectory,
     TrustedParserWorkspace,
     UnsafeParserWorkspace,
 )
@@ -173,6 +175,7 @@ def test_forced_mineru_uses_only_staging_and_creates_trailing_blank_page(
     assert repository.read_current_page(registered.content_id, 1).normalized_text == "OCR 第一页"  # type: ignore[union-attr]
     assert repository.read_current_page(registered.content_id, 2).normalized_text == ""  # type: ignore[union-attr]
     assert len(observed_inputs) == 1
+    assert list((parser_library.data_root / "mineru-work").iterdir()) == []
     with parser_library.database.connect() as connection:
         job = connection.execute("SELECT checkpoint_json FROM jobs").fetchone()
     assert job is not None
@@ -264,6 +267,62 @@ def test_copying_failure_removes_only_held_partial_result_and_journal(
     assert not (result_parent / str(run_id)).exists()
     assert not (result_parent / f"{run_id}.promotion.json").exists()
     sealed.close()
+    workspace.close()
+
+
+def test_copying_failure_preserves_journal_when_destination_root_delete_fails(
+    parser_library: ParserLibraryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered = parser_library.register("copy-root-failure.pdf", _pdf_bytes(text=False))
+    run_id = uuid4()
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    work = workspace.create_mineru_work(run_id)
+    (work.path / "result.json").write_text("{}", encoding="utf-8")
+    sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
+
+    def fail_copy(self: TrustedParserFile, destination: TrustedParserFile, **_: object) -> None:
+        destination.write(b"partial")
+        raise OSError("copy failed")
+
+    original_delete = TrustedParserDirectory.delete
+
+    def fail_root_delete(self: TrustedParserDirectory) -> None:
+        if self.path.name == str(run_id):
+            raise OSError("injected root delete failure")
+        original_delete(self)
+
+    monkeypatch.setattr(TrustedParserFile, "copy_to", fail_copy)
+    monkeypatch.setattr(TrustedParserDirectory, "delete", fail_root_delete)
+    with pytest.raises(OSError, match="copy failed"):
+        workspace.promote_sealed_mineru_result(sealed)
+
+    parent = parser_library.data_root / "parse-results" / registered.content_id
+    assert (parent / str(run_id)).exists()
+    assert (parent / f"{run_id}.promotion.json").exists()
+    sealed.close()
+    workspace.close()
+
+
+def test_journal_first_frame_and_delete_flush_parent_after_handle_close(
+    parser_library: ParserLibraryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    content_id = parser_library.register("flush-journal.pdf", _pdf_bytes()).content_id
+    attempt_id = uuid4()
+    journal = workspace.create_journal(content_id, attempt_id)
+    calls: list[Path] = []
+    monkeypatch.setattr(parser_workspace, "_flush_directory", calls.append)
+
+    journal.append_journal_record(
+        workspace.journal_payload(content_id, attempt_id, str(content_id), "prepared")
+    )
+    journal.delete()
+    assert calls == [journal.path.parent]
+    journal.close()
+
+    assert calls == [journal.path.parent, journal.path.parent]
     workspace.close()
 
 
@@ -733,6 +792,169 @@ def test_retry_recovers_promoted_manifest_after_database_failure(
         ).read_text(encoding="utf-8")
     )
     assert pointer["manifest_digest"] == cancellation.state["mineru_manifest_digest"]
+
+
+@pytest.mark.parametrize("work_state", ["runner_finished", "sealed"])
+def test_empty_checkpoint_recovers_finished_work_without_rerunning_mineru(
+    parser_library: ParserLibraryFixture,
+    work_state: str,
+) -> None:
+    registered = parser_library.register("work-recovery.pdf", _pdf_bytes(text=False))
+    queue = _queue(parser_library)
+    queue.enqueue(
+        "parse_pdf",
+        f"work-recovery:{registered.content_id}",
+        {"content_id": str(registered.content_id), "strategy": "mineru"},
+    )
+    job = queue.lease_next("work-recovery", 30)
+    assert job is not None
+    revision = int(job.payload["request_revision"])
+    run_id = ParseRunRepository(parser_library.database).create_run(
+        registered.content_id,
+        "mineru",
+        "mineru-powershell-v1",
+        source_job_id=job.id,
+        request_revision=revision,
+    )
+    stem = str(uuid4())
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    work = workspace.create_mineru_work(run_id)
+    journal = workspace.create_mineru_work_journal(
+        work, registered.content_id, run_id, job.id, revision, stem
+    )
+    output = work.path / stem / "auto"
+    output.mkdir(parents=True)
+    (output / f"{stem}_content_list.json").write_text("[]", encoding="utf-8")
+    root = work.metadata()
+    journal.append_journal_record(
+        workspace.mineru_work_journal_payload(
+            registered.content_id,
+            run_id,
+            job.id,
+            revision,
+            stem,
+            root.volume_id,
+            root.file_id,
+            work_state,
+        )
+    )
+    journal.close()
+    if work_state == "sealed":
+        sealed = workspace.seal_mineru_work(
+            registered.content_id,
+            run_id,
+            work,
+            input_stem=stem,
+            source_job_id=job.id,
+            request_revision=revision,
+        )
+        sealed.close()
+    else:
+        work.close()
+    workspace.close()
+
+    class Cancellation:
+        is_cancelled = False
+
+        def raise_if_cancelled(self) -> None:
+            return None
+
+        def require_current_lease(self, connection: object) -> None:
+            assert connection.in_transaction  # type: ignore[attr-defined]
+
+        def checkpoint(self, _stage: str, _payload: object) -> None:
+            return None
+
+    class MustNotRun:
+        def run(self, *_args: object) -> ProcessOutcome:
+            raise AssertionError("MinerU must not rerun")
+
+    recovery = replace(job, checkpoint={}, stage="pending")
+    service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+        mineru_factory=lambda _record: MustNotRun(),  # type: ignore[arg-type]
+    )
+    service.process(recovery, Cancellation())  # type: ignore[arg-type]
+
+    assert ParseRunRepository(parser_library.database).current_run_id(
+        registered.content_id
+    ) == run_id
+    assert list((parser_library.data_root / "mineru-work").iterdir()) == []
+
+
+def test_empty_checkpoint_cleans_created_work_then_starts_once(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    registered = parser_library.register("created-recovery.pdf", _pdf_bytes(text=False))
+    queue = _queue(parser_library)
+    queue.enqueue(
+        "parse_pdf",
+        f"created-recovery:{registered.content_id}",
+        {"content_id": str(registered.content_id), "strategy": "mineru"},
+    )
+    job = queue.lease_next("created-recovery", 30)
+    assert job is not None
+    revision = int(job.payload["request_revision"])
+    old_run = ParseRunRepository(parser_library.database).create_run(
+        registered.content_id,
+        "mineru",
+        "mineru-powershell-v1",
+        source_job_id=job.id,
+        request_revision=revision,
+    )
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    work = workspace.create_mineru_work(old_run)
+    stem = str(uuid4())
+    journal = workspace.create_mineru_work_journal(
+        work, registered.content_id, old_run, job.id, revision, stem
+    )
+    journal.close()
+    work.close()
+    workspace.close()
+    calls = 0
+
+    class FakeMinerU:
+        def run(self, staged: object, output: Path, language: str) -> ProcessOutcome:
+            nonlocal calls
+            del language
+            calls += 1
+            staged_path = staged.path  # type: ignore[attr-defined]
+            result = output / staged_path.stem / "auto"
+            result.mkdir(parents=True)
+            (result / f"{staged_path.stem}_content_list.json").write_text(
+                "[]", encoding="utf-8"
+            )
+            return ProcessOutcome(0, b"", b"")
+
+    class Cancellation:
+        is_cancelled = False
+
+        def raise_if_cancelled(self) -> None:
+            return None
+
+        def require_current_lease(self, connection: object) -> None:
+            assert connection.in_transaction  # type: ignore[attr-defined]
+
+        def checkpoint(self, _stage: str, _payload: object) -> None:
+            return None
+
+    service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+        mineru_factory=lambda _record: FakeMinerU(),  # type: ignore[arg-type]
+    )
+    service.process(replace(job, checkpoint={}, stage="pending"), Cancellation())  # type: ignore[arg-type]
+
+    assert calls == 1
+    with parser_library.database.connect() as connection:
+        old = connection.execute(
+            "SELECT status FROM parse_runs WHERE id=?", (str(old_run),)
+        ).fetchone()
+    assert old is not None and old["status"] == "failed"
+    assert list((parser_library.data_root / "mineru-work").iterdir()) == []
 
 
 def test_stale_completed_job_cannot_publish_over_newer_current_result(

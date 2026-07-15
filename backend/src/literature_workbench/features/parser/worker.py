@@ -28,7 +28,7 @@ from literature_workbench.features.parser.mineru import (
     choose_ocr_language,
     validate_mineru_output,
 )
-from literature_workbench.features.parser.models import StagedPdf
+from literature_workbench.features.parser.models import ParsedPage, StagedPdf
 from literature_workbench.features.parser.normalizer import (
     ParseRunRepository,
     extract_pymupdf_pages,
@@ -243,6 +243,7 @@ class ParseWorkerService:
                 work_capability = self._ensure_workspace().create_mineru_work(run_id)
                 work_directory = work_capability.path
                 work_journal = self._ensure_workspace().create_mineru_work_journal(
+                    work_capability,
                     content_id,
                     run_id,
                     job.id,
@@ -283,6 +284,8 @@ class ParseWorkerService:
                         job.id,
                         request_revision,
                         staged.path.stem,
+                        work_capability.metadata().volume_id,
+                        work_capability.metadata().file_id,
                         "runner_finished",
                     )
                 )
@@ -301,6 +304,8 @@ class ParseWorkerService:
                         job.id,
                         request_revision,
                         staged.path.stem,
+                        work_capability.metadata().volume_id,
+                        work_capability.metadata().file_id,
                         "sealed",
                     )
                 )
@@ -314,7 +319,6 @@ class ParseWorkerService:
                     )
                 )
                 promoted_result = result_capability.path
-                work_directory = None
                 relative_output = Path(
                     os.path.relpath(promoted_result, self._data_root)
                 ).as_posix()
@@ -496,10 +500,79 @@ class ParseWorkerService:
         ):
             raise ParseJobFailure("stale_parse_publication", retryable=False)
         result: TrustedMinerUResult | None = None
+        pages: list[ParsedPage] | None = None
         try:
-            result = self._ensure_workspace().open_sealed_mineru_result(
-                content_id, run_id
-            )
+            try:
+                result = self._ensure_workspace().open_sealed_mineru_result(
+                    content_id, run_id
+                )
+            except FileNotFoundError:
+                work, work_journal, work_state, work_stem = (
+                    self._ensure_workspace().open_recoverable_mineru_work(
+                        content_id,
+                        run_id,
+                        job.id,
+                        request_revision,
+                        None,
+                    )
+                )
+                work_journal.close()
+                if work_state == "created":
+                    work.close()
+                    cleaned = self._ensure_workspace().cleanup_mineru_work(
+                        run_id,
+                        content_id,
+                        job.id,
+                        request_revision,
+                        work_stem,
+                    )
+                    if not cleaned:
+                        raise ParseJobFailure(
+                            "mineru_work_recovery_unsafe", retryable=False
+                        )
+                    self._fail_run_if_running(run_id, "mineru_interrupted_before_run")
+                    return False
+                if work_state == "runner_finished":
+                    try:
+                        result = self._ensure_workspace().seal_mineru_work(
+                            content_id,
+                            run_id,
+                            work,
+                            input_stem=work_stem,
+                            source_job_id=job.id,
+                            request_revision=request_revision,
+                        )
+                    except FileExistsError:
+                        result = self._ensure_workspace().open_sealed_mineru_work(
+                            content_id, run_id, work
+                        )
+                else:
+                    result = self._ensure_workspace().open_sealed_mineru_work(
+                        content_id, run_id, work
+                    )
+                pages = validate_mineru_output(
+                    staged,
+                    run_id,
+                    result.path,
+                    str(run["parser_version"]),
+                    output_stem=work_stem,
+                )
+                try:
+                    result = self._ensure_workspace().promote_sealed_mineru_result(result)
+                except FileExistsError:
+                    if not self._ensure_workspace().cleanup_interrupted_promotion(result):
+                        raise ParseJobFailure(
+                            "mineru_copying_recovery_unsafe", retryable=False
+                        )
+                    result = self._ensure_workspace().promote_sealed_mineru_result(result)
+                if not self._ensure_workspace().cleanup_mineru_work(
+                    run_id,
+                    content_id,
+                    job.id,
+                    request_revision,
+                    work_stem,
+                ):
+                    raise ParseJobFailure("mineru_work_recovery_unsafe", retryable=False)
             if isinstance(raw_digest, str) and result.manifest_digest != raw_digest:
                 raise ParseJobFailure(
                     "mineru_recovery_manifest_mismatch", retryable=False
@@ -520,13 +593,14 @@ class ParseWorkerService:
                 }
             )
             result.verify()
-            pages = validate_mineru_output(
-                staged,
-                run_id,
-                result.path,
-                str(run["parser_version"]),
-                output_stem=result.input_stem,
-            )
+            if pages is None:
+                pages = validate_mineru_output(
+                    staged,
+                    run_id,
+                    result.path,
+                    str(run["parser_version"]),
+                    output_stem=result.input_stem,
+                )
             expected_output = f"parse-results/{content_id}/{run_id}"
             existing_output = run["output_dir"]
             if existing_output is None:
