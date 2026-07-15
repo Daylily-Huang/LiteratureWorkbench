@@ -16,3 +16,7 @@ class AppSettings(BaseModel):
     @property
     def database_path(self) -> Path:
         return self.data_root / "db" / "literature-workbench.sqlite3"
+
+    @property
+    def qwen_runtime_dir(self) -> Path:
+        return self.data_root / "runtime" / "qwen"
