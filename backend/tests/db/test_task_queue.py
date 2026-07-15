@@ -16,6 +16,69 @@ from literature_workbench.features.library.import_service import ImportPromotion
 from conftest import FakeClock
 
 
+def test_translation_leases_before_older_background_parse(
+    queue: TaskQueue, fake_clock: FakeClock
+) -> None:
+    background = queue.enqueue("parse_pdf", "parse:background", {})
+    fake_clock.advance(seconds=1)
+    translation = queue.enqueue(
+        "translate_selection", "translate:interactive", {"task_id": "task-a"}
+    )
+
+    leased = queue.lease_next("worker-a", lease_seconds=30)
+
+    assert leased is not None and leased.id == translation
+    queued = queue.lease_next("worker-b", lease_seconds=30)
+    assert queued is not None and queued.id == background
+
+
+def test_manual_parse_leases_before_older_automatic_parse(
+    queue: TaskQueue, fake_clock: FakeClock
+) -> None:
+    automatic = queue.enqueue("parse_pdf", "parse:auto", {})
+    fake_clock.advance(seconds=1)
+    manual = queue.enqueue(
+        "parse_pdf",
+        "parse:manual",
+        {"document_id": "document-a"},
+    )
+
+    leased = queue.lease_next("worker-a", lease_seconds=30)
+
+    assert leased is not None and leased.id == manual
+    queued = queue.lease_next("worker-b", lease_seconds=30)
+    assert queued is not None and queued.id == automatic
+
+
+def test_priority_scheduler_preserves_fifo_within_priority(
+    queue: TaskQueue, fake_clock: FakeClock
+) -> None:
+    first = queue.enqueue("translate_selection", "translate:first", {})
+    fake_clock.advance(seconds=1)
+    second = queue.enqueue("translate_selection", "translate:second", {})
+
+    first_lease = queue.lease_next("worker-a", lease_seconds=30)
+    second_lease = queue.lease_next("worker-b", lease_seconds=30)
+
+    assert first_lease is not None and first_lease.id == first
+    assert second_lease is not None and second_lease.id == second
+
+
+def test_priority_scheduler_does_not_preempt_running_job(
+    queue: TaskQueue, fake_clock: FakeClock
+) -> None:
+    background = queue.enqueue("parse_pdf", "parse:running", {})
+    running = queue.lease_next("worker-a", lease_seconds=30)
+    assert running is not None and running.id == background
+    fake_clock.advance(seconds=1)
+    translation = queue.enqueue("translate_selection", "translate:later", {})
+
+    next_lease = queue.lease_next("worker-b", lease_seconds=30)
+
+    assert next_lease is not None and next_lease.id == translation
+    assert queue.count(kind="parse_pdf", status="running") == 1
+
+
 def test_identical_active_dedup_key_returns_one_job_id(queue: TaskQueue) -> None:
     first = queue.enqueue("parse", "parse:sha256-a", {"content_sha256": "sha256-a"})
     second = queue.enqueue("parse", "parse:sha256-a", {"content_sha256": "sha256-a"})

@@ -132,7 +132,16 @@ class TaskQueue:
                 """
                 SELECT id FROM jobs
                 WHERE status = 'queued'
-                ORDER BY created_at, id
+                ORDER BY
+                  CASE
+                    WHEN kind = 'translate_selection' THEN 0
+                    WHEN kind = 'parse_pdf'
+                         AND json_type(payload_json, '$.document_id') = 'text' THEN 1
+                    WHEN kind IN ('validate_import', 'scan_library') THEN 1
+                    WHEN kind = 'parse_pdf' THEN 3
+                    ELSE 2
+                  END,
+                  created_at, id
                 LIMIT 1
                 """
             ).fetchone()
