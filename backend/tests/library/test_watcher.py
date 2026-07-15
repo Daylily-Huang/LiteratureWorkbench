@@ -39,6 +39,12 @@ class FakeScanner:
         self.reconciled.append((library_id, path))
         return ScanSummary(0, 0, 0, 0, ())
 
+    def reconcile_paths(
+        self, library_id: UUID, paths: tuple[Path, ...]
+    ) -> ScanSummary:
+        self.reconciled.extend((library_id, path) for path in paths)
+        return ScanSummary(0, 0, 0, 0, ())
+
     def scan_library(self, library_id: UUID) -> ScanSummary:
         self.full_scans.append(library_id)
         return ScanSummary(0, 0, 0, 0, ())

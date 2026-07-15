@@ -6,6 +6,7 @@ import os
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
 from typing import BinaryIO, NoReturn, Protocol
 from uuid import UUID
 
@@ -151,6 +152,12 @@ class FileIdentity:
 class VerifiedHandle:
     identity: FileIdentity
     stream: BinaryIO
+    identity_reader: Callable[[], FileIdentity] | None = None
+
+    def current_identity(self) -> FileIdentity:
+        if self.identity_reader is None:
+            return self.identity
+        return self.identity_reader()
 
     def close(self) -> None:
         self.stream.close()
@@ -187,7 +194,13 @@ class FileMetadataProvider(Protocol):
 class SafeFileInspector(Protocol):
     def inspect_root_directory(self, candidate: Path) -> RootIdentity: ...
 
+    def inspect_directory_under_root(
+        self, candidate: Path, root: LibraryRoot
+    ) -> RootIdentity: ...
+
     def inspect_under_root(self, candidate: Path, root: LibraryRoot) -> FileIdentity: ...
+
+    def inspect_regular_file(self, candidate: Path, root: LibraryRoot) -> FileIdentity: ...
 
     def open_registered_pdf(self, document: DocumentRecord) -> VerifiedHandle: ...
 
@@ -379,12 +392,59 @@ class SafeWindowsFileInspector:
             handle.close()
 
     def inspect_under_root(self, candidate: Path, root: LibraryRoot) -> FileIdentity:
-        identity, handle = self._inspect_candidate(candidate, root)
+        identity, handle = self._inspect_candidate(candidate, root, require_pdf=True)
+        handle.close()
+        return identity
+
+    def inspect_directory_under_root(
+        self, candidate: Path, root: LibraryRoot
+    ) -> RootIdentity:
+        candidate = Path(os.path.abspath(candidate))
+        root_path = Path(os.path.abspath(root.canonical_path))
+        self._require_lexically_contained(candidate, root_path)
+        root_handle = self._provider.open_directory(root_path)
+        try:
+            root_final = self._require_registered_root(root_handle.metadata, root)
+            relative = Path(os.path.relpath(candidate, root_path))
+            current = root_path
+            final_metadata = root_handle.metadata
+            for component in (() if str(relative) == "." else relative.parts):
+                current /= component
+                component_handle = self._provider.open_directory(current)
+                try:
+                    final_metadata = component_handle.metadata
+                    if not final_metadata.is_directory:
+                        raise UnsafePath("intermediate_not_directory")
+                    if final_metadata.is_reparse_point:
+                        raise UnsafePath("reparse_point")
+                    if not self._is_contained(final_metadata.final_path, root_final):
+                        raise UnsafePath("outside_registered_root")
+                finally:
+                    component_handle.close()
+            second_root = self._provider.open_directory(root_path)
+            try:
+                second_final = self._require_registered_root(second_root.metadata, root)
+                if not self._same_path(second_final, root_final):
+                    raise UnsafePath("root_identity_changed")
+            finally:
+                second_root.close()
+            return RootIdentity(
+                canonical_path=final_metadata.final_path,
+                volume_id=final_metadata.volume_id,
+                file_id=final_metadata.file_id,
+            )
+        finally:
+            root_handle.close()
+
+    def inspect_regular_file(self, candidate: Path, root: LibraryRoot) -> FileIdentity:
+        identity, handle = self._inspect_candidate(candidate, root, require_pdf=False)
         handle.close()
         return identity
 
     def open_registered_pdf(self, document: DocumentRecord) -> VerifiedHandle:
-        identity, handle = self._inspect_candidate(document.path, document.library_root)
+        identity, handle = self._inspect_candidate(
+            document.path, document.library_root, require_pdf=True
+        )
         if (identity.volume_id, identity.file_id) != (document.volume_id, document.file_id):
             handle.close()
             raise UnsafePath("file_identity_changed")
@@ -393,16 +453,27 @@ class SafeWindowsFileInspector:
         except BaseException:
             handle.close()
             raise
-        return VerifiedHandle(identity=identity, stream=stream)
+        def current_identity() -> FileIdentity:
+            raw_handle = msvcrt.get_osfhandle(stream.fileno())
+            metadata = _metadata_for_handle(raw_handle)
+            return self._identity_from_metadata(metadata, document.library_root)
+
+        return VerifiedHandle(
+            identity=identity,
+            stream=stream,
+            identity_reader=current_identity,
+        )
 
     def _inspect_candidate(
         self,
         candidate: Path,
         root: LibraryRoot,
+        *,
+        require_pdf: bool,
     ) -> tuple[FileIdentity, OwnedFileHandle]:
         candidate = Path(os.path.abspath(candidate))
         root_path = Path(os.path.abspath(root.canonical_path))
-        if candidate.suffix.casefold() != ".pdf":
+        if require_pdf and candidate.suffix.casefold() != ".pdf":
             raise UnsafePath("not_pdf")
         self._require_lexically_contained(candidate, root_path)
 
@@ -432,7 +503,7 @@ class SafeWindowsFileInspector:
                 raise UnsafePath("reparse_point")
             if not self._is_contained(metadata.final_path, root_final):
                 raise UnsafePath("outside_registered_root")
-            if file_handle.read_prefix(5) != b"%PDF-":
+            if require_pdf and file_handle.read_prefix(5) != b"%PDF-":
                 raise UnsafePath("invalid_pdf_header")
 
             second_root = self._provider.open_directory(root_path)
@@ -443,16 +514,7 @@ class SafeWindowsFileInspector:
             finally:
                 second_root.close()
 
-            identity = FileIdentity(
-                canonical_path=metadata.final_path,
-                root_id=root.id,
-                volume_id=metadata.volume_id,
-                file_id=metadata.file_id,
-                size=metadata.size,
-                modified_ns=metadata.modified_ns,
-                hard_link_count=metadata.hard_link_count,
-                is_reparse_point=metadata.is_reparse_point,
-            )
+            identity = self._identity_from_metadata(metadata, root)
             owned_handle = file_handle
             file_handle = None
             return identity, owned_handle
@@ -460,6 +522,19 @@ class SafeWindowsFileInspector:
             if file_handle is not None:
                 file_handle.close()
             root_handle.close()
+
+    @staticmethod
+    def _identity_from_metadata(metadata: HandleMetadata, root: LibraryRoot) -> FileIdentity:
+        return FileIdentity(
+            canonical_path=metadata.final_path,
+            root_id=root.id,
+            volume_id=metadata.volume_id,
+            file_id=metadata.file_id,
+            size=metadata.size,
+            modified_ns=metadata.modified_ns,
+            hard_link_count=metadata.hard_link_count,
+            is_reparse_point=metadata.is_reparse_point,
+        )
 
     @staticmethod
     def _require_registered_root(metadata: HandleMetadata, root: LibraryRoot) -> Path:

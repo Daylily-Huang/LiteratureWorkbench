@@ -21,6 +21,10 @@ class ActiveLibraryRepository(Protocol):
 class Reconciler(Protocol):
     def reconcile_path(self, library_id: UUID, path: Path) -> ScanSummary: ...
 
+    def reconcile_paths(
+        self, library_id: UUID, paths: tuple[Path, ...]
+    ) -> ScanSummary: ...
+
     def scan_library(self, library_id: UUID) -> ScanSummary: ...
 
 
@@ -90,8 +94,10 @@ class WatcherManager:
             if not self._contained(candidate, root):
                 continue
             candidates[os.path.normcase(str(candidate))] = candidate
-        for candidate in candidates.values():
-            await asyncio.to_thread(self._scanner.reconcile_path, library_id, candidate)
+        if candidates:
+            await asyncio.to_thread(
+                self._scanner.reconcile_paths, library_id, tuple(candidates.values())
+            )
 
     async def shutdown(self) -> None:
         self._shutdown.set()
