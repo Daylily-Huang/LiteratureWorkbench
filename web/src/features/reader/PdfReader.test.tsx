@@ -58,6 +58,18 @@ function page(number: number) {
 }
 
 
+function sizedPage(number: number, unscaledWidth: number) {
+  const value = page(number);
+  return {
+    ...value,
+    getViewport: ({ scale }: { scale: number }) => ({
+      width: unscaledWidth * scale,
+      height: 800 * scale,
+    }),
+  };
+}
+
+
 function readerProps() {
   return {
     documentId: "document-a",
@@ -74,11 +86,17 @@ function setSelection(
   text: string,
   rects: Array<Pick<DOMRect, "left" | "top" | "right" | "bottom" | "width" | "height">>,
   collapsed = false,
+  startOffset = 0,
+  endOffset = endContainer instanceof Text
+    ? endContainer.data.length
+    : endContainer.childNodes.length,
 ) {
   const range = {
     collapsed,
     startContainer,
     endContainer,
+    startOffset,
+    endOffset,
     getClientRects: () => rects,
   } as unknown as Range;
   vi.spyOn(window, "getSelection").mockReturnValue({
@@ -204,6 +222,29 @@ describe("PdfReader", () => {
     });
   });
 
+  it("fits width using the current physical page in a mixed-width document", async () => {
+    pdf.getDocument.mockReturnValue({
+      promise: Promise.resolve({
+        numPages: 2,
+        getPage: vi.fn(async (number: number) => sizedPage(number, number === 1 ? 450 : 900)),
+      }),
+      destroy: pdf.loadingDestroy,
+    });
+    render(<PdfReader {...readerProps()} />);
+    const toolbar = await screen.findByRole("toolbar", { name: "PDF 工具栏" });
+    const pages = document.querySelector(".pdf-reader__pages");
+    if (!(pages instanceof HTMLElement)) throw new Error("reader pages missing");
+    Object.defineProperty(pages, "clientWidth", { configurable: true, value: 932 });
+    fireEvent.click(within(toolbar).getByRole("button", { name: "下一页" }));
+    await waitFor(() => expect(within(toolbar).getByText("2 / 2")).toBeVisible());
+
+    fireEvent.click(within(toolbar).getByRole("button", { name: "适合宽度" }));
+
+    await waitFor(() => {
+      expect(within(toolbar).getByRole("status", { name: "缩放比例" })).toHaveTextContent("100%");
+    });
+  });
+
   it("captures normalized multi-line text and bounded same-page context", async () => {
     const selected: SelectedText[] = [];
     render(<PdfReader {...readerProps()} onSelectionChange={(value) => selected.push(value)} />);
@@ -308,6 +349,43 @@ describe("PdfReader", () => {
     const value = onSelection.mock.calls[0]?.[0] as SelectedText;
     expect(Array.from(value.contextBefore)).toHaveLength(500);
     expect(value.contextBefore.endsWith("near")).toBe(true);
+  });
+
+  it("derives context from the selected Range when the phrase repeats", async () => {
+    const onSelection = vi.fn();
+    render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
+    const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+    const textLayer = pageElement.querySelector(".textLayer") as HTMLElement;
+    textLayer.replaceChildren();
+    const before = document.createTextNode("alpha repeat middle ");
+    const selected = document.createTextNode("repeat");
+    const after = document.createTextNode(" tail repeat");
+    textLayer.append(before, selected, after);
+    setSelection(selected, selected, "repeat", [
+      { left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 },
+    ]);
+
+    fireEvent.pointerUp(pageElement);
+
+    const value = onSelection.mock.calls[0]?.[0] as SelectedText;
+    expect(value.contextBefore).toBe("alpha repeat middle");
+    expect(value.contextAfter).toBe("tail repeat");
+  });
+
+  it("shows a local hint for a non-collapsed canvas-only selection", async () => {
+    const onSelection = vi.fn();
+    render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
+    const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+    const canvas = pageElement.querySelector("canvas");
+    if (canvas === null) throw new Error("mock canvas missing");
+    setSelection(canvas, canvas, "canvas selection", [
+      { left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 },
+    ]);
+
+    fireEvent.pointerUp(pageElement);
+
+    expect(onSelection).not.toHaveBeenCalled();
+    expect(screen.getByText("请选择同一页文字")).toBeVisible();
   });
 
   it("recalculates overlay coordinates on zoom and clears selection on page change", async () => {

@@ -11,12 +11,12 @@ from literature_workbench.db.database import Database
 from literature_workbench.features.library.models import DocumentRecord, LibraryRoot
 from literature_workbench.platform.windows.filesystem import (
     SafeFileInspector,
-    UnsafePath,
     VerifiedHandle,
 )
 
 
 STREAM_CHUNK_BYTES = 1024 * 1024
+MAX_RANGE_DECIMAL_DIGITS = 20
 
 
 class DocumentNotFound(LookupError):
@@ -70,21 +70,35 @@ def parse_single_range(value: str | None, size: int) -> ByteRange | None:
         raise RangeNotSatisfiable("invalid_byte_range")
     raw_start, raw_end = spec.split("-", 1)
     if raw_start == "":
-        if not raw_end.isdecimal():
-            raise RangeNotSatisfiable("invalid_byte_range")
-        suffix_length = int(raw_end)
+        suffix_length = _parse_range_decimal(raw_end)
         if suffix_length <= 0 or size == 0:
             raise RangeNotSatisfiable("invalid_byte_range")
         return ByteRange(max(0, size - suffix_length), size - 1)
-    if not raw_start.isdecimal() or (raw_end != "" and not raw_end.isdecimal()):
-        raise RangeNotSatisfiable("invalid_byte_range")
-    start = int(raw_start)
+    start = _parse_range_decimal(raw_start)
     if start >= size:
         raise RangeNotSatisfiable("invalid_byte_range")
-    end = size - 1 if raw_end == "" else min(int(raw_end), size - 1)
+    end = (
+        size - 1
+        if raw_end == ""
+        else min(_parse_range_decimal(raw_end), size - 1)
+    )
     if end < start:
         raise RangeNotSatisfiable("invalid_byte_range")
     return ByteRange(start, end)
+
+
+def _parse_range_decimal(value: str) -> int:
+    if (
+        value == ""
+        or len(value) > MAX_RANGE_DECIMAL_DIGITS
+        or not value.isascii()
+        or not value.isdecimal()
+    ):
+        raise RangeNotSatisfiable("invalid_byte_range")
+    try:
+        return int(value)
+    except ValueError as error:
+        raise RangeNotSatisfiable("invalid_byte_range") from error
 
 
 def load_registered_pdf(database: Database, document_id: UUID) -> RegisteredPdf:
@@ -118,9 +132,12 @@ def open_verified_pdf(
     try:
         handle = inspector.open_registered_pdf(registered.document)
         current = handle.current_identity()
-    except (OSError, UnsafePath) as error:
+    except Exception as error:
         if handle is not None:
-            handle.close()
+            try:
+                handle.close()
+            except Exception:
+                pass
         raise DocumentIdentityChanged("document_identity_changed") from error
     expected = registered.document
     if (

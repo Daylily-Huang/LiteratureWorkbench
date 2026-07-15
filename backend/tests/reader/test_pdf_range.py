@@ -7,8 +7,18 @@ from uuid import uuid4
 import pytest
 
 from conftest import RegisteredPdfFixture
-from literature_workbench.features.reader.pdf_stream import ByteRange, stream_pdf
-from literature_workbench.platform.windows.filesystem import FileIdentity, VerifiedHandle
+from literature_workbench.features.library.models import DocumentRecord
+from literature_workbench.features.reader.pdf_stream import (
+    ByteRange,
+    RangeNotSatisfiable,
+    parse_single_range,
+    stream_pdf,
+)
+from literature_workbench.platform.windows.filesystem import (
+    FileIdentity,
+    SafeFileInspector,
+    VerifiedHandle,
+)
 
 
 def _url(value: RegisteredPdfFixture) -> str:
@@ -125,6 +135,19 @@ def test_open_ended_suffix_and_clamped_ranges(
 def test_matching_if_none_match_returns_empty_304(
     registered_pdf: RegisteredPdfFixture,
 ) -> None:
+    class TrackingInspector:
+        def __init__(self, delegate: SafeFileInspector) -> None:
+            self.delegate = delegate
+            self.handle: VerifiedHandle | None = None
+
+        def open_registered_pdf(self, document: DocumentRecord) -> VerifiedHandle:
+            self.handle = self.delegate.open_registered_pdf(document)
+            return self.handle
+
+    original = registered_pdf.client.app.state.file_inspector
+    tracking = TrackingInspector(original)
+    registered_pdf.client.app.state.file_inspector = tracking
+
     response = registered_pdf.client.get(
         _url(registered_pdf),
         headers={
@@ -137,6 +160,9 @@ def test_matching_if_none_match_returns_empty_304(
     assert response.content == b""
     assert response.headers["etag"] == f'"sha256:{registered_pdf.content_id}"'
     assert response.headers["cache-control"] == "private, no-store"
+    assert tracking.handle is not None
+    assert tracking.handle.stream.closed
+    registered_pdf.client.app.state.file_inspector = original
 
 
 @pytest.mark.parametrize(
@@ -164,6 +190,27 @@ def test_unsatisfiable_multiple_and_malformed_ranges_return_416(
     assert response.content == b""
     assert response.headers["content-range"] == "bytes */1024"
     assert response.headers["accept-ranges"] == "bytes"
+
+
+def test_pathological_decimal_range_returns_416_instead_of_raising(
+    registered_pdf: RegisteredPdfFixture,
+) -> None:
+    response = registered_pdf.client.get(
+        _url(registered_pdf),
+        headers={
+            **registered_pdf.auth_headers,
+            "Range": f"bytes={'9' * 5000}-",
+        },
+    )
+
+    assert response.status_code == 416
+    assert response.content == b""
+
+
+@pytest.mark.parametrize("digits", ["١", "１２", "²"])
+def test_non_ascii_decimal_characters_are_malformed(digits: str) -> None:
+    with pytest.raises(RangeNotSatisfiable):
+        parse_single_range(f"bytes={digits}-", 1024)
 
 
 def test_missing_document_returns_404(registered_pdf: RegisteredPdfFixture) -> None:

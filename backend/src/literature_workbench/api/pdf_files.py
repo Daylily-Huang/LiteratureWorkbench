@@ -51,17 +51,19 @@ def get_pdf_file(request: Request, document_id: UUID) -> Response:
     except DocumentNotReadable:
         return Response(status_code=409)
     headers = _base_headers(registered.etag)
-    if _etag_matches(request.headers.get("If-None-Match"), registered.etag):
-        return Response(status_code=304, headers=headers)
-    try:
-        selected = parse_single_range(request.headers.get("Range"), registered.size)
-    except RangeNotSatisfiable:
-        headers["Content-Range"] = f"bytes */{registered.size}"
-        return Response(status_code=416, headers=headers)
     try:
         handle = open_verified_pdf(request.app.state.file_inspector, registered)
     except DocumentIdentityChanged:
         return Response(status_code=409)
+    if _etag_matches(request.headers.get("If-None-Match"), registered.etag):
+        handle.close()
+        return Response(status_code=304, headers=headers)
+    try:
+        selected = parse_single_range(request.headers.get("Range"), registered.size)
+    except RangeNotSatisfiable:
+        handle.close()
+        headers["Content-Range"] = f"bytes */{registered.size}"
+        return Response(status_code=416, headers=headers)
     byte_range = selected or ByteRange(0, registered.size - 1)
     headers["Content-Length"] = str(byte_range.length)
     status_code = 206 if selected is not None else 200

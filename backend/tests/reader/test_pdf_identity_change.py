@@ -65,6 +65,26 @@ def test_missing_registered_file_returns_empty_409(
     assert response.content == b""
 
 
+def test_matching_etag_cannot_bypass_registered_identity_verification(
+    registered_pdf: RegisteredPdfFixture,
+) -> None:
+    replacement = registered_pdf.pdf_path.with_name("etag-replacement.pdf")
+    replacement.write_bytes(registered_pdf.pdf_bytes)
+    registered_pdf.pdf_path.unlink()
+    replacement.rename(registered_pdf.pdf_path)
+
+    response = registered_pdf.client.get(
+        f"/api/documents/{registered_pdf.document_id}/file",
+        headers={
+            **registered_pdf.auth_headers,
+            "If-None-Match": f'"sha256:{registered_pdf.content_id}"',
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.content == b""
+
+
 def test_api_never_accepts_a_local_path_query(registered_pdf: RegisteredPdfFixture) -> None:
     unrelated = Path(__file__)
 
@@ -105,3 +125,36 @@ def test_failed_handle_identity_reread_closes_the_held_stream(
 
     assert inspector.handle is not None
     assert inspector.handle.stream.closed
+
+
+def test_unexpected_identity_reread_error_fails_closed_at_api_boundary(
+    registered_pdf: RegisteredPdfFixture,
+) -> None:
+    class UnexpectedRereadInspector:
+        handle: VerifiedHandle | None = None
+
+        def open_registered_pdf(self, document: object) -> VerifiedHandle:
+            handle = SafeWindowsFileInspector().open_registered_pdf(document)  # type: ignore[arg-type]
+
+            def fail_reread() -> object:
+                raise RuntimeError("private internal identity error")
+
+            handle.identity_reader = fail_reread  # type: ignore[assignment]
+            self.handle = handle
+            return handle
+
+    original = registered_pdf.client.app.state.file_inspector
+    inspector = UnexpectedRereadInspector()
+    registered_pdf.client.app.state.file_inspector = inspector
+
+    response = registered_pdf.client.get(
+        f"/api/documents/{registered_pdf.document_id}/file",
+        headers=registered_pdf.auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert response.content == b""
+    assert b"private internal identity error" not in response.content
+    assert inspector.handle is not None
+    assert inspector.handle.stream.closed
+    registered_pdf.client.app.state.file_inspector = original

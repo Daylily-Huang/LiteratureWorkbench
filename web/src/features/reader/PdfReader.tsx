@@ -172,9 +172,24 @@ export function PdfReader({
     [pageIndex, pdf?.numPages],
   );
 
-  function fitWidth() {
-    const width = rootRef.current?.clientWidth ?? 0;
-    if (width > 32) setScale(Math.max(0.25, Math.min(4, (width - 32) / 600)));
+  async function fitWidth() {
+    const root = rootRef.current;
+    if (root === null || pdf === null) return;
+    try {
+      const page = await pdf.getPage(pageIndex + 1);
+      const unscaledWidth = page.getViewport({ scale: 1 }).width;
+      const style = window.getComputedStyle(root);
+      const horizontalPadding = (
+        Number.parseFloat(style.paddingLeft)
+        + Number.parseFloat(style.paddingRight)
+      );
+      const availableWidth = root.clientWidth - horizontalPadding;
+      if (availableWidth > 0 && unscaledWidth > 0) {
+        setScale(Math.max(0.25, Math.min(4, availableWidth / unscaledWidth)));
+      }
+    } catch {
+      // A page render already reports reader errors; fit-width stays a no-op on lookup failure.
+    }
   }
 
   function captureSelection() {
@@ -198,7 +213,7 @@ export function PdfReader({
     <section aria-label={`阅读 ${filename}`} className="pdf-reader">
       <PdfToolbar
         currentPage={pageIndex + 1}
-        onFitWidth={fitWidth}
+        onFitWidth={() => void fitWidth()}
         onPageChange={(page) => setPageIndex(page - 1)}
         onScaleChange={setScale}
         scale={scale}

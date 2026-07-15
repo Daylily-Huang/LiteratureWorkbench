@@ -40,17 +40,23 @@ function containingElement(node: Node): Element | null {
 }
 
 
-function boundedContext(
-  fullText: string,
-  selectedText: string,
+function contextAroundRange(
+  textLayer: HTMLElement,
+  range: Range,
 ): { before: string; after: string } {
-  const index = fullText.indexOf(selectedText);
-  if (index < 0) return { before: "", after: "" };
-  const before = Array.from(fullText.slice(0, index).trim())
+  const beforeRange = textLayer.ownerDocument.createRange();
+  beforeRange.selectNodeContents(textLayer);
+  beforeRange.setEnd(range.startContainer, range.startOffset);
+  const afterRange = textLayer.ownerDocument.createRange();
+  afterRange.selectNodeContents(textLayer);
+  afterRange.setStart(range.endContainer, range.endOffset);
+  const before = Array.from(normalizeWhitespace(beforeRange.toString()))
     .slice(-MAX_CONTEXT_CODE_POINTS)
     .join("");
-  const afterStart = index + selectedText.length;
-  const after = capCodePoints(fullText.slice(afterStart).trim(), MAX_CONTEXT_CODE_POINTS);
+  const after = capCodePoints(
+    normalizeWhitespace(afterRange.toString()),
+    MAX_CONTEXT_CODE_POINTS,
+  );
   return {
     before,
     after,
@@ -108,7 +114,7 @@ export function captureSamePageSelection(
   }
   const fullSelection = normalized;
   const text = capCodePoints(fullSelection, MAX_SELECTED_CODE_POINTS);
-  const context = boundedContext(normalizeWhitespace(startLayer.textContent ?? ""), fullSelection);
+  const context = contextAroundRange(startLayer, range);
   const last = rects[rects.length - 1];
   if (last === undefined) return { selected: null, hint: "请选择同一页文字" };
   return {
