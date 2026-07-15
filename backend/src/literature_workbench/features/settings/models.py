@@ -11,8 +11,8 @@ TranslationMode = Literal["online", "local_only"]
 class PublicSettings(BaseModel):
     deepseek_key_configured: bool
     deepseek_base_url: Literal["https://api.deepseek.com"] = "https://api.deepseek.com"
-    primary_fast_model: str = "deepseek-v4-flash"
-    primary_strong_model: str = "deepseek-v4-pro"
+    deepseek_model: str = "deepseek-v4-flash"
+    qwen_fallback_enabled: bool = False
     default_translation_mode: TranslationMode = "online"
 
 
@@ -20,14 +20,23 @@ class SettingsPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     default_translation_mode: TranslationMode | None = None
+    deepseek_model: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    )
+    qwen_fallback_enabled: bool | None = None
 
     @model_validator(mode="after")
     def reject_explicit_null(self) -> Self:
-        if (
-            "default_translation_mode" in self.model_fields_set
-            and self.default_translation_mode is None
+        for field_name in (
+            "default_translation_mode",
+            "deepseek_model",
+            "qwen_fallback_enabled",
         ):
-            raise ValueError("default_translation_mode may be omitted but not null")
+            if field_name in self.model_fields_set and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} may be omitted but not null")
         return self
 
 

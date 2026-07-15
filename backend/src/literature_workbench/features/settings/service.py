@@ -1,29 +1,50 @@
 from __future__ import annotations
 
+from typing import Protocol
+
 from literature_workbench.features.settings.models import PublicSettings, SettingsPatch
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.platform.windows.credentials import SecretStore
 
 
+class ConfigurationProbeGateway(Protocol):
+    def configuration_probe(self, model: str) -> str: ...
+
+
 class SettingsService:
-    def __init__(self, repository: SettingsRepository, secret_store: SecretStore) -> None:
+    def __init__(
+        self,
+        repository: SettingsRepository,
+        secret_store: SecretStore,
+        probe_gateway: ConfigurationProbeGateway | None = None,
+    ) -> None:
         self._repository = repository
         self._secret_store = secret_store
+        self._probe_gateway = probe_gateway
 
     def read_public(self) -> PublicSettings:
         record = self._repository.read()
         return PublicSettings(
             deepseek_key_configured=self._secret_store.deepseek_key_configured(),
             default_translation_mode=record.default_translation_mode,
+            deepseek_model=record.deepseek_model,
+            qwen_fallback_enabled=record.qwen_fallback_enabled,
         )
 
     def patch_public(self, patch: SettingsPatch) -> PublicSettings:
-        if "default_translation_mode" in patch.model_fields_set:
-            mode = patch.default_translation_mode
-            if mode is None:
-                raise AssertionError("SettingsPatch rejects explicit null")
-            self._repository.update_translation_mode(mode)
+        if patch.model_fields_set:
+            self._repository.update(
+                default_translation_mode=patch.default_translation_mode,
+                deepseek_model=patch.deepseek_model,
+                qwen_fallback_enabled=patch.qwen_fallback_enabled,
+            )
         return self.read_public()
+
+    def probe_deepseek(self) -> str:
+        gateway = self._probe_gateway
+        if gateway is None:
+            raise RuntimeError("deepseek_probe_unavailable")
+        return gateway.configuration_probe(self._repository.read().deepseek_model)
 
     def put_deepseek_key(self, api_key: str) -> None:
         self._secret_store.put_deepseek_key(api_key)

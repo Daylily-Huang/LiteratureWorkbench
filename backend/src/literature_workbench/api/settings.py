@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import cast
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
+from literature_workbench.features.egress.gateway import EgressRejected
 from literature_workbench.features.settings.models import (
     DeepSeekKeyUpdate,
     PublicSettings,
@@ -39,3 +41,16 @@ def put_deepseek_key(request: Request, update: DeepSeekKeyUpdate) -> Response:
 def delete_deepseek_key(request: Request) -> Response:
     _service(request).delete_deepseek_key()
     return Response(status_code=204)
+
+
+@router.post("/deepseek-probe")
+async def probe_deepseek(request: Request) -> JSONResponse:
+    if await request.body():
+        raise HTTPException(status_code=422, detail="deepseek_probe_accepts_no_body")
+    try:
+        result = _service(request).probe_deepseek()
+    except EgressRejected as error:
+        return JSONResponse({"code": str(error)}, status_code=502)
+    except RuntimeError:
+        return JSONResponse({"code": "deepseek_probe_failed"}, status_code=502)
+    return JSONResponse({"result": result})

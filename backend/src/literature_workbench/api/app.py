@@ -20,6 +20,7 @@ from literature_workbench.db.migrations import run_migrations
 from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.features.settings.service import SettingsService
+from literature_workbench.features.egress.gateway import DeepSeekGateway
 from literature_workbench.features.parser.normalizer import ParseRunRepository
 from literature_workbench.features.library.coordinator import LibraryScanCoordinator
 from literature_workbench.features.library.repository import LibraryRepository
@@ -101,8 +102,16 @@ def create_app(
             app.state.import_service.reconcile_stale_receiving()
             app.state.import_service.sweep_failed_residue()
             app.state.import_service.sweep_failed_promotions()
+            deepseek_gateway = DeepSeekGateway(
+                database,
+                resolved_secret_store,
+                process_generation=resolved_session.session_generation,
+            )
+            app.state.deepseek_gateway = deepseek_gateway
             app.state.settings_service = SettingsService(
-                SettingsRepository(database), resolved_secret_store
+                SettingsRepository(database),
+                resolved_secret_store,
+                deepseek_gateway,
             )
             library_repository = LibraryRepository(database, task_queue)
             app.state.library_repository = library_repository
