@@ -37,6 +37,7 @@ export function SettingsDialog({ onClose, fetcher = fetch }: SettingsDialogProps
         if (active) {
           setSettings(value);
           setModel(value.deepseek_model);
+          setError(false);
         }
       })
       .catch(() => { if (active) setError(true); });
@@ -56,6 +57,7 @@ export function SettingsDialog({ onClose, fetcher = fetch }: SettingsDialogProps
       if (!response.ok) throw new Error("key_update_failed");
       setKey("");
       setSettings((current) => current && { ...current, deepseek_key_configured: true });
+      setError(false);
     } catch {
       setError(true);
     }
@@ -74,6 +76,7 @@ export function SettingsDialog({ onClose, fetcher = fetch }: SettingsDialogProps
       const value = await response.json() as PublicSettings;
       setSettings(value);
       setModel(value.deepseek_model);
+      setError(false);
     } catch {
       setError(true);
     }

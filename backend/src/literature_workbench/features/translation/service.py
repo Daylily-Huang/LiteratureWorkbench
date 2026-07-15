@@ -92,11 +92,13 @@ class TranslationService:
             queue=self._queue,
         )
 
-    def get(self, task_id: UUID) -> TranslationTask:
-        return self._repository.get(task_id)
+    def get(
+        self, task_id: UUID, *, session_generation: str
+    ) -> TranslationTask:
+        return self._repository.get(task_id, session_generation=session_generation)
 
     def process_task(self, task_id: UUID) -> TranslationTask:
-        task = self._repository.get(task_id)
+        task = self._repository.get_for_worker(task_id)
         if task.status in {"completed", "failed"}:
             return task
         if task.status == "running":

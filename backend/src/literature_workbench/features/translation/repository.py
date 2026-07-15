@@ -105,6 +105,11 @@ class TranslationRepository:
                 JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
                 JOIN document_versions AS v
                   ON v.id=? AND v.document_id=d.id AND v.content_sha256=d.content_sha256
+                 AND v.id=(
+                   SELECT latest.id FROM document_versions AS latest
+                   WHERE latest.document_id=d.id
+                   ORDER BY latest.observed_at DESC,latest.rowid DESC LIMIT 1
+                 )
                 JOIN contents AS c
                   ON c.sha256=d.content_sha256 AND c.mime_type='application/pdf'
                 JOIN parse_runs AS r
@@ -168,7 +173,7 @@ class TranslationRepository:
                 (session_generation, str(client_task_id)),
             ).fetchone()
             if existing is not None:
-                return self.get(UUID(str(existing["id"])))
+                return self.get_for_worker(UUID(str(existing["id"])))
             connection.execute(
                 """
                 INSERT INTO translation_tasks(
@@ -202,18 +207,34 @@ class TranslationRepository:
                     "prompt_version": PROMPT_VERSION,
                 },
             )
-        return self.get(task_id)
+        return self.get_for_worker(task_id)
 
-    def get(self, task_id: UUID) -> TranslationTask:
+    def get(
+        self, task_id: UUID, *, session_generation: str
+    ) -> TranslationTask:
+        return self._get(task_id, session_generation=session_generation)
+
+    def get_for_worker(self, task_id: UUID) -> TranslationTask:
+        return self._get(task_id, session_generation=None)
+
+    def _get(
+        self, task_id: UUID, *, session_generation: str | None
+    ) -> TranslationTask:
+        session_clause = "" if session_generation is None else " AND t.session_generation=?"
+        parameters = (
+            (str(task_id),)
+            if session_generation is None
+            else (str(task_id), session_generation)
+        )
         with self._database.connect() as connection:
             row = connection.execute(
-                """
+                f"""
                 SELECT t.*,c.translated_text,c.detected_source_language
                 FROM translation_tasks AS t
                 LEFT JOIN translation_cache AS c ON c.cache_key=t.result_cache_key
-                WHERE t.id=?
-                """,
-                (str(task_id),),
+                WHERE t.id=?{session_clause}
+                """,  # noqa: S608 - clause is selected only from fixed server literals
+                parameters,
             ).fetchone()
         if row is None:
             raise TranslationNotFound("translation_not_found")
@@ -226,7 +247,7 @@ class TranslationRepository:
                    updated_at=? WHERE id=? AND status='queued'""",
                 (self._timestamp(), str(task_id)),
             )
-        return self.get(task_id)
+        return self.get_for_worker(task_id)
 
     def cache_key(self, task: TranslationTask, provider: str, model: str) -> str:
         stable = json.dumps(
@@ -272,7 +293,7 @@ class TranslationRepository:
         model: str,
         fallback_reason: str | None,
     ) -> TranslationTask:
-        task = self.get(task_id)
+        task = self.get_for_worker(task_id)
         timestamp = self._timestamp()
         with self._database.transaction() as connection:
             connection.execute(
@@ -288,7 +309,7 @@ class TranslationRepository:
                    updated_at=? WHERE id=?""",
                 (provider, model, fallback_reason, cache_key, timestamp, str(task_id)),
             )
-        return self.get(task_id)
+        return self.get_for_worker(task_id)
 
     def complete_cached(
         self, task_id: UUID, cached: CachedTranslation, fallback_reason: str | None = None
@@ -301,7 +322,7 @@ class TranslationRepository:
                 (cached.provider, cached.model, fallback_reason, cached.cache_key,
                  self._timestamp(), str(task_id)),
             )
-        return self.get(task_id)
+        return self.get_for_worker(task_id)
 
     def fail(self, task_id: UUID, error_code: str) -> TranslationTask:
         with self._database.transaction() as connection:
@@ -310,7 +331,7 @@ class TranslationRepository:
                    updated_at=? WHERE id=?""",
                 (error_code, self._timestamp(), str(task_id)),
             )
-        return self.get(task_id)
+        return self.get_for_worker(task_id)
 
     def _timestamp(self) -> str:
         value = self._now()

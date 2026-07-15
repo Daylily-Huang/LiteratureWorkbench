@@ -68,7 +68,10 @@ def create_translation(request: Request, payload: TranslationCreate) -> JSONResp
 @router.get("/{task_id}")
 def get_translation(request: Request, task_id: UUID) -> JSONResponse:
     try:
-        task = _service(request).get(task_id)
+        task = _service(request).get(
+            task_id,
+            session_generation=request.app.state.local_session.session_generation,
+        )
     except TranslationNotFound:
         return JSONResponse({"code": "translation_not_found"}, status_code=404)
     return JSONResponse(_body(task))

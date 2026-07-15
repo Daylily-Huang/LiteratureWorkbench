@@ -294,6 +294,56 @@ def test_valid_registered_selection_calls_fixed_transport_once(
     assert len(calls) == 1
 
 
+def test_same_content_older_version_never_calls_transport(
+    database: Database,
+    proof: VerifiedSelectionProof,
+) -> None:
+    calls: list[httpx.Request] = []
+    with database.transaction() as connection:
+        connection.execute(
+            """INSERT INTO document_versions(
+               id,document_id,content_sha256,size_bytes,mtime_ns,volume_id,file_id,
+               hard_link_count,observed_at) VALUES(?,?,?,100,2,'volume','new-file',1,?)""",
+            (
+                "20000000-0000-0000-0000-000000000002",
+                str(DOCUMENT_ID),
+                CONTENT_SHA256,
+                "2026-07-16T01:00:00+00:00",
+            ),
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return _success_response(request)
+
+    with pytest.raises(EgressRejected, match="selection_not_current"):
+        _gateway(database, handler).translate_selection(proof)
+    assert calls == []
+
+
+def test_normalized_selection_spanning_page_whitespace_is_accepted(
+    database: Database,
+    proof: VerifiedSelectionProof,
+) -> None:
+    calls: list[httpx.Request] = []
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET normalized_text=?,raw_text=? WHERE parse_run_id=?",
+            (
+                "before bounded\n verified   source text after",
+                "before bounded\n verified   source text after",
+                str(PARSE_RUN_ID),
+            ),
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return _success_response(request)
+
+    assert _gateway(database, handler).translate_selection(proof) == TRANSLATED_TEXT
+    assert len(calls) == 1
+
+
 def test_client_disables_environment_and_redirects_and_bounds_timeouts(
     database: Database,
     proof: VerifiedSelectionProof,

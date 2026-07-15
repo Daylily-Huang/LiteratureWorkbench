@@ -75,3 +75,17 @@ def test_translation_get_hides_unknown_task(client, authenticated) -> None:
     response = client.get(f"/api/translations/{uuid4()}")
     assert response.status_code == 404
     assert response.json() == {"code": "translation_not_found"}
+
+
+def test_translation_get_hides_task_from_previous_session(client, authenticated) -> None:
+    ids = _register_page(client)
+    created = client.post(
+        "/api/translations", headers=_headers(authenticated), json=_payload(ids)
+    )
+    assert created.status_code == 202
+
+    client.app.state.local_session.session_generation = str(uuid4())
+    response = client.get(f"/api/translations/{created.json()['id']}")
+
+    assert response.status_code == 404
+    assert response.json() == {"code": "translation_not_found"}

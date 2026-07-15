@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from typing import NoReturn
 from uuid import uuid4
@@ -27,6 +28,10 @@ MAX_REQUEST_BYTES = 64 * 1024
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 TOTAL_REQUEST_TIMEOUT_SECONDS = 30.0
 _FIXED_PROBE_PROMPT = "Reply with exactly: model configuration ok"
+
+
+def _normalize_whitespace(value: str) -> str:
+    return re.sub(r"\s+", " ", value, flags=re.UNICODE).strip()
 
 
 class EgressRejected(RuntimeError):
@@ -99,6 +104,11 @@ class DeepSeekGateway:
                 JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
                 JOIN document_versions AS v
                   ON v.id=? AND v.document_id=d.id AND v.content_sha256=d.content_sha256
+                 AND v.id=(
+                   SELECT latest.id FROM document_versions AS latest
+                   WHERE latest.document_id=d.id
+                   ORDER BY latest.observed_at DESC,latest.rowid DESC LIMIT 1
+                 )
                 JOIN contents AS c
                   ON c.sha256=d.content_sha256 AND c.mime_type='application/pdf'
                 JOIN parse_runs AS r
@@ -121,7 +131,9 @@ class DeepSeekGateway:
                     proof.content_sha256,
                 ),
             ).fetchone()
-        if row is None or proof.verified_text not in str(row["normalized_text"]):
+        if row is None or _normalize_whitespace(
+            proof.verified_text
+        ) not in _normalize_whitespace(str(row["normalized_text"])):
             raise EgressRejected("selection_not_current")
         return str(row["display_name"])
 

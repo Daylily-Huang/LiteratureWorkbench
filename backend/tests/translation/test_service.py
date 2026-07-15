@@ -14,6 +14,7 @@ from literature_workbench.features.egress.gateway import EgressRejected
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.features.translation.repository import (
     SelectionRejected,
+    TranslationNotFound,
     TranslationRepository,
 )
 from literature_workbench.features.translation.service import (
@@ -171,8 +172,8 @@ def test_online_completion_is_cached_by_provider_model_and_selection(translation
     subject.process_task(second.id)
 
     assert len(deepseek.calls) == 1
-    assert subject.get(first.id).status == "completed"
-    cached = subject.get(second.id)
+    assert subject.get(first.id, session_generation="session").status == "completed"
+    cached = subject.get(second.id, session_generation="session")
     assert cached.status == "completed"
     assert cached.translated_text == "深度求索译文"
     assert cached.provider == "deepseek"
@@ -206,7 +207,7 @@ def test_credential_or_configuration_failure_is_terminal_without_fallback(
     )
 
     assert handled is True
-    failed = subject.get(task.id)
+    failed = subject.get(task.id, session_generation="session")
     assert failed.status == "failed"
     assert failed.error_code == code
     assert qwen.calls == []
@@ -223,7 +224,7 @@ def test_known_transient_deepseek_failure_falls_back_to_qwen_once(translation_db
     task = subject.submit("session", request(ids))
     subject.process_task(task.id)
 
-    completed = subject.get(task.id)
+    completed = subject.get(task.id, session_generation="session")
     assert completed.status == "completed"
     assert completed.provider == "qwen"
     assert completed.model == "literature-workbench-qwen"
@@ -240,7 +241,7 @@ def test_local_only_routes_directly_to_qwen(translation_db) -> None:
     task = subject.submit("session", request(ids))
     subject.process_task(task.id)
 
-    assert subject.get(task.id).provider == "qwen"
+    assert subject.get(task.id, session_generation="session").provider == "qwen"
     assert deepseek.calls == []
     assert len(qwen.calls) == process.calls == 1
 
@@ -262,3 +263,32 @@ def test_recovered_running_task_never_repeats_an_ambiguous_deepseek_send(
     assert recovered.status == "failed"
     assert recovered.error_code == "translation_send_ambiguous"
     assert deepseek.calls == []
+
+
+def test_session_scoped_lookup_hides_another_sessions_task(translation_db) -> None:
+    _, ids = translation_db
+    subject = service(translation_db)
+    task = subject.submit("old-session", request(ids))
+
+    with pytest.raises(TranslationNotFound, match="translation_not_found"):
+        subject.get(task.id, session_generation="new-session")
+
+
+def test_same_content_older_document_version_is_not_current(translation_db) -> None:
+    database, ids = translation_db
+    old_request = request(ids)
+    with database.transaction() as connection:
+        connection.execute(
+            """INSERT INTO document_versions(
+               id,document_id,content_sha256,size_bytes,mtime_ns,volume_id,file_id,
+               hard_link_count,observed_at) VALUES(?,?,?,12,2,'vol','file-new',1,?)""",
+            (
+                str(uuid4()),
+                ids["document"],
+                ids["content"],
+                "2026-07-16T01:00:00+00:00",
+            ),
+        )
+
+    with pytest.raises(SelectionRejected, match="selection_not_current"):
+        service(translation_db).submit("session", old_request)
