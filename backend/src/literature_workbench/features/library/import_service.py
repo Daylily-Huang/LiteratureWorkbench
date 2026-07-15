@@ -57,6 +57,13 @@ def _check_transaction(
         fence(connection)
 
 
+def _is_file_not_found(error: OSError) -> bool:
+    return isinstance(error, FileNotFoundError) or getattr(error, "winerror", None) in {
+        2,
+        3,
+    }
+
+
 def _moved_identity_matches(row: sqlite3.Row, metadata: HandleMetadata) -> bool:
     return (
         int(row["cleanup_authorized"]) == 1
@@ -575,13 +582,22 @@ class ImportValidator:
             owner = str(promotion["owner_intent_id"]) == str(intent_id)
             promotion_status = str(promotion["status"])
             if promotion_status == "failed" and source is not None:
-                promotion = self._takeover_failed_promotion(
-                    intent_id,
-                    digest,
-                    final_path,
-                    source.metadata(),
-                    cancellation,
-                )
+                try:
+                    promotion = self._takeover_failed_promotion(
+                        intent_id,
+                        digest,
+                        final_path,
+                        source.metadata(),
+                        cancellation,
+                    )
+                except ImportPromotionRejected:
+                    try:
+                        source.delete()
+                    except OSError:
+                        pass
+                    source.close()
+                    source = None
+                    raise
                 owner = True
                 promotion_status = "claimed"
             if not owner and promotion_status != "completed":
@@ -1242,17 +1258,26 @@ class ImportValidator:
             try:
                 failed_final = self._root.open_final(final_path)
                 if not _owned_final_matches(failed_final, promotion):
-                    self._record_promotion_recovery_failure(
-                        UUID(str(promotion["owner_intent_id"])),
-                        "recovery_failed_promotion_identity_mismatch",
+                    self._reject_owned_identity_conflict(
+                        intent_id,
+                        digest,
+                        cancellation,
                     )
-                    raise ImportPromotionPending(
-                        "promotion_failed_identity_mismatch"
+                    raise ImportPromotionRejected(
+                        "promotion_owned_identity_conflict"
                     )
                 _check(cancellation)
-                failed_final.delete()
-            except OSError:
-                pass
+                try:
+                    failed_final.delete()
+                except OSError as error:
+                    raise ImportPromotionPending(
+                        "promotion_cleanup_io_retry"
+                    ) from error
+            except OSError as error:
+                if not _is_file_not_found(error):
+                    raise ImportPromotionPending(
+                        "promotion_cleanup_io_retry"
+                    ) from error
             finally:
                 if failed_final is not None:
                     failed_final.close()
@@ -1286,16 +1311,25 @@ class ImportValidator:
             raise ImportPromotionPending("promotion_takeover_retry")
         return cast(sqlite3.Row, row)
 
-    def _record_promotion_recovery_failure(
-        self, intent_id: UUID, error_code: str
+    def _reject_owned_identity_conflict(
+        self,
+        intent_id: UUID,
+        digest: str,
+        cancellation: Cancellation | None,
     ) -> None:
         with self._database.transaction() as connection:
+            _check_transaction(cancellation, connection)
             changed = connection.execute(
                 """
-                UPDATE import_intents SET error_code=?,updated_at=?
-                WHERE id=? AND status='failed'
+                UPDATE import_intents SET status='failed',error_code=?,updated_at=?
+                WHERE id=? AND status='ready_to_promote' AND content_sha256=?
                 """,
-                (error_code, datetime.now(UTC).isoformat(), str(intent_id)),
+                (
+                    "promotion_owned_identity_conflict",
+                    datetime.now(UTC).isoformat(),
+                    str(intent_id),
+                    digest,
+                ),
             )
             if changed.rowcount != 1:
                 raise ValueError("import_state_conflict")
