@@ -363,7 +363,7 @@ def test_worker_ready_accepts_exact_direct_real_python_child_of_venv_shim(
         identity_lookup=lambda pid: real_worker if pid == real_worker.pid else shim,
         parent_lookup=lambda pid: shim.pid if pid == real_worker.pid else None,
         cmdline_lookup=lambda pid: (
-            shim.executable,
+            real_worker.executable,
             "-m",
             "literature_workbench.launcher",
             "_worker",
@@ -386,7 +386,7 @@ def test_worker_ready_rejects_unproven_venv_child_identity(
     token = "t" * 43
     WorkerReady(generation, token, real_worker).write(ready_path)
     command = (
-        shim.executable,
+        real_worker.executable,
         "-m",
         "literature_workbench.launcher",
         "_worker",

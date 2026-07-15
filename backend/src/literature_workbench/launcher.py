@@ -656,7 +656,7 @@ def wait_for_worker_ready(
                 and _same_executable(ready.worker.executable, expected_child_executable)
                 and command is not None
                 and len(command) == 6
-                and _same_executable(command[0], expected_worker.executable)
+                and _same_executable(command[0], expected_child_executable)
                 and command[1:5]
                 == (
                     "-m",
