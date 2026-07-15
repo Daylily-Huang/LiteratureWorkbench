@@ -1,37 +1,49 @@
 from __future__ import annotations
 
 import asyncio
-import ctypes
-import hashlib
 import os
-import stat
-import subprocess
-import sys
+import sqlite3
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol, cast
 from uuid import UUID, uuid4
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 from literature_workbench.db.database import Database
 from literature_workbench.db.task_queue import TaskQueue
+from literature_workbench.features.library.import_files import (
+    TrustedImportFile,
+    TrustedImportRoot,
+)
 from literature_workbench.features.library.import_intents import (
     ImportIntentRepository,
     ImportTask,
 )
 from literature_workbench.features.library.models import LibraryRoot
-from literature_workbench.platform.windows.filesystem import (
-    SafeFileInspector,
-    SafeWindowsFileInspector,
-)
+from literature_workbench.platform.windows.filesystem import SafeFileInspector
 
 
 MAX_BYTES = 2 * 1024**3
 WRITE_SIZE = 4 * 1024**2
-MOVEFILE_WRITE_THROUGH = 0x00000008
-ERROR_FILE_EXISTS = 80
-ERROR_ALREADY_EXISTS = 183
+
+
+class Cancellation(Protocol):
+    def raise_if_cancelled(self) -> None: ...
+
+
+class ImportPromotionPending(RuntimeError):
+    pass
+
+
+class ImportPromotionRejected(RuntimeError):
+    pass
+
+
+def _check(cancellation: Cancellation | None) -> None:
+    if cancellation is not None:
+        cancellation.raise_if_cancelled()
 
 
 class ImportService:
@@ -39,15 +51,17 @@ class ImportService:
         self,
         database: Database,
         repository: ImportIntentRepository,
-        data_root: Path,
+        trusted_root: TrustedImportRoot,
         session_generation: str,
         *,
         queue: TaskQueue | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
+        if not isinstance(trusted_root, TrustedImportRoot):
+            raise TypeError("trusted_import_root_required")
         self._database = database
         self._repository = repository
-        self._data_root = Path(data_root)
+        self._root = trusted_root
         self._session_generation = session_generation
         self._queue = queue or TaskQueue(database, now)
 
@@ -59,23 +73,40 @@ class ImportService:
         *,
         declared_length: int | None = None,
     ) -> ImportTask:
-        claimed = self._repository.claim(intent_id, self._session_generation, upload_token)
+        claimed = await asyncio.to_thread(
+            self._repository.claim,
+            intent_id,
+            self._session_generation,
+            upload_token,
+        )
         if Path(claimed.original_name).suffix.lower() != ".pdf":
-            self._repository.fail(intent_id, "invalid_pdf_extension", allowed=("receiving",))
+            await asyncio.to_thread(
+                self._repository.fail,
+                intent_id,
+                "invalid_pdf_extension",
+                allowed=("receiving",),
+            )
             raise ValueError("invalid_pdf_extension")
         if declared_length is not None and declared_length != claimed.expected_size:
-            self._repository.fail(intent_id, "content_length_mismatch", allowed=("receiving",))
+            await asyncio.to_thread(
+                self._repository.fail,
+                intent_id,
+                "content_length_mismatch",
+                allowed=("receiving",),
+            )
             raise ValueError("content_length_mismatch")
-        incoming = self._data_root / "imports" / ".incoming"
-        part = incoming / f"{intent_id}.part"
-        uploaded = incoming / f"{intent_id}.uploaded.pdf"
+
+        file = await asyncio.to_thread(self._root.create_incoming, intent_id)
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=2)
         written = 0
         prefix = bytearray()
-        try:
-            await asyncio.to_thread(incoming.mkdir, parents=True, exist_ok=True)
-            handle = await asyncio.to_thread(open, part, "xb", buffering=0)
-            try:
-                async for chunk in chunks:
+
+        async def produce() -> None:
+            nonlocal written
+            async for asgi_chunk in chunks:
+                view = memoryview(asgi_chunk)
+                for offset in range(0, len(view), WRITE_SIZE):
+                    chunk = bytes(view[offset : offset + WRITE_SIZE])
                     if not chunk:
                         continue
                     written += len(chunk)
@@ -83,119 +114,156 @@ class ImportService:
                         raise ValueError("upload_size_mismatch")
                     if len(prefix) < 5:
                         prefix.extend(chunk[: 5 - len(prefix)])
-                    for offset in range(0, len(chunk), WRITE_SIZE):
-                        await asyncio.to_thread(handle.write, chunk[offset : offset + WRITE_SIZE])
-                if written != claimed.expected_size:
-                    raise ValueError("upload_size_mismatch")
-                if bytes(prefix) != b"%PDF-":
-                    raise ValueError("invalid_pdf_signature")
-                await asyncio.to_thread(handle.flush)
-                await asyncio.to_thread(os.fsync, handle.fileno())
-            finally:
-                await asyncio.to_thread(handle.close)
-            await asyncio.to_thread(self._move_no_replace, part, uploaded)
-            with self._database.transaction() as connection:
-                self._repository.mark_uploaded(intent_id, connection)
-                self._queue.enqueue_in_transaction(
-                    connection,
-                    "validate_import",
-                    f"validate_import:{intent_id}",
-                    {"intent_id": str(intent_id)},
-                )
-        except BaseException as error:
-            await asyncio.to_thread(
-                self._unlink_received_file,
-                part,
-                intent_id,
-                claimed.expected_size,
-                ".part",
-            )
-            if not uploaded.exists():
-                code = str(error) if isinstance(error, ValueError) else "upload_interrupted"
-                self._repository.fail(intent_id, code, allowed=("receiving",))
-            raise
-        return self._repository.get(intent_id, self._session_generation)
+                    await queue.put(chunk)
+            await queue.put(None)
 
-    def _unlink_received_file(
-        self,
-        path: Path,
-        intent_id: UUID,
-        expected_size: int,
-        suffix: str,
-    ) -> None:
-        incoming = self._data_root / "imports" / ".incoming"
-        if path.parent != incoming or path.name != f"{intent_id}{suffix}":
-            return
+        async def consume_queue() -> None:
+            while True:
+                item = await queue.get()
+                try:
+                    if item is None:
+                        return
+                    await asyncio.to_thread(file.write, item)
+                finally:
+                    queue.task_done()
+
+        producer = asyncio.create_task(produce())
+        consumer = asyncio.create_task(consume_queue())
         try:
-            metadata = path.lstat()
-            attributes = int(getattr(metadata, "st_file_attributes", 0))
-            if (
-                not stat.S_ISREG(metadata.st_mode)
-                or attributes & 0x00000400
-                or metadata.st_size > expected_size
-            ):
-                return
-            path.unlink()
-        except FileNotFoundError:
-            pass
+            await asyncio.gather(producer, consumer)
+            if written != claimed.expected_size:
+                raise ValueError("upload_size_mismatch")
+            if bytes(prefix) != b"%PDF-":
+                raise ValueError("invalid_pdf_signature")
+            await asyncio.to_thread(file.flush)
+            before = await asyncio.to_thread(file.metadata)
+            prefix_after_flush = await asyncio.to_thread(file.read_prefix, 5)
+            if before.size != claimed.expected_size or prefix_after_flush != b"%PDF-":
+                raise ValueError("upload_size_mismatch")
+            await asyncio.to_thread(file.rename_incoming, intent_id, "uploaded.pdf")
+            after = await asyncio.to_thread(file.metadata)
+            if (after.volume_id, after.file_id) != (before.volume_id, before.file_id):
+                raise ValueError("upload_identity_changed")
+            await asyncio.to_thread(self._mark_uploaded_and_enqueue, intent_id)
+        except BaseException as error:
+            producer.cancel()
+            consumer.cancel()
+            try:
+                await asyncio.gather(producer, consumer, return_exceptions=True)
+            finally:
+                try:
+                    await asyncio.to_thread(file.delete)
+                except OSError:
+                    pass
+                await asyncio.to_thread(file.close)
+            code = str(error) if isinstance(error, ValueError) else "upload_interrupted"
+            await asyncio.to_thread(
+                self._repository.fail,
+                intent_id,
+                code,
+                allowed=("receiving",),
+            )
+            raise
+        await asyncio.to_thread(file.close)
+        return await asyncio.to_thread(
+            self._repository.get, intent_id, self._session_generation
+        )
+
+    def _mark_uploaded_and_enqueue(self, intent_id: UUID) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE import_intents SET status='uploaded',updated_at=?
+                WHERE id=? AND status='receiving' AND session_generation=?
+                """,
+                (now, str(intent_id), self._session_generation),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("import_state_conflict")
+            self._queue.enqueue_in_transaction(
+                connection,
+                "validate_import",
+                f"validate_import:{intent_id}",
+                {"intent_id": str(intent_id)},
+            )
 
     def reconcile_stale_receiving(self) -> None:
-        incoming = self._data_root / "imports" / ".incoming"
         with self._database.connect() as connection:
             rows = connection.execute(
-                "SELECT id, expected_size FROM import_intents WHERE status='receiving'"
+                """
+                SELECT id,expected_size FROM import_intents
+                WHERE status='receiving' AND session_generation<>?
+                """,
+                (self._session_generation,),
             ).fetchall()
         for row in rows:
             intent_id = UUID(str(row["id"]))
             expected = int(row["expected_size"])
-            part = incoming / f"{intent_id}.part"
-            uploaded = incoming / f"{intent_id}.uploaded.pdf"
-            candidate = uploaded if uploaded.exists() else part
-            valid = False
+            file: TrustedImportFile | None = None
+            suffix = "uploaded.pdf"
             try:
-                valid = (
-                    candidate.is_file()
-                    and candidate.stat().st_size == expected
-                    and self._read_prefix(candidate) == b"%PDF-"
-                )
-            except OSError:
-                valid = False
-            if valid:
-                if candidate == part:
-                    self._move_no_replace(part, uploaded)
-                else:
-                    self._unlink_received_file(part, intent_id, expected, ".part")
-                with self._database.transaction() as connection:
-                    self._repository.mark_uploaded(intent_id, connection)
-                    self._queue.enqueue_in_transaction(
-                        connection,
-                        "validate_import",
-                        f"validate_import:{intent_id}",
-                        {"intent_id": str(intent_id)},
+                try:
+                    file = self._root.open_incoming(intent_id, suffix)
+                except OSError:
+                    suffix = "part"
+                    file = self._root.open_incoming(intent_id, suffix)
+                metadata = file.metadata()
+                valid = metadata.size == expected and file.read_prefix(5) == b"%PDF-"
+                if not valid:
+                    file.delete()
+                    file.close()
+                    file = None
+                    self._delete_incoming_exact(
+                        intent_id, "part" if suffix == "uploaded.pdf" else "uploaded.pdf"
                     )
-            else:
-                self._unlink_received_file(part, intent_id, expected, ".part")
-                self._unlink_received_file(
-                    uploaded, intent_id, expected, ".uploaded.pdf"
-                )
-                self._repository.fail(intent_id, "upload_interrupted", allowed=("receiving",))
+                    self._fail_receiving(intent_id, "upload_interrupted")
+                    continue
+                if suffix == "part":
+                    file.rename_incoming(intent_id, "uploaded.pdf")
+                self._mark_stale_uploaded_and_enqueue(intent_id)
+            except OSError:
+                self._fail_receiving(intent_id, "upload_interrupted")
+            finally:
+                if file is not None:
+                    file.close()
 
-    @staticmethod
-    def _move_no_replace(source: Path, destination: Path) -> None:
-        if os.name == "nt":
-            move = ctypes.WinDLL("kernel32", use_last_error=True).MoveFileExW
-            move.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
-            move.restype = ctypes.c_int
-            if not move(str(source), str(destination), MOVEFILE_WRITE_THROUGH):
-                raise OSError(ctypes.get_last_error(), "MoveFileExW failed")
-        else:
-            os.link(source, destination)
-            source.unlink()
+    def _mark_stale_uploaded_and_enqueue(self, intent_id: UUID) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE import_intents SET status='uploaded',updated_at=?
+                WHERE id=? AND status='receiving' AND session_generation<>?
+                """,
+                (now, str(intent_id), self._session_generation),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("import_state_conflict")
+            self._queue.enqueue_in_transaction(
+                connection,
+                "validate_import",
+                f"validate_import:{intent_id}",
+                {"intent_id": str(intent_id)},
+            )
 
-    @staticmethod
-    def _read_prefix(path: Path) -> bytes:
-        with path.open("rb") as stream:
-            return stream.read(5)
+    def _fail_receiving(self, intent_id: UUID, error_code: str) -> None:
+        self._repository.fail(
+            intent_id,
+            error_code,
+            allowed=("receiving",),
+        )
+
+    def _delete_incoming_exact(self, intent_id: UUID, suffix: str) -> None:
+        file: TrustedImportFile | None = None
+        try:
+            file = self._root.open_incoming(intent_id, suffix)
+            file.delete()
+        except OSError:
+            return
+        finally:
+            if file is not None:
+                file.close()
 
 
 class ImportValidator:
@@ -203,275 +271,437 @@ class ImportValidator:
         self,
         database: Database,
         queue: TaskQueue,
-        data_root: Path,
+        trusted_root: TrustedImportRoot,
         *,
         inspector: SafeFileInspector | None = None,
     ) -> None:
+        if not isinstance(trusted_root, TrustedImportRoot):
+            raise TypeError("trusted_import_root_required")
         self._database = database
         self._queue = queue
-        self._data_root = Path(data_root)
-        self._inspector = inspector or SafeWindowsFileInspector()
+        self._root = trusted_root
+        self._inspector = inspector
 
-    def validate_and_promote(self, intent_id: UUID) -> None:
-        incoming = self._data_root / "imports" / ".incoming"
-        uploaded = incoming / f"{intent_id}.uploaded.pdf"
-        verify = incoming / f"{intent_id}.verify.pdf"
-        try:
-            with self._database.transaction() as connection:
-                row = connection.execute(
-                    "SELECT * FROM import_intents WHERE id = ?", (str(intent_id),)
-                ).fetchone()
-                if row is None:
-                    raise ValueError("import_not_found")
-                status = str(row["status"])
-                if status == "completed":
-                    return
-                if status not in {"uploaded", "validating", "ready_to_promote"}:
-                    raise ValueError("invalid_import_state")
-                if status == "ready_to_promote":
-                    digest_value = row["content_sha256"]
-                    final_value = row["final_path_key"]
-                    if digest_value is None or final_value is None:
-                        raise ValueError("promotion_recovery_unauthorized")
-                    digest = str(digest_value)
-                    final = Path(str(final_value))
-                    display_name = str(row["file_name"])
-                    ready = True
-                else:
-                    ready = False
-                connection.execute(
-                    "UPDATE import_intents SET status='validating', updated_at=? WHERE id=? AND status='uploaded'",
-                    (datetime.now(UTC).isoformat(), str(intent_id)),
-                )
-                expected_size = int(row["expected_size"])
-                display_name = str(row["file_name"])
-            if ready:
-                self._promote(
-                    intent_id,
-                    digest,
-                    final,
-                    os.path.normcase(os.path.abspath(final)),
-                    verify,
-                    display_name,
-                )
-                return
-            validation_source = verify if status == "validating" and verify.exists() else uploaded
-            digest = self._hash_and_validate(validation_source, expected_size)
-            if validation_source == uploaded:
-                ImportService._move_no_replace(uploaded, verify)
-            year, month = self._month_parts()
-            final = self._data_root / "imports" / "library" / year / month / f"{digest}.pdf"
-            final_key = os.path.normcase(os.path.abspath(final))
-            with self._database.transaction() as connection:
-                connection.execute(
-                    "UPDATE import_intents SET status='ready_to_promote', content_sha256=?, final_path_key=?, updated_at=? WHERE id=?",
-                    (digest, final_key, datetime.now(UTC).isoformat(), str(intent_id)),
-                )
-            self._promote(intent_id, digest, final, final_key, verify, display_name)
-        except ValueError as error:
-            if str(error) == "promotion_owner_pending":
-                return
-            self._fail(intent_id, str(error), uploaded, verify)
-        except OSError:
-            with self._database.connect() as connection:
-                state = connection.execute(
-                    "SELECT status FROM import_intents WHERE id=?", (str(intent_id),)
-                ).fetchone()
-            if state is not None and str(state["status"]) == "ready_to_promote":
-                raise
-            self._fail(intent_id, "import_io_error", uploaded, verify)
-
-    def reconcile_ready_promotions(self) -> None:
-        with self._database.connect() as connection:
-            rows = connection.execute(
-                "SELECT id FROM import_intents WHERE status='ready_to_promote' ORDER BY created_at,id"
-            ).fetchall()
-        for row in rows:
-            self.validate_and_promote(UUID(str(row["id"])))
-
-    def _hash_and_validate(self, path: Path, expected_size: int) -> str:
-        digest = hashlib.sha256()
-        size = 0
-        with path.open("rb") as stream:
-            prefix = stream.read(5)
-            if prefix != b"%PDF-":
-                raise ValueError("invalid_pdf_signature")
-            digest.update(prefix)
-            size += len(prefix)
-            while chunk := stream.read(4 * 1024**2):
-                digest.update(chunk)
-                size += len(chunk)
-        if size != expected_size:
-            raise ValueError("upload_size_mismatch")
-        probe = (
-            "import fitz,sys; d=fitz.open(sys.argv[1]); "
-            "ok=(not d.needs_pass and not d.is_repaired and d.page_count>0); "
-            "d.load_page(0) if ok else None; d.close(); raise SystemExit(0 if ok else 2)"
+    def validate_and_promote(
+        self,
+        intent_id: UUID,
+        cancellation: Cancellation | None = None,
+    ) -> None:
+        intent_lock = FileLock(
+            str(self._root.locks_directory / f"intent-{intent_id}.lock")
         )
+        self._acquire_lock(intent_lock, cancellation)
         try:
-            result = subprocess.run(
-                [sys.executable, "-c", probe, str(path)],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=120,
-                check=False,
+            self._validate_locked(intent_id, cancellation)
+        finally:
+            intent_lock.release()
+
+    def _validate_locked(
+        self,
+        intent_id: UUID,
+        cancellation: Cancellation | None,
+    ) -> None:
+        _check(cancellation)
+        row = self._intent_row(intent_id)
+        status = str(row["status"])
+        if status == "completed":
+            return
+        if status not in {"uploaded", "validating", "ready_to_promote"}:
+            raise ValueError("invalid_import_state")
+        display_name = str(row["file_name"])
+        expected_size = int(row["expected_size"])
+        source: TrustedImportFile | None = None
+        try:
+            if status in {"uploaded", "validating"}:
+                suffix = "uploaded.pdf" if status == "uploaded" else "verify.pdf"
+                try:
+                    source = self._root.open_incoming(intent_id, suffix)
+                except OSError:
+                    if status != "validating":
+                        raise
+                    source = self._root.open_incoming(intent_id, "uploaded.pdf")
+                    suffix = "uploaded.pdf"
+                if status == "uploaded":
+                    self._cas_intent(intent_id, "uploaded", "validating")
+                    status = "validating"
+                digest = self._validate_held(source, expected_size, cancellation)
+                _check(cancellation)
+                if suffix == "uploaded.pdf":
+                    source.rename_incoming(intent_id, "verify.pdf")
+                    _check(cancellation)
+                final_path = self._promotion_path_or_current(digest)
+                self._cas_ready(intent_id, digest, final_path)
+                status = "ready_to_promote"
+                _check(cancellation)
+            else:
+                digest = str(row["content_sha256"])
+                final_path = Path(str(row["final_path_key"]))
+                try:
+                    source = self._root.open_incoming(intent_id, "verify.pdf")
+                    if self._validate_held(source, expected_size, cancellation) != digest:
+                        raise ValueError("promotion_source_hash_mismatch")
+                except OSError:
+                    source = None
+            self._promote(
+                intent_id,
+                digest,
+                final_path,
+                display_name,
+                expected_size,
+                source,
+                cancellation,
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise ValueError("invalid_pdf_structure") from error
-        if result.returncode != 0:
+            source = None
+        except ImportPromotionPending:
+            raise
+        except ImportPromotionRejected:
+            return
+        except asyncio.CancelledError:
+            raise
+        except ValueError as error:
+            if status != "ready_to_promote" and source is not None:
+                try:
+                    source.delete()
+                except OSError:
+                    pass
+            self._fail_intent(intent_id, str(error), status)
+        except OSError as error:
+            if status == "ready_to_promote":
+                raise ImportPromotionPending("promotion_io_retry") from error
+            if source is not None:
+                try:
+                    source.delete()
+                except OSError:
+                    pass
+            self._fail_intent(intent_id, "import_io_error", status)
+        finally:
+            if source is not None:
+                source.close()
+
+    def _validate_held(
+        self,
+        file: TrustedImportFile,
+        expected_size: int,
+        cancellation: Cancellation | None,
+    ) -> str:
+        _check(cancellation)
+        before = file.metadata()
+        if before.size != expected_size or file.read_prefix(5) != b"%PDF-":
+            raise ValueError("upload_size_mismatch")
+        digest = file.sha256(cancellation)
+        _check(cancellation)
+        if not file.probe_pdf(timeout_seconds=120, cancellation=cancellation):
             raise ValueError("invalid_pdf_structure")
-        return digest.hexdigest()
+        _check(cancellation)
+        after = file.metadata()
+        if (
+            (after.volume_id, after.file_id, after.size)
+            != (before.volume_id, before.file_id, before.size)
+            or after.is_reparse_point
+        ):
+            raise ValueError("import_identity_changed")
+        return digest
 
     def _promote(
         self,
         intent_id: UUID,
         digest: str,
-        final: Path,
-        final_key: str,
-        verify: Path,
+        proposed_path: Path,
         display_name: str,
+        expected_size: int,
+        source: TrustedImportFile | None,
+        cancellation: Cancellation | None,
     ) -> None:
-        final.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = self._data_root / "imports" / ".locks" / f"{digest}.lock"
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock = FileLock(str(lock_path))
-        with lock:
-            with self._database.transaction() as connection:
-                promotion = connection.execute(
-                    "SELECT * FROM import_promotions WHERE content_sha256=?", (digest,)
-                ).fetchone()
-                if promotion is None:
-                    connection.execute(
-                        "INSERT INTO import_promotions(content_sha256,owner_intent_id,final_path_key,status,updated_at) VALUES(?,?,?,'claimed',?)",
-                        (digest, str(intent_id), final_key, datetime.now(UTC).isoformat()),
+        content_lock = FileLock(str(self._root.locks_directory / f"content-{digest}.lock"))
+        self._acquire_lock(content_lock, cancellation)
+        final: TrustedImportFile | None = None
+        try:
+            _check(cancellation)
+            promotion = self._claim_or_read_promotion(intent_id, digest, proposed_path)
+            final_path = Path(str(promotion["final_path_key"]))
+            owner = str(promotion["owner_intent_id"]) == str(intent_id)
+            promotion_status = str(promotion["status"])
+            if not owner and promotion_status != "completed":
+                raise ImportPromotionPending("promotion_owner_pending")
+            if not owner:
+                final = self._root.open_final(final_path)
+                self._verify_final(final, final_path, digest, expected_size, cancellation)
+                _check(cancellation)
+                if source is not None:
+                    source.delete()
+                    source.close()
+                    source = None
+                try:
+                    self._complete(
+                        intent_id,
+                        digest,
+                        final_path,
+                        display_name,
+                        final,
+                        owner=False,
+                        cancellation=cancellation,
                     )
-                    owner = True
-                else:
-                    owner = str(promotion["owner_intent_id"]) == str(intent_id)
-                    if not owner and str(promotion["status"]) == "failed":
-                        raise ValueError("promotion_recovery_unauthorized")
-                    if not owner and str(promotion["status"]) != "completed":
-                        raise ValueError("promotion_owner_pending")
-            if owner:
-                if verify.exists():
-                    try:
-                        ImportService._move_no_replace(verify, final)
-                    except OSError as error:
-                        if error.errno not in {ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS, 17}:
-                            raise
-                        if self._file_hash(final) != digest:
-                            raise ValueError("promotion_path_conflict")
-                    with self._database.transaction() as connection:
-                        connection.execute(
-                            "UPDATE import_promotions SET status='moved',updated_at=? WHERE content_sha256=? AND owner_intent_id=?",
-                            (datetime.now(UTC).isoformat(), digest, str(intent_id)),
-                        )
-                elif not final.exists() or self._file_hash(final) != digest:
+                except ValueError as error:
+                    if str(error) != "document_binding_conflict":
+                        raise
+                    self._reject_document_binding(intent_id, digest, owner=False)
+                return
+
+            if source is not None:
+                try:
+                    existing = self._root.open_final(final_path)
+                except OSError:
+                    existing = None
+                if existing is not None:
+                    existing.close()
+                    self._reject_preexisting_final(intent_id, digest, source)
+                relative = final_path.relative_to(self._root.library_directory)
+                if len(relative.parts) != 3:
+                    raise ValueError("promotion_path_invalid")
+                _check(cancellation)
+                source.rename_final(relative.parts[0], relative.parts[1], relative.parts[2])
+                _check(cancellation)
+                self._cas_promotion(digest, intent_id, "claimed", "moved")
+                final = source
+                source = None
+            else:
+                if promotion_status not in {"claimed", "moved"}:
                     raise ValueError("promotion_recovery_unauthorized")
-            elif self._file_hash(final) != digest:
-                raise ValueError("promotion_recovery_unauthorized")
-            self._complete(intent_id, digest, final, final_key, display_name, owner)
+                final = self._root.open_final(final_path)
+            self._verify_final(final, final_path, digest, expected_size, cancellation)
+            _check(cancellation)
+            try:
+                self._complete(
+                    intent_id,
+                    digest,
+                    final_path,
+                    display_name,
+                    final,
+                    owner=True,
+                    cancellation=cancellation,
+                )
+            except ValueError as error:
+                if str(error) != "document_binding_conflict":
+                    raise
+                final.delete()
+                self._reject_document_binding(intent_id, digest, owner=True)
+        finally:
+            if final is not None:
+                final.close()
+            content_lock.release()
+
+    def _verify_final(
+        self,
+        final: TrustedImportFile,
+        expected_path: Path,
+        digest: str,
+        expected_size: int,
+        cancellation: Cancellation | None,
+    ) -> None:
+        metadata = final.metadata()
+        if (
+            os.path.normcase(os.path.abspath(metadata.final_path))
+            != os.path.normcase(os.path.abspath(expected_path))
+            or metadata.size != expected_size
+            or metadata.hard_link_count != 1
+            or metadata.is_reparse_point
+        ):
+            raise ValueError("promotion_final_unsafe")
+        if final.sha256(cancellation) != digest:
+            raise ValueError("promotion_final_hash_mismatch")
+        _check(cancellation)
 
     def _complete(
         self,
         intent_id: UUID,
         digest: str,
-        final: Path,
-        final_key: str,
+        final_path: Path,
         display_name: str,
+        final: TrustedImportFile,
+        *,
         owner: bool,
+        cancellation: Cancellation | None,
     ) -> None:
+        _check(cancellation)
         managed = self.ensure_managed_import_library()
-        identity = self._inspector.inspect_regular_file(final, managed)
-        if identity.hard_link_count != 1:
-            raise ValueError("promotion_final_unsafe")
-        managed_id = str(managed.id)
+        metadata = final.metadata()
         now = datetime.now(UTC).isoformat()
+        final_key = os.path.normcase(os.path.abspath(final_path))
         with self._database.transaction() as connection:
-            existing = connection.execute(
-                "SELECT document_id FROM confirmed_imports WHERE intent_id=?", (str(intent_id),)
+            current = connection.execute(
+                "SELECT status,content_sha256,final_path_key FROM import_intents WHERE id=?",
+                (str(intent_id),),
             ).fetchone()
-            if existing is not None:
-                return
+            if current is None or str(current["status"]) != "ready_to_promote":
+                raise ValueError("import_state_conflict")
+            if (
+                str(current["content_sha256"]) != digest
+                or str(current["final_path_key"]) != final_key
+            ):
+                raise ValueError("import_binding_conflict")
             connection.execute(
-                "INSERT INTO contents(sha256,size_bytes,mime_type,status,created_at,updated_at) VALUES(?,?,'application/pdf','queued',?,?) ON CONFLICT(sha256) DO NOTHING",
-                (digest, identity.size, now, now),
+                """
+                INSERT INTO contents(sha256,size_bytes,mime_type,status,created_at,updated_at)
+                VALUES(?,?,'application/pdf','queued',?,?) ON CONFLICT(sha256) DO NOTHING
+                """,
+                (digest, metadata.size, now, now),
             )
             document = connection.execute(
-                "SELECT id FROM documents WHERE path_key=?", (final_key,)
+                "SELECT * FROM documents WHERE path_key=?", (final_key,)
             ).fetchone()
             document_id = str(document["id"]) if document else str(uuid4())
-            if document is None:
+            if document is not None:
+                if (
+                    str(document["library_id"]) != str(managed.id)
+                    or str(document["content_sha256"]) != digest
+                    or os.path.normcase(os.path.abspath(str(document["path"]))) != final_key
+                    or str(document["authorization_source"]) != "confirmed_import"
+                    or int(document["auto_cloud_eligible"]) != 1
+                ):
+                    raise ValueError("document_binding_conflict")
+            else:
                 connection.execute(
                     """
                     INSERT INTO documents(
                       id,library_id,content_sha256,path,path_key,display_name,format,size_bytes,
                       mtime_ns,volume_id,file_id,hard_link_count,parse_preference,
                       auto_cloud_eligible,authorization_source,status,created_at,updated_at
-                    ) VALUES(?,?,?,?,?,?,'pdf',?,?,?,?,1,'parse',1,'confirmed_import','valid_pdf',?,?)
+                    ) VALUES(?,?,?,?,?,?,'pdf',?,?,?,?,?,'parse',1,'confirmed_import',
+                             'valid_pdf',?,?)
                     """,
                     (
                         document_id,
-                        managed_id,
+                        str(managed.id),
                         digest,
-                        str(final),
+                        str(metadata.final_path),
                         final_key,
                         display_name,
-                        identity.size,
-                        identity.modified_ns,
-                        identity.volume_id,
-                        identity.file_id,
+                        metadata.size,
+                        metadata.modified_ns,
+                        metadata.volume_id,
+                        metadata.file_id,
+                        metadata.hard_link_count,
                         now,
                         now,
                     ),
                 )
                 connection.execute(
-                    "INSERT INTO document_versions(id,document_id,content_sha256,size_bytes,mtime_ns,volume_id,file_id,hard_link_count,observed_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                    (str(uuid4()), document_id, digest, identity.size, identity.modified_ns, identity.volume_id, identity.file_id, 1, now),
+                    """
+                    INSERT INTO document_versions(
+                      id,document_id,content_sha256,size_bytes,mtime_ns,volume_id,file_id,
+                      hard_link_count,observed_at) VALUES(?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        str(uuid4()),
+                        document_id,
+                        digest,
+                        metadata.size,
+                        metadata.modified_ns,
+                        metadata.volume_id,
+                        metadata.file_id,
+                        metadata.hard_link_count,
+                        now,
+                    ),
                 )
             connection.execute(
-                "INSERT INTO confirmed_imports(intent_id,document_id,content_sha256,final_path_key,confirmed_at) VALUES(?,?,?,?,?)",
+                """
+                INSERT INTO confirmed_imports(
+                  intent_id,document_id,content_sha256,final_path_key,confirmed_at)
+                VALUES(?,?,?,?,?)
+                """,
                 (str(intent_id), document_id, digest, final_key, now),
             )
-            connection.execute(
-                "UPDATE import_intents SET status='completed',error_code=NULL,updated_at=? WHERE id=?",
-                (now, str(intent_id)),
+            changed = connection.execute(
+                """
+                UPDATE import_intents SET status='completed',error_code=NULL,updated_at=?
+                WHERE id=? AND status='ready_to_promote' AND content_sha256=?
+                  AND final_path_key=?
+                """,
+                (now, str(intent_id), digest, final_key),
             )
+            if changed.rowcount != 1:
+                raise ValueError("import_state_conflict")
             if owner:
-                connection.execute(
-                    "UPDATE import_promotions SET status='completed',updated_at=? WHERE content_sha256=? AND owner_intent_id=?",
+                changed = connection.execute(
+                    """
+                    UPDATE import_promotions SET status='completed',updated_at=?
+                    WHERE content_sha256=? AND owner_intent_id=? AND status IN ('claimed','moved')
+                    """,
                     (now, digest, str(intent_id)),
                 )
+                if changed.rowcount != 1:
+                    raise ValueError("promotion_state_conflict")
             self._queue.enqueue_in_transaction(
-                connection, "parse_pdf", f"parse_pdf:{digest}", {"content_sha256": digest}
+                connection,
+                "parse_pdf",
+                f"parse_pdf:{digest}",
+                {"content_sha256": digest},
             )
+        _check(cancellation)
+
+    def reconcile_ready_promotions(
+        self, cancellation: Cancellation | None = None
+    ) -> None:
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id FROM import_intents
+                WHERE status='ready_to_promote' ORDER BY created_at,id
+                """
+            ).fetchall()
+        for row in rows:
+            _check(cancellation)
+            try:
+                self.validate_and_promote(UUID(str(row["id"])), cancellation)
+            except ImportPromotionPending:
+                continue
 
     def ensure_managed_import_library(self) -> LibraryRoot:
-        root = self._data_root / "imports" / "library"
-        root.mkdir(parents=True, exist_ok=True)
-        identity = self._inspector.inspect_root_directory(root)
+        identity = (
+            self._inspector.inspect_root_directory(self._root.library_directory)
+            if self._inspector is not None
+            else None
+        )
+        if identity is None:
+            metadata = self._root._library_handle.metadata
+            from literature_workbench.platform.windows.filesystem import RootIdentity
+
+            identity = RootIdentity(
+                metadata.final_path, metadata.volume_id, metadata.file_id
+            )
         now = datetime.now(UTC).isoformat()
         library_id = "00000000-0000-0000-0000-000000000006"
+        path_key = os.path.normcase(os.path.abspath(identity.canonical_path))
         with self._database.transaction() as connection:
             connection.execute(
                 """
-                INSERT INTO libraries(id,root_path,root_path_key,root_volume_id,root_file_id,
-                  recursive,discovery_mode,cloud_pdf_auto_allowed,authorization_source,status,
+                INSERT INTO libraries(
+                  id,root_path,root_path_key,root_volume_id,root_file_id,recursive,
+                  discovery_mode,cloud_pdf_auto_allowed,authorization_source,status,
                   created_at,updated_at)
                 VALUES(?,?,?,?,?,1,'managed_import',1,'managed_import_internal','active',?,?)
                 ON CONFLICT(root_path_key) DO NOTHING
                 """,
-                (library_id, str(identity.canonical_path), os.path.normcase(os.path.abspath(identity.canonical_path)), identity.volume_id, identity.file_id, now, now),
+                (
+                    library_id,
+                    str(identity.canonical_path),
+                    path_key,
+                    identity.volume_id,
+                    identity.file_id,
+                    now,
+                    now,
+                ),
             )
             row = connection.execute(
-                "SELECT * FROM libraries WHERE root_path_key=?",
-                (os.path.normcase(os.path.abspath(identity.canonical_path)),),
+                "SELECT * FROM libraries WHERE root_path_key=?", (path_key,)
             ).fetchone()
-            managed_count = connection.execute(
-                "SELECT COUNT(*) FROM libraries WHERE discovery_mode='managed_import' AND status='active'"
+            count = connection.execute(
+                """
+                SELECT COUNT(*) FROM libraries
+                WHERE discovery_mode='managed_import' AND status='active'
+                """
             ).fetchone()[0]
-        if row is None or managed_count != 1:
+        if row is None or count != 1:
             raise ValueError("managed_import_library_conflict")
         if (
             str(row["root_volume_id"]) != identity.volume_id
@@ -482,7 +712,7 @@ class ImportValidator:
             or str(row["status"]) != "active"
         ):
             raise ValueError("managed_import_library_conflict")
-        root_model = LibraryRoot(
+        return LibraryRoot(
             UUID(str(row["id"])),
             identity.canonical_path,
             identity.volume_id,
@@ -492,34 +722,181 @@ class ImportValidator:
             "managed_import_internal",
             "active",
         )
-        return root_model
 
-    def _fail(self, intent_id: UUID, code: str, uploaded: Path, verify: Path, *, keep_verify: bool = False) -> None:
-        for path in (uploaded, verify):
-            if keep_verify and path == verify:
-                continue
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-        ImportIntentRepository(self._database, lambda: datetime.now(UTC)).fail(
-            intent_id, code, allowed=("uploaded", "validating", "ready_to_promote")
-        )
+    def _intent_row(self, intent_id: UUID) -> sqlite3.Row:
+        with self._database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM import_intents WHERE id=?", (str(intent_id),)
+            ).fetchone()
+        if row is None:
+            raise ValueError("import_not_found")
+        return cast(sqlite3.Row, row)
+
+    def _cas_intent(self, intent_id: UUID, expected: str, target: str) -> None:
         with self._database.transaction() as connection:
-            connection.execute(
-                "UPDATE import_promotions SET status='failed',updated_at=? WHERE owner_intent_id=? AND status<>'completed'",
-                (datetime.now(UTC).isoformat(), str(intent_id)),
+            changed = connection.execute(
+                "UPDATE import_intents SET status=?,updated_at=? WHERE id=? AND status=?",
+                (target, datetime.now(UTC).isoformat(), str(intent_id), expected),
             )
+            if changed.rowcount != 1:
+                raise ValueError("import_state_conflict")
 
-    @staticmethod
-    def _file_hash(path: Path) -> str:
-        digest = hashlib.sha256()
-        with path.open("rb") as stream:
-            while chunk := stream.read(4 * 1024**2):
-                digest.update(chunk)
-        return digest.hexdigest()
+    def _cas_ready(self, intent_id: UUID, digest: str, final_path: Path) -> None:
+        final_key = os.path.normcase(os.path.abspath(final_path))
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE import_intents SET status='ready_to_promote',content_sha256=?,
+                  final_path_key=?,updated_at=? WHERE id=? AND status='validating'
+                """,
+                (digest, final_key, datetime.now(UTC).isoformat(), str(intent_id)),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("import_state_conflict")
 
-    @staticmethod
-    def _month_parts() -> tuple[str, str]:
+    def _promotion_path_or_current(self, digest: str) -> Path:
+        with self._database.connect() as connection:
+            row = connection.execute(
+                "SELECT final_path_key FROM import_promotions WHERE content_sha256=?",
+                (digest,),
+            ).fetchone()
+        if row is not None:
+            return Path(str(row["final_path_key"]))
         now = datetime.now(UTC)
-        return f"{now.year:04d}", f"{now.month:02d}"
+        return (
+            self._root.library_directory
+            / f"{now.year:04d}"
+            / f"{now.month:02d}"
+            / f"{digest}.pdf"
+        )
+
+    def _claim_or_read_promotion(
+        self, intent_id: UUID, digest: str, final_path: Path
+    ) -> sqlite3.Row:
+        final_key = os.path.normcase(os.path.abspath(final_path))
+        now = datetime.now(UTC).isoformat()
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM import_promotions WHERE content_sha256=?", (digest,)
+            ).fetchone()
+            if row is None:
+                connection.execute(
+                    """
+                    INSERT INTO import_promotions(
+                      content_sha256,owner_intent_id,final_path_key,status,updated_at)
+                    VALUES(?,?,?,'claimed',?)
+                    """,
+                    (digest, str(intent_id), final_key, now),
+                )
+                row = connection.execute(
+                    "SELECT * FROM import_promotions WHERE content_sha256=?", (digest,)
+                ).fetchone()
+        if row is None:
+            raise ValueError("promotion_claim_failed")
+        return cast(sqlite3.Row, row)
+
+    def _cas_promotion(
+        self,
+        digest: str,
+        intent_id: UUID,
+        expected: str,
+        target: str,
+    ) -> None:
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE import_promotions SET status=?,updated_at=?
+                WHERE content_sha256=? AND owner_intent_id=? AND status=?
+                """,
+                (
+                    target,
+                    datetime.now(UTC).isoformat(),
+                    digest,
+                    str(intent_id),
+                    expected,
+                ),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("promotion_state_conflict")
+
+    def _reject_preexisting_final(
+        self,
+        intent_id: UUID,
+        digest: str,
+        source: TrustedImportFile,
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE import_intents SET status='failed',error_code='promotion_path_conflict',
+                  updated_at=? WHERE id=? AND status='ready_to_promote'
+                  AND content_sha256=?
+                """,
+                (now, str(intent_id), digest),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("import_state_conflict")
+            changed = connection.execute(
+                """
+                UPDATE import_promotions SET status='failed',updated_at=?
+                WHERE content_sha256=? AND owner_intent_id=? AND status='claimed'
+                """,
+                (now, digest, str(intent_id)),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("promotion_state_conflict")
+        source.delete()
+        source.close()
+        raise ImportPromotionRejected("promotion_path_conflict")
+
+    def _reject_document_binding(
+        self, intent_id: UUID, digest: str, *, owner: bool
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE import_intents SET status='failed',error_code='document_binding_conflict',
+                  updated_at=? WHERE id=? AND status='ready_to_promote'
+                  AND content_sha256=?
+                """,
+                (now, str(intent_id), digest),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("import_state_conflict")
+            if owner:
+                changed = connection.execute(
+                    """
+                    UPDATE import_promotions SET status='failed',updated_at=?
+                    WHERE content_sha256=? AND owner_intent_id=? AND status='moved'
+                    """,
+                    (now, digest, str(intent_id)),
+                )
+                if changed.rowcount != 1:
+                    raise ValueError("promotion_state_conflict")
+        raise ImportPromotionRejected("document_binding_conflict")
+
+    def _fail_intent(self, intent_id: UUID, error_code: str, current: str) -> None:
+        if current == "ready_to_promote":
+            return
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE import_intents SET status='failed',error_code=?,updated_at=?
+                WHERE id=? AND status=?
+                """,
+                (error_code, datetime.now(UTC).isoformat(), str(intent_id), current),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("import_state_conflict")
+
+    @staticmethod
+    def _acquire_lock(lock: FileLock, cancellation: Cancellation | None) -> None:
+        while True:
+            _check(cancellation)
+            try:
+                lock.acquire(timeout=0.1)
+                return
+            except Timeout:
+                continue

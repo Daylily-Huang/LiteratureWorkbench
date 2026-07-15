@@ -101,6 +101,7 @@ test("refresh resumes current-session active imports from the server inventory",
   vi.mocked(importApi.listActiveImports).mockResolvedValue([
     {
       intent_id: "intent-resume",
+      file_name: "resumed.pdf",
       status: "completed",
       document_id: "document-resume",
       error_code: null,
@@ -112,6 +113,66 @@ test("refresh resumes current-session active imports from the server inventory",
 
   await waitFor(() => expect(importApi.listActiveImports).toHaveBeenCalledTimes(1));
   expect(screen.getByText("导入完成")).toBeVisible();
+});
+
+test("first confirmation click closes the dialog and a duplicate click creates one intent", async () => {
+  const user = userEvent.setup();
+  const importApi = api();
+  let resolveIntent!: (value: { intent_id: string; upload_token: string; expires_at: string }) => void;
+  vi.mocked(importApi.createImportIntent).mockReturnValue(
+    new Promise((resolve) => { resolveIntent = resolve; }),
+  );
+  render(<LibraryPanel importApi={importApi} />);
+  await user.upload(
+    screen.getByLabelText("导入文献"),
+    new File(["%PDF-1.7"], "once.pdf", { type: "application/pdf" }),
+  );
+  const button = screen.getByRole("button", { name: "确认导入" });
+
+  fireEvent.click(button);
+  fireEvent.click(button);
+
+  expect(screen.queryByRole("button", { name: "确认导入" })).not.toBeInTheDocument();
+  expect(importApi.createImportIntent).toHaveBeenCalledTimes(1);
+  resolveIntent({ intent_id: "intent-1", upload_token: "token-1", expires_at: "2026-07-15T09:15:00Z" });
+  await waitFor(() => expect(importApi.uploadImport).toHaveBeenCalledTimes(1));
+});
+
+test("server inventory renders every task with its preserved filename", async () => {
+  const importApi = api();
+  vi.mocked(importApi.listActiveImports).mockResolvedValue([
+    { intent_id: "a", file_name: "alpha.pdf", status: "completed", document_id: "doc-a", error_code: null, poll_after_ms: null },
+    { intent_id: "b", file_name: "beta.pdf", status: "failed", document_id: null, error_code: "import_failed", poll_after_ms: null },
+  ]);
+
+  render(<LibraryPanel importApi={importApi} />);
+
+  expect(await screen.findByText("alpha.pdf")).toBeVisible();
+  expect(screen.getByText("beta.pdf")).toBeVisible();
+});
+
+test("poll failure is sanitized and automatically recovers", async () => {
+  const importApi = api();
+  vi.mocked(importApi.listActiveImports).mockResolvedValue([
+    { intent_id: "poll", file_name: "poll.pdf", status: "validating", document_id: null, error_code: null, poll_after_ms: 1 },
+  ]);
+  vi.mocked(importApi.getImport).mockReset()
+    .mockRejectedValueOnce(new Error("sensitive server detail"))
+    .mockResolvedValueOnce({
+      intent_id: "poll",
+      file_name: "poll.pdf",
+      status: "completed",
+      document_id: "doc-poll",
+      error_code: null,
+      poll_after_ms: null,
+    });
+
+  render(<LibraryPanel importApi={importApi} />);
+
+  expect(await screen.findByText("状态更新暂时失败，正在重试")).toBeVisible();
+  expect(screen.queryByText(/sensitive server detail/)).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText("导入完成")).toBeVisible(), { timeout: 2500 });
+  expect(importApi.getImport).toHaveBeenCalledTimes(2);
 });
 
 test("dropping a PDF with an empty browser MIME still waits for confirmation", () => {

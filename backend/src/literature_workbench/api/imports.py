@@ -29,6 +29,7 @@ class ImportIntentResult(BaseModel):
 def _view(task: ImportTask) -> dict[str, object]:
     return {
         "intent_id": str(task.intent_id),
+        "file_name": task.file_name,
         "status": task.status,
         "document_id": None if task.document_id is None else str(task.document_id),
         "error_code": task.error_code,
@@ -81,9 +82,9 @@ async def upload_content(
 
 @router.get("")
 def list_imports(request: Request, active: bool = True) -> JSONResponse:
-    del active
     tasks = request.app.state.import_intent_repository.list_current(
-        request.app.state.local_session.session_generation
+        request.app.state.local_session.session_generation,
+        active=active,
     )
     return JSONResponse({"items": [_view(task) for task in tasks]})
 

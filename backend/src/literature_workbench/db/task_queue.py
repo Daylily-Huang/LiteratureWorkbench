@@ -203,6 +203,19 @@ class TaskQueue:
             )
             self._require_lease(changed, job_id, worker_id)
 
+    def requeue_running(self, job_id: JobId, worker_id: str) -> None:
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE jobs
+                SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE id = ? AND status = 'running' AND lease_owner = ?
+                """,
+                (self._timestamp(self._now_utc()), job_id, worker_id),
+            )
+            self._require_lease(changed, job_id, worker_id)
+
     def requeue_expired(self) -> int:
         with self._database.transaction() as connection:
             changed = connection.execute(

@@ -24,6 +24,8 @@ from literature_workbench.features.library.roots import LibraryRootService
 from literature_workbench.features.library.scanner import LibraryScanner
 from literature_workbench.features.library.import_intents import ImportIntentRepository
 from literature_workbench.features.library.import_service import ImportService, ImportValidator
+from literature_workbench.features.library.import_files import TrustedImportRoot
+from filelock import FileLock, Timeout
 from literature_workbench.platform.windows.folder_dialog import FolderDialog
 from literature_workbench.platform.windows.filesystem import (
     SafeFileInspector,
@@ -65,51 +67,65 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        database = Database.open(resolved.database_path)
-        run_migrations(database)
-        app.state.database = database
-        queue_clock = _utc_now
-        task_queue = TaskQueue(database, queue_clock)
-        app.state.queue_clock = queue_clock
-        app.state.task_queue = task_queue
-        import_repository = ImportIntentRepository(database, queue_clock)
-        import_repository.expire_pending()
-        app.state.import_intent_repository = import_repository
-        app.state.import_service = ImportService(
-            database,
-            import_repository,
-            resolved.data_root,
-            resolved_session.session_generation,
-            queue=task_queue,
-            now=queue_clock,
+        trusted_root = TrustedImportRoot.create(resolved.data_root)
+        supervisor_lock = FileLock(
+            str(trusted_root.locks_directory / "api-supervisor.lock")
         )
-        app.state.import_service.reconcile_stale_receiving()
-        app.state.settings_service = SettingsService(
-            SettingsRepository(database), resolved_secret_store
-        )
-        library_repository = LibraryRepository(database, task_queue)
-        app.state.library_repository = library_repository
-        app.state.library_root_service = LibraryRootService(
-            library_repository, resolved_inspector
-        )
-        library_scan_coordinator = LibraryScanCoordinator()
-        app.state.library_scan_coordinator = library_scan_coordinator
-        app.state.library_scanner = LibraryScanner(
-            database,
-            library_repository,
-            resolved_inspector,
-            task_queue,
-            coordinator=library_scan_coordinator,
-        )
-        app.state.import_validator = ImportValidator(
-            database,
-            task_queue,
-            resolved.data_root,
-            inspector=resolved_inspector,
-        )
-        if register_initial_library and library_repository.count() == 0:
-            app.state.library_root_service.register_initial_approved_library()
-        yield
+        try:
+            supervisor_lock.acquire(timeout=0)
+        except Timeout:
+            trusted_root.close()
+            raise RuntimeError("api_supervisor_already_running") from None
+        try:
+            database = Database.open(resolved.database_path)
+            run_migrations(database)
+            app.state.database = database
+            app.state.trusted_import_root = trusted_root
+            queue_clock = _utc_now
+            task_queue = TaskQueue(database, queue_clock)
+            app.state.queue_clock = queue_clock
+            app.state.task_queue = task_queue
+            import_repository = ImportIntentRepository(database, queue_clock)
+            import_repository.expire_pending()
+            app.state.import_intent_repository = import_repository
+            app.state.import_service = ImportService(
+                database,
+                import_repository,
+                trusted_root,
+                resolved_session.session_generation,
+                queue=task_queue,
+                now=queue_clock,
+            )
+            app.state.import_service.reconcile_stale_receiving()
+            app.state.settings_service = SettingsService(
+                SettingsRepository(database), resolved_secret_store
+            )
+            library_repository = LibraryRepository(database, task_queue)
+            app.state.library_repository = library_repository
+            app.state.library_root_service = LibraryRootService(
+                library_repository, resolved_inspector
+            )
+            library_scan_coordinator = LibraryScanCoordinator()
+            app.state.library_scan_coordinator = library_scan_coordinator
+            app.state.library_scanner = LibraryScanner(
+                database,
+                library_repository,
+                resolved_inspector,
+                task_queue,
+                coordinator=library_scan_coordinator,
+            )
+            app.state.import_validator = ImportValidator(
+                database,
+                task_queue,
+                trusted_root,
+                inspector=resolved_inspector,
+            )
+            if register_initial_library and library_repository.count() == 0:
+                app.state.library_root_service.register_initial_approved_library()
+            yield
+        finally:
+            supervisor_lock.release()
+            trusted_root.close()
 
     app = FastAPI(
         title="Literature Workbench",

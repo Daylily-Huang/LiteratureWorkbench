@@ -8,11 +8,50 @@ export type ImportStatus =
 
 export type ImportTask = {
   intent_id: string;
+  file_name: string;
   status: ImportStatus;
   document_id: string | null;
   error_code: string | null;
   poll_after_ms: number | null;
 };
+
+export type ImportErrorCode =
+  | "import_failed"
+  | "invalid_pdf_extension"
+  | "content_length_mismatch"
+  | "upload_size_mismatch"
+  | "invalid_pdf_signature"
+  | "import_too_large"
+  | "unsupported_media_type"
+  | "import_not_found";
+
+const allowedCodes = new Set<ImportErrorCode>([
+  "invalid_pdf_extension",
+  "content_length_mismatch",
+  "upload_size_mismatch",
+  "invalid_pdf_signature",
+  "import_too_large",
+  "unsupported_media_type",
+  "import_not_found",
+]);
+
+export class ImportApiError extends Error {
+  constructor(readonly code: ImportErrorCode) {
+    super(code);
+  }
+}
+
+async function responseError(response: Response): Promise<ImportApiError> {
+  try {
+    const payload = (await response.json()) as { code?: unknown };
+    if (typeof payload.code === "string" && allowedCodes.has(payload.code as ImportErrorCode)) {
+      return new ImportApiError(payload.code as ImportErrorCode);
+    }
+  } catch {
+    // A fixed local code keeps server/network details out of the UI.
+  }
+  return new ImportApiError("import_failed");
+}
 
 export type ImportIntent = {
   intent_id: string;
@@ -46,7 +85,7 @@ export const browserImportApi: ImportApi = {
         media_type: "application/pdf",
       }),
     });
-    if (!response.ok) throw new Error("intent_failed");
+    if (!response.ok) throw await responseError(response);
     return response.json() as Promise<ImportIntent>;
   },
   async uploadImport(intent, file) {
@@ -59,12 +98,12 @@ export const browserImportApi: ImportApi = {
       },
       body: file,
     });
-    if (!response.ok) throw new Error("upload_failed");
+    if (!response.ok) throw await responseError(response);
     return response.json() as Promise<ImportTask>;
   },
   async getImport(intentId) {
     const response = await fetch(`/api/imports/${intentId}`, { credentials: "same-origin" });
-    if (!response.ok) throw new Error("poll_failed");
+    if (!response.ok) throw await responseError(response);
     return response.json() as Promise<ImportTask>;
   },
   async listActiveImports() {

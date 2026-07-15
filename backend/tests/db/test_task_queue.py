@@ -11,6 +11,7 @@ import pytest
 from literature_workbench.db.database import Database
 from literature_workbench.db.task_queue import JobId, LostLease, TaskQueue
 from literature_workbench.worker import JobCancellation, Worker
+from literature_workbench.features.library.import_service import ImportPromotionPending
 
 from conftest import FakeClock
 
@@ -221,3 +222,20 @@ async def test_shutdown_between_lease_and_cancellation_registration_blocks_side_
 
     assert await worker.run_once() is True
     assert sentinel_promotions == []
+
+
+@pytest.mark.asyncio
+async def test_promotion_waiter_is_requeued_instead_of_failed(database: Database) -> None:
+    queue = TaskQueue(database, lambda: datetime.now(UTC))
+    job_id = queue.enqueue("validate_import", "import:waiter", {})
+
+    async def handler(_job: object, _cancellation: JobCancellation) -> None:
+        raise ImportPromotionPending("promotion_owner_pending")
+
+    worker = Worker(queue, "worker-a", {"validate_import": handler}, lease_seconds=30)
+
+    assert await worker.run_once() is True
+    assert queue.count(status="queued") == 1
+    assert queue.count(status="failed") == 0
+    leased_again = queue.lease_next("worker-b", lease_seconds=30)
+    assert leased_again is not None and leased_again.id == job_id

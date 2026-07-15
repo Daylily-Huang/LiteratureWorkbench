@@ -42,6 +42,7 @@ class ClaimedImportIntent:
 @dataclass(frozen=True, slots=True)
 class ImportTask:
     intent_id: UUID
+    file_name: str
     status: ImportStatus
     document_id: UUID | None
     error_code: str | None
@@ -201,16 +202,30 @@ class ImportIntentRepository:
             raise KeyError("import_not_found")
         return self._view(row)
 
-    def list_current(self, session_generation: str) -> tuple[ImportTask, ...]:
+    def list_current(
+        self, session_generation: str, *, active: bool = True
+    ) -> tuple[ImportTask, ...]:
+        recent_cutoff = (self._aware_now() - timedelta(hours=24)).isoformat()
+        recent_clause = (
+            "AND (i.status IN ('receiving','uploaded','validating','ready_to_promote') "
+            "OR i.updated_at >= ?)"
+            if active
+            else ""
+        )
+        parameters: tuple[str, ...] = (
+            (session_generation, recent_cutoff) if active else (session_generation,)
+        )
         with self._database.connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT i.*, c.document_id FROM import_intents AS i
                 LEFT JOIN confirmed_imports AS c ON c.intent_id = i.id
                 WHERE i.session_generation = ? AND i.status <> 'pending'
+                {recent_clause}
                 ORDER BY i.created_at DESC, i.id
+                LIMIT 100
                 """,
-                (session_generation,),
+                parameters,
             ).fetchall()
         return tuple(self._view(row) for row in rows)
 
@@ -227,6 +242,7 @@ class ImportIntentRepository:
         document = row["document_id"]
         return ImportTask(
             UUID(str(row["id"])),
+            str(row["file_name"]),
             status,
             UUID(str(document)) if status == "completed" and document is not None else None,
             str(row["error_code"]) if status == "failed" and row["error_code"] else None,

@@ -6,7 +6,10 @@ from threading import Event, Lock, Thread
 
 from literature_workbench.db.task_queue import Job, LostLease, TaskQueue
 from literature_workbench.features.library.scanner import LibraryScanner
-from literature_workbench.features.library.import_service import ImportValidator
+from literature_workbench.features.library.import_service import (
+    ImportPromotionPending,
+    ImportValidator,
+)
 
 
 class JobCancellation:
@@ -57,7 +60,11 @@ def library_job_handlers(
         from uuid import UUID
 
         cancellation.raise_if_cancelled()
-        await asyncio.to_thread(import_validator.validate_and_promote, UUID(raw_intent_id))
+        await asyncio.to_thread(
+            import_validator.validate_and_promote,
+            UUID(raw_intent_id),
+            cancellation,
+        )
         cancellation.raise_if_cancelled()
 
     handlers: dict[str, JobHandler] = {"scan_library": scan_library}
@@ -127,6 +134,11 @@ class Worker:
             cancellation.cancel()
             if not internally_cancelled:
                 raise
+        except ImportPromotionPending:
+            try:
+                self._queue.requeue_running(job.id, self._worker_id)
+            except LostLease:
+                cancellation.cancel()
         except Exception:
             try:
                 self._queue.fail(job.id, self._worker_id, "handler_error", retryable=True)
