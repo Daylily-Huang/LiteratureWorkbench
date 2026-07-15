@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from literature_workbench.features.library.models import DocumentRecord, LibraryRoot
+from literature_workbench.platform.windows import filesystem as windows_filesystem
 from literature_workbench.platform.windows.filesystem import (
     HandleMetadata,
     SafeWindowsFileInspector,
@@ -322,3 +323,26 @@ def test_real_windows_handles_inspect_and_open_ordinary_pdf(tmp_path: Path) -> N
     assert re.fullmatch(r"[0-9a-f]{32}", root_identity.file_id)
     assert re.fullmatch(r"[0-9a-f]{16}", identity.volume_id)
     assert re.fullmatch(r"[0-9a-f]{32}", identity.file_id)
+
+
+def test_detach_stream_closes_transferred_fd_when_fdopen_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handle = windows_filesystem.Win32OwnedFileHandle(
+        123,
+        _metadata(Path(r"C:\library\paper.pdf")),
+    )
+    closed: list[int] = []
+    monkeypatch.setattr(windows_filesystem.msvcrt, "open_osfhandle", lambda raw, flags: 77)
+
+    def fail_fdopen(fd: int, mode: str, *, closefd: bool):
+        raise RuntimeError("fdopen failed")
+
+    monkeypatch.setattr(windows_filesystem.os, "fdopen", fail_fdopen)
+    monkeypatch.setattr(windows_filesystem.os, "close", closed.append)
+
+    with pytest.raises(RuntimeError, match="fdopen failed"):
+        handle.detach_stream()
+
+    assert closed == [77]
+    handle.close()

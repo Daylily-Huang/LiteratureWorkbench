@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+import subprocess
 from uuid import UUID
 
 import pytest
@@ -70,6 +71,14 @@ class FakeDialogRunner:
         return self.result
 
 
+@dataclass(slots=True)
+class RaisingDialogRunner:
+    error: BaseException
+
+    def run(self, arguments: list[str]) -> CommandResult:
+        raise self.error
+
+
 def _identity(path: Path, *, file_id: str = "00000000000000000000000000000022") -> RootIdentity:
     return RootIdentity(
         canonical_path=path,
@@ -133,6 +142,21 @@ def test_folder_dialog_cancellation_returns_none_and_failure_is_closed() -> None
     with pytest.raises(FolderDialogError, match="folder_dialog_failed") as exc_info:
         failed.select()
     assert "private detail" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("private executable path"),
+        subprocess.TimeoutExpired("private command", 300, output="private output"),
+    ],
+)
+def test_folder_dialog_normalizes_process_start_and_timeout_errors(error: BaseException) -> None:
+    with pytest.raises(FolderDialogError) as exc_info:
+        FolderDialog(RaisingDialogRunner(error)).select()
+
+    assert str(exc_info.value) == "folder_dialog_failed"
+    assert "private" not in str(exc_info.value)
 
 
 def test_select_root_cancellation_returns_204_without_token_or_root(tmp_path: Path) -> None:
@@ -299,6 +323,25 @@ def test_select_root_requires_central_session_and_csrf_policy(tmp_path: Path) ->
         missing_session = client.post(
             "/api/libraries/select-root",
             headers=_headers(session),
+        )
+
+    assert missing_csrf.json() == {"code": "csrf_required"}
+    assert missing_session.json() == {"code": "session_required"}
+
+
+def test_register_library_requires_central_session_and_csrf_policy(tmp_path: Path) -> None:
+    session = LocalSession()
+    with _client(tmp_path, session, FakeFolderDialog(), FakeInspector()) as client:
+        missing_csrf = client.post(
+            "/api/libraries",
+            headers={"Origin": "http://testserver"},
+            json={"selection_token": "opaque-capability"},
+        )
+        client.cookies.clear()
+        missing_session = client.post(
+            "/api/libraries",
+            headers=_headers(session),
+            json={"selection_token": "opaque-capability"},
         )
 
     assert missing_csrf.json() == {"code": "csrf_required"}

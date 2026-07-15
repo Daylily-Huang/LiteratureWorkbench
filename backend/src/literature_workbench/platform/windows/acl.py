@@ -1,28 +1,43 @@
 from __future__ import annotations
 
+import base64
 import csv
 import json
 import os
 import re
 import subprocess
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from literature_workbench.platform.windows.filesystem import Win32FileMetadataProvider
+from literature_workbench.platform.windows.filesystem import (
+    OwnedFileHandle,
+    Win32FileMetadataProvider,
+)
 
 
 SYSTEM_SID = "S-1-5-18"
 _SID_PATTERN = re.compile(r"^S-1-(?:\d+-)+\d+$")
 _PRODUCTION_RUNTIME_ROOT = Path(r"D:\LiteratureWorkbenchData\runtime")
 _DACL_SCRIPT = (
-    "$acl=Get-Acl -LiteralPath $args[0];"
+    "$target=[Text.Encoding]::UTF8.GetString("
+    "[Convert]::FromBase64String('__TARGET_B64__'));"
+    "$acl=Get-Acl -LiteralPath $target;"
+    "$sddl=$acl.GetSecurityDescriptorSddlForm("
+    "[System.Security.AccessControl.AccessControlSections]::All);"
+    "$raw=[System.Security.AccessControl.RawSecurityDescriptor]::new($sddl);"
+    "$ownerSid=if($null -ne $raw.Owner){$raw.Owner.Value}else{''};"
+    "$valid=($null -ne $raw.DiscretionaryAcl);"
+    "$protected=(($raw.ControlFlags -band "
+    "[System.Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) -ne 0);"
     "$entries=@($acl.Access | ForEach-Object {"
     "$sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value;"
     "[pscustomobject]@{sid=$sid;rights=$_.FileSystemRights.ToString();"
     "allow=($_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow);"
     "inherited=$_.IsInherited}});"
-    "[pscustomobject]@{valid=$true;protected=$acl.AreAccessRulesProtected;entries=$entries}"
+    "[pscustomobject]@{owner_sid=$ownerSid;valid=$valid;protected=$protected;entries=$entries}"
     "| ConvertTo-Json -Compress -Depth 4"
 )
 
@@ -65,6 +80,7 @@ class AccessControlEntry:
 
 @dataclass(frozen=True, slots=True)
 class DaclSnapshot:
+    owner_sid: str
     valid: bool
     protected: bool
     entries: tuple[AccessControlEntry, ...]
@@ -79,25 +95,48 @@ class PowerShellDaclReader:
         self._runner = runner
 
     def read(self, target: Path) -> DaclSnapshot:
+        encoded_target = base64.b64encode(str(target).encode("utf-8")).decode("ascii")
+        script = _DACL_SCRIPT.replace("__TARGET_B64__", encoded_target)
         result = self._runner.run(
-            ["pwsh.exe", "-NoProfile", "-Command", _DACL_SCRIPT, str(target)]
+            ["pwsh.exe", "-NoProfile", "-Command", script]
         )
         if result.returncode != 0:
             raise AclSecurityError("dacl_read_failed")
         try:
             payload = json.loads(result.stdout)
+            owner_sid = payload["owner_sid"]
+            valid = payload["valid"]
+            protected = payload["protected"]
+            raw_entries = payload["entries"]
+            if (
+                not isinstance(owner_sid, str)
+                or _SID_PATTERN.fullmatch(owner_sid) is None
+                or not isinstance(valid, bool)
+                or not isinstance(protected, bool)
+                or not isinstance(raw_entries, list)
+            ):
+                raise TypeError("invalid DACL payload")
             entries = tuple(
                 AccessControlEntry(
-                    sid=str(entry["sid"]),
-                    rights=str(entry["rights"]),
-                    allow=bool(entry["allow"]),
-                    inherited=bool(entry["inherited"]),
+                    sid=entry["sid"],
+                    rights=entry["rights"],
+                    allow=entry["allow"],
+                    inherited=entry["inherited"],
                 )
-                for entry in payload["entries"]
+                for entry in raw_entries
             )
+            if any(
+                _SID_PATTERN.fullmatch(entry.sid) is None
+                or not isinstance(entry.rights, str)
+                or not isinstance(entry.allow, bool)
+                or not isinstance(entry.inherited, bool)
+                for entry in entries
+            ):
+                raise TypeError("invalid DACL entry")
             return DaclSnapshot(
-                valid=bool(payload["valid"]),
-                protected=bool(payload["protected"]),
+                owner_sid=owner_sid,
+                valid=valid,
+                protected=protected,
                 entries=entries,
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
@@ -120,34 +159,86 @@ class VerifiedAclTarget:
 
 
 class AclPathVerifier(Protocol):
-    def verify(self, target: Path, trusted_root: TrustedRuntimeRoot) -> VerifiedAclTarget: ...
+    def hold(
+        self,
+        target: Path,
+        trusted_root: TrustedRuntimeRoot,
+    ) -> AbstractContextManager[VerifiedAclTarget]: ...
+
+
+class AclHandleProvider(Protocol):
+    def open_directory(
+        self,
+        path: Path,
+        *,
+        share_delete: bool = True,
+    ) -> OwnedFileHandle: ...
+
+    def open_file(
+        self,
+        path: Path,
+        *,
+        share_delete: bool = True,
+    ) -> OwnedFileHandle: ...
 
 
 class WindowsAclPathVerifier:
-    def __init__(self, provider: Win32FileMetadataProvider | None = None) -> None:
+    def __init__(self, provider: AclHandleProvider | None = None) -> None:
         self._provider = provider or Win32FileMetadataProvider()
 
-    def verify(self, target: Path, trusted_root: TrustedRuntimeRoot) -> VerifiedAclTarget:
-        root_handle = self._provider.open_directory(trusted_root.path)
-        target_handle = None
+    @contextmanager
+    def hold(
+        self,
+        target: Path,
+        trusted_root: TrustedRuntimeRoot,
+    ) -> Iterator[VerifiedAclTarget]:
+        root_path = Path(os.path.abspath(trusted_root.path))
+        target_path = Path(os.path.abspath(target))
+        if not self._contained(target_path, root_path):
+            raise AclSecurityError("outside_trusted_root")
+        held_handles: list[OwnedFileHandle] = []
         try:
+            root_handle = self._provider.open_directory(root_path, share_delete=False)
+            held_handles.append(root_handle)
             root = root_handle.metadata
             if not root.is_directory or root.is_reparse_point:
                 raise AclSecurityError("reparse_root")
+
+            relative = Path(os.path.relpath(target_path, root_path))
+            current = root_path
+            for component in relative.parts[:-1]:
+                current /= component
+                component_handle = self._provider.open_directory(
+                    current,
+                    share_delete=False,
+                )
+                held_handles.append(component_handle)
+                metadata = component_handle.metadata
+                if not metadata.is_directory or metadata.is_reparse_point:
+                    raise AclSecurityError("reparse_target")
+                if not self._contained(metadata.final_path, root.final_path):
+                    raise AclSecurityError("outside_trusted_root")
+
             try:
-                target_handle = self._provider.open_directory(target)
+                target_handle = self._provider.open_directory(
+                    target_path,
+                    share_delete=False,
+                )
             except OSError:
-                target_handle = self._provider.open_file(target)
+                target_handle = self._provider.open_file(
+                    target_path,
+                    share_delete=False,
+                )
+            held_handles.append(target_handle)
             metadata = target_handle.metadata
             if metadata.is_reparse_point:
                 raise AclSecurityError("reparse_target")
             if not self._contained(metadata.final_path, root.final_path):
                 raise AclSecurityError("outside_trusted_root")
-            return VerifiedAclTarget(metadata.final_path, metadata.is_directory)
+            yield VerifiedAclTarget(metadata.final_path, metadata.is_directory)
         finally:
-            if target_handle is not None:
-                target_handle.close()
-            root_handle.close()
+            for handle in reversed(held_handles):
+                handle.close()
 
     @staticmethod
     def _contained(candidate: Path, root: Path) -> bool:
@@ -194,7 +285,7 @@ def _verify_final_dacl(
     directory: bool,
 ) -> None:
     expected = {owner_sid, SYSTEM_SID}
-    if not snapshot.valid or not snapshot.protected:
+    if snapshot.owner_sid != owner_sid or not snapshot.valid or not snapshot.protected:
         raise AclSecurityError("dacl_verification_failed")
     if any(
         not entry.allow or entry.inherited or entry.sid not in expected
@@ -223,45 +314,46 @@ def secure_owner_directory(
     resolved_acl_runner = acl_runner or SubprocessAclCommandRunner()
     resolved_sid_runner = sid_runner or SubprocessAclCommandRunner()
     resolved_reader = dacl_reader or PowerShellDaclReader(resolved_acl_runner)
-    verified = (path_verifier or WindowsAclPathVerifier()).verify(target, trusted_runtime_root)
-    owner_sid = _current_user_sid(resolved_sid_runner)
-    initial = resolved_reader.read(verified.canonical_path)
+    verifier = path_verifier or WindowsAclPathVerifier()
+    with verifier.hold(target, trusted_runtime_root) as verified:
+        owner_sid = _current_user_sid(resolved_sid_runner)
+        initial = resolved_reader.read(verified.canonical_path)
 
-    _run_required(
-        resolved_acl_runner,
-        ["icacls.exe", str(verified.canonical_path), "/inheritance:r"],
-    )
-    non_owner_allow_sids = sorted(
-        {
-            entry.sid
-            for entry in initial.entries
-            if entry.allow
-            and not entry.inherited
-            and entry.sid != owner_sid
-        }
-    )
-    for sid in non_owner_allow_sids:
         _run_required(
             resolved_acl_runner,
-            ["icacls.exe", str(verified.canonical_path), "/remove:g", f"*{sid}"],
+            ["icacls.exe", str(verified.canonical_path), "/inheritance:r"],
         )
-    _run_required(
-        resolved_acl_runner,
-        ["icacls.exe", str(verified.canonical_path), "/setowner", f"*{owner_sid}"],
-    )
-    inheritance = "(OI)(CI)" if verified.is_directory else ""
-    _run_required(
-        resolved_acl_runner,
-        [
-            "icacls.exe",
-            str(verified.canonical_path),
-            "/grant:r",
-            f"*{owner_sid}:{inheritance}F",
-            f"*{SYSTEM_SID}:{inheritance}F",
-        ],
-    )
-    _verify_final_dacl(
-        resolved_reader.read(verified.canonical_path),
-        owner_sid=owner_sid,
-        directory=verified.is_directory,
-    )
+        non_owner_allow_sids = sorted(
+            {
+                entry.sid
+                for entry in initial.entries
+                if entry.allow
+                and not entry.inherited
+                and entry.sid != owner_sid
+            }
+        )
+        for sid in non_owner_allow_sids:
+            _run_required(
+                resolved_acl_runner,
+                ["icacls.exe", str(verified.canonical_path), "/remove:g", f"*{sid}"],
+            )
+        _run_required(
+            resolved_acl_runner,
+            ["icacls.exe", str(verified.canonical_path), "/setowner", f"*{owner_sid}"],
+        )
+        inheritance = "(OI)(CI)" if verified.is_directory else ""
+        _run_required(
+            resolved_acl_runner,
+            [
+                "icacls.exe",
+                str(verified.canonical_path),
+                "/grant:r",
+                f"*{owner_sid}:{inheritance}F",
+                f"*{SYSTEM_SID}:{inheritance}F",
+            ],
+        )
+        _verify_final_dacl(
+            resolved_reader.read(verified.canonical_path),
+            owner_sid=owner_sid,
+            directory=verified.is_directory,
+        )

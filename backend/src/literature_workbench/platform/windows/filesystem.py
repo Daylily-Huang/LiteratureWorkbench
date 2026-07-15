@@ -279,7 +279,14 @@ class Win32OwnedFileHandle:
         handle = self._require_handle()
         file_descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
         self._handle = None
-        return os.fdopen(file_descriptor, "rb", closefd=True)
+        try:
+            return os.fdopen(file_descriptor, "rb", closefd=True)
+        except BaseException:
+            try:
+                os.close(file_descriptor)
+            except OSError:
+                pass
+            raise
 
     def close(self) -> None:
         if self._handle is not None:
@@ -293,26 +300,47 @@ class Win32OwnedFileHandle:
 
 
 class Win32FileMetadataProvider:
-    def open_directory(self, path: Path) -> Win32OwnedFileHandle:
+    def open_directory(
+        self,
+        path: Path,
+        *,
+        share_delete: bool = True,
+    ) -> Win32OwnedFileHandle:
         return self._open(
             path,
             access=FILE_READ_ATTRIBUTES | FILE_LIST_DIRECTORY,
             flags=FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            share_delete=share_delete,
         )
 
-    def open_file(self, path: Path) -> Win32OwnedFileHandle:
+    def open_file(
+        self,
+        path: Path,
+        *,
+        share_delete: bool = True,
+    ) -> Win32OwnedFileHandle:
         return self._open(
             path,
             access=GENERIC_READ,
             flags=FILE_FLAG_OPEN_REPARSE_POINT,
+            share_delete=share_delete,
         )
 
     @staticmethod
-    def _open(path: Path, *, access: int, flags: int) -> Win32OwnedFileHandle:
+    def _open(
+        path: Path,
+        *,
+        access: int,
+        flags: int,
+        share_delete: bool,
+    ) -> Win32OwnedFileHandle:
+        share_mode = FILE_SHARE_READ | FILE_SHARE_WRITE
+        if share_delete:
+            share_mode |= FILE_SHARE_DELETE
         raw_handle = _CreateFileW(
             str(path),
             access,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            share_mode,
             None,
             OPEN_EXISTING,
             flags,

@@ -49,9 +49,12 @@ class FolderDialog:
         self._runner = runner or SubprocessCommandRunner()
 
     def select(self) -> Path | None:
-        result = self._runner.run(
-            ["pwsh.exe", "-NoProfile", "-STA", "-Command", FIXED_DIALOG_SCRIPT]
-        )
+        try:
+            result = self._runner.run(
+                ["pwsh.exe", "-NoProfile", "-STA", "-Command", FIXED_DIALOG_SCRIPT]
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise FolderDialogError from None
         if result.returncode != 0:
             raise FolderDialogError
         selected = result.stdout.rstrip("\r\n")
