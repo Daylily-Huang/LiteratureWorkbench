@@ -22,7 +22,7 @@ from literature_workbench.features.library.import_intents import (
     ImportTask,
 )
 from literature_workbench.features.library.models import LibraryRoot
-from literature_workbench.platform.windows.filesystem import SafeFileInspector
+from literature_workbench.platform.windows.filesystem import HandleMetadata, SafeFileInspector
 
 
 MAX_BYTES = 2 * 1024**3
@@ -55,6 +55,32 @@ def _check_transaction(
     fence = getattr(cancellation, "require_current_lease", None)
     if callable(fence):
         fence(connection)
+
+
+def _moved_identity_matches(row: sqlite3.Row, metadata: HandleMetadata) -> bool:
+    return (
+        int(row["cleanup_authorized"]) == 1
+        and row["moved_volume_id"] is not None
+        and row["moved_file_id"] is not None
+        and row["moved_size_bytes"] is not None
+        and row["moved_hard_link_count"] is not None
+        and str(row["moved_volume_id"]) == metadata.volume_id
+        and str(row["moved_file_id"]) == metadata.file_id
+        and int(row["moved_size_bytes"]) == metadata.size
+        and int(row["moved_hard_link_count"]) == metadata.hard_link_count
+    )
+
+
+def _owned_final_matches(final: TrustedImportFile, row: sqlite3.Row) -> bool:
+    metadata = final.metadata()
+    return (
+        os.path.normcase(os.path.abspath(metadata.final_path))
+        == os.path.normcase(os.path.abspath(str(row["final_path_key"])))
+        and not metadata.is_reparse_point
+        and metadata.hard_link_count == 1
+        and _moved_identity_matches(row, metadata)
+        and final.sha256() == str(row["content_sha256"])
+    )
 
 
 class ImportService:
@@ -292,10 +318,11 @@ class ImportService:
         with self._database.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT p.content_sha256,p.final_path_key,i.id,i.expected_size
+                SELECT p.*,i.id,i.expected_size
                 FROM import_promotions AS p
                 JOIN import_intents AS i ON i.id=p.owner_intent_id
-                WHERE p.status='failed' AND i.status='failed'
+                WHERE p.status='failed' AND p.cleanup_authorized=1
+                  AND i.status='failed'
                 """
             ).fetchall()
         for row in rows:
@@ -303,14 +330,9 @@ class ImportService:
             intent_id = UUID(str(row["id"]))
             try:
                 final = self._root.open_final(Path(str(row["final_path_key"])))
-                metadata = final.metadata()
-                if (
-                    metadata.size != int(row["expected_size"])
-                    or metadata.hard_link_count != 1
-                    or final.sha256() != str(row["content_sha256"])
-                ):
+                if not _owned_final_matches(final, row):
                     self._record_failed_recovery(
-                        intent_id, "recovery_failed_promotion_mismatch"
+                        intent_id, "recovery_failed_promotion_identity_mismatch"
                     )
                     continue
                 final.delete()
@@ -456,7 +478,11 @@ class ImportValidator:
                     source = self._root.open_incoming(intent_id, "verify.pdf")
                     if self._validate_held(source, expected_size, cancellation) != digest:
                         raise ValueError("promotion_source_hash_mismatch")
-                except OSError:
+                except OSError as error:
+                    if not isinstance(error, FileNotFoundError) and getattr(
+                        error, "winerror", None
+                    ) not in {2, 3}:
+                        raise
                     source = None
             self._promote(
                 intent_id,
@@ -539,7 +565,11 @@ class ImportValidator:
             acquired = True
             _check(cancellation)
             promotion = self._claim_or_read_promotion(
-                intent_id, digest, proposed_path, cancellation
+                intent_id,
+                digest,
+                proposed_path,
+                None if source is None else source.metadata(),
+                cancellation,
             )
             final_path = Path(str(promotion["final_path_key"]))
             owner = str(promotion["owner_intent_id"]) == str(intent_id)
@@ -549,7 +579,7 @@ class ImportValidator:
                     intent_id,
                     digest,
                     final_path,
-                    expected_size,
+                    source.metadata(),
                     cancellation,
                 )
                 owner = True
@@ -600,8 +630,20 @@ class ImportValidator:
                 _check(cancellation)
                 source.rename_final(relative.parts[0], relative.parts[1], relative.parts[2])
                 _check(cancellation)
+                moved_metadata = source.metadata()
+                if (
+                    os.path.normcase(os.path.abspath(moved_metadata.final_path))
+                    != os.path.normcase(os.path.abspath(final_path))
+                    or moved_metadata.is_reparse_point
+                ):
+                    raise ValueError("promotion_moved_identity_invalid")
                 self._cas_promotion(
-                    digest, intent_id, "claimed", "moved", cancellation
+                    digest,
+                    intent_id,
+                    "claimed",
+                    "moved",
+                    moved_metadata,
+                    cancellation,
                 )
                 final = source
                 source = None
@@ -609,6 +651,13 @@ class ImportValidator:
                 if promotion_status not in {"claimed", "moved"}:
                     raise ValueError("promotion_recovery_unauthorized")
                 final = self._root.open_final(final_path)
+                self._verify_final(final, final_path, digest, expected_size, cancellation)
+                if promotion_status == "claimed":
+                    self._authorize_crash_recovery(
+                        promotion, intent_id, digest, final, cancellation
+                    )
+                elif not _moved_identity_matches(promotion, final.metadata()):
+                    raise ValueError("promotion_recovery_identity_mismatch")
             self._verify_final(final, final_path, digest, expected_size, cancellation)
             _check(cancellation)
             try:
@@ -967,6 +1016,7 @@ class ImportValidator:
         intent_id: UUID,
         digest: str,
         final_path: Path,
+        source_metadata: HandleMetadata | None,
         cancellation: Cancellation | None,
     ) -> sqlite3.Row:
         final_key = os.path.normcase(os.path.abspath(final_path))
@@ -977,13 +1027,26 @@ class ImportValidator:
                 "SELECT * FROM import_promotions WHERE content_sha256=?", (digest,)
             ).fetchone()
             if row is None:
+                if source_metadata is None:
+                    raise ValueError("promotion_source_identity_missing")
                 connection.execute(
                     """
                     INSERT INTO import_promotions(
-                      content_sha256,owner_intent_id,final_path_key,status,updated_at)
-                    VALUES(?,?,?,'claimed',?)
+                      content_sha256,owner_intent_id,final_path_key,status,updated_at,
+                      expected_volume_id,expected_file_id,expected_size_bytes,
+                      expected_hard_link_count,cleanup_authorized,ownership_provenance)
+                    VALUES(?,?,?,'claimed',?,?,?,?,?,0,'source_claim')
                     """,
-                    (digest, str(intent_id), final_key, now),
+                    (
+                        digest,
+                        str(intent_id),
+                        final_key,
+                        now,
+                        source_metadata.volume_id,
+                        source_metadata.file_id,
+                        source_metadata.size,
+                        source_metadata.hard_link_count,
+                    ),
                 )
                 row = connection.execute(
                     "SELECT * FROM import_promotions WHERE content_sha256=?", (digest,)
@@ -998,21 +1061,36 @@ class ImportValidator:
         intent_id: UUID,
         expected: str,
         target: str,
+        moved_metadata: HandleMetadata,
         cancellation: Cancellation | None,
     ) -> None:
         with self._database.transaction() as connection:
             _check_transaction(cancellation, connection)
             changed = connection.execute(
                 """
-                UPDATE import_promotions SET status=?,updated_at=?
+                UPDATE import_promotions SET status=?,updated_at=?,
+                  moved_volume_id=?,moved_file_id=?,moved_size_bytes=?,
+                  moved_hard_link_count=?,cleanup_authorized=1,
+                  ownership_provenance='handle_move'
                 WHERE content_sha256=? AND owner_intent_id=? AND status=?
+                  AND expected_volume_id=? AND expected_file_id=?
+                  AND expected_size_bytes=? AND expected_hard_link_count=?
+                  AND cleanup_authorized=0
                 """,
                 (
                     target,
                     datetime.now(UTC).isoformat(),
+                    moved_metadata.volume_id,
+                    moved_metadata.file_id,
+                    moved_metadata.size,
+                    moved_metadata.hard_link_count,
                     digest,
                     str(intent_id),
                     expected,
+                    moved_metadata.volume_id,
+                    moved_metadata.file_id,
+                    moved_metadata.size,
+                    moved_metadata.hard_link_count,
                 ),
             )
             if changed.rowcount != 1:
@@ -1038,7 +1116,8 @@ class ImportValidator:
                 raise ValueError("import_state_conflict")
             changed = connection.execute(
                 """
-                UPDATE import_promotions SET status='failed',updated_at=?
+                UPDATE import_promotions SET status='failed',cleanup_authorized=0,
+                  ownership_provenance='source_claim',updated_at=?
                 WHERE content_sha256=? AND owner_intent_id=? AND status='claimed'
                 """,
                 (now, digest, str(intent_id)),
@@ -1095,7 +1174,8 @@ class ImportValidator:
                 raise ImportPromotionPending("promotion_conflict_state_retry")
             changed = connection.execute(
                 """
-                UPDATE import_promotions SET status='failed',updated_at=?
+                UPDATE import_promotions SET status='failed',cleanup_authorized=0,
+                  ownership_provenance='source_claim',updated_at=?
                 WHERE content_sha256=? AND owner_intent_id=? AND status='claimed'
                 """,
                 (now, digest, str(intent_id)),
@@ -1147,32 +1227,53 @@ class ImportValidator:
         intent_id: UUID,
         digest: str,
         final_path: Path,
-        expected_size: int,
+        source_metadata: HandleMetadata,
         cancellation: Cancellation | None,
     ) -> sqlite3.Row:
+        with self._database.connect() as connection:
+            promotion = connection.execute(
+                "SELECT * FROM import_promotions WHERE content_sha256=? AND status='failed'",
+                (digest,),
+            ).fetchone()
+        if promotion is None:
+            raise ImportPromotionPending("promotion_takeover_retry")
         failed_final: TrustedImportFile | None = None
-        try:
-            failed_final = self._root.open_final(final_path)
-            self._verify_final(
-                failed_final, final_path, digest, expected_size, cancellation
-            )
-            _check(cancellation)
-            failed_final.delete()
-        except OSError:
-            pass
-        finally:
-            if failed_final is not None:
-                failed_final.close()
+        if int(promotion["cleanup_authorized"]) == 1:
+            try:
+                failed_final = self._root.open_final(final_path)
+                if not _owned_final_matches(failed_final, promotion):
+                    self._record_promotion_recovery_failure(
+                        UUID(str(promotion["owner_intent_id"])),
+                        "recovery_failed_promotion_identity_mismatch",
+                    )
+                    raise ImportPromotionPending(
+                        "promotion_failed_identity_mismatch"
+                    )
+                _check(cancellation)
+                failed_final.delete()
+            except OSError:
+                pass
+            finally:
+                if failed_final is not None:
+                    failed_final.close()
         with self._database.transaction() as connection:
             _check_transaction(cancellation, connection)
             changed = connection.execute(
                 """
-                UPDATE import_promotions SET owner_intent_id=?,status='claimed',updated_at=?
+                UPDATE import_promotions SET owner_intent_id=?,status='claimed',updated_at=?,
+                  expected_volume_id=?,expected_file_id=?,expected_size_bytes=?,
+                  expected_hard_link_count=?,moved_volume_id=NULL,moved_file_id=NULL,
+                  moved_size_bytes=NULL,moved_hard_link_count=NULL,cleanup_authorized=0,
+                  ownership_provenance='source_claim'
                 WHERE content_sha256=? AND status='failed'
                 """,
                 (
                     str(intent_id),
                     datetime.now(UTC).isoformat(),
+                    source_metadata.volume_id,
+                    source_metadata.file_id,
+                    source_metadata.size,
+                    source_metadata.hard_link_count,
                     digest,
                 ),
             )
@@ -1184,6 +1285,74 @@ class ImportValidator:
         if row is None:
             raise ImportPromotionPending("promotion_takeover_retry")
         return cast(sqlite3.Row, row)
+
+    def _record_promotion_recovery_failure(
+        self, intent_id: UUID, error_code: str
+    ) -> None:
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE import_intents SET error_code=?,updated_at=?
+                WHERE id=? AND status='failed'
+                """,
+                (error_code, datetime.now(UTC).isoformat(), str(intent_id)),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("import_state_conflict")
+
+    def _authorize_crash_recovery(
+        self,
+        promotion: sqlite3.Row,
+        intent_id: UUID,
+        digest: str,
+        final: TrustedImportFile,
+        cancellation: Cancellation | None,
+    ) -> None:
+        metadata = final.metadata()
+        if not self._expected_identity_matches(promotion, metadata):
+            raise ValueError("promotion_recovery_identity_mismatch")
+        with self._database.transaction() as connection:
+            _check_transaction(cancellation, connection)
+            changed = connection.execute(
+                """
+                UPDATE import_promotions SET status='moved',updated_at=?,
+                  moved_volume_id=?,moved_file_id=?,moved_size_bytes=?,
+                  moved_hard_link_count=?,cleanup_authorized=1,
+                  ownership_provenance='crash_recovery'
+                WHERE content_sha256=? AND owner_intent_id=? AND status='claimed'
+                  AND cleanup_authorized=0 AND expected_volume_id=?
+                  AND expected_file_id=? AND expected_size_bytes=?
+                  AND expected_hard_link_count=?
+                """,
+                (
+                    datetime.now(UTC).isoformat(),
+                    metadata.volume_id,
+                    metadata.file_id,
+                    metadata.size,
+                    metadata.hard_link_count,
+                    digest,
+                    str(intent_id),
+                    metadata.volume_id,
+                    metadata.file_id,
+                    metadata.size,
+                    metadata.hard_link_count,
+                ),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("promotion_state_conflict")
+
+    @staticmethod
+    def _expected_identity_matches(row: sqlite3.Row, metadata: HandleMetadata) -> bool:
+        return (
+            row["expected_volume_id"] is not None
+            and row["expected_file_id"] is not None
+            and row["expected_size_bytes"] is not None
+            and row["expected_hard_link_count"] is not None
+            and str(row["expected_volume_id"]) == metadata.volume_id
+            and str(row["expected_file_id"]) == metadata.file_id
+            and int(row["expected_size_bytes"]) == metadata.size
+            and int(row["expected_hard_link_count"]) == metadata.hard_link_count
+        )
 
     @staticmethod
     def _acquire_lock(

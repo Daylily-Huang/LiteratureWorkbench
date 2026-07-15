@@ -9,6 +9,8 @@ from literature_workbench.db.database import Database
 
 SCHEMA_V01_PATH = Path(__file__).with_name("schema_v01.sql")
 SCHEMA_V01_VERSION = "0001_v01"
+SCHEMA_V02_PATH = Path(__file__).with_name("schema_v02_import_ownership.sql")
+SCHEMA_V02_VERSION = "0002_import_ownership"
 
 
 def _split_sql_script(script: str) -> list[str]:
@@ -27,26 +29,27 @@ def _split_sql_script(script: str) -> list[str]:
 
 
 def run_migrations(db: Database) -> None:
-    statements = _split_sql_script(SCHEMA_V01_PATH.read_text(encoding="utf-8"))
     with db.transaction() as connection:
-        migrations_table_exists = connection.execute(
-            """
-            SELECT 1
-            FROM sqlite_master
-            WHERE type = 'table' AND name = 'schema_migrations'
-            """
-        ).fetchone()
-        if migrations_table_exists is not None:
-            applied = connection.execute(
-                "SELECT 1 FROM schema_migrations WHERE version = ?",
-                (SCHEMA_V01_VERSION,),
+        for version, path in (
+            (SCHEMA_V01_VERSION, SCHEMA_V01_PATH),
+            (SCHEMA_V02_VERSION, SCHEMA_V02_PATH),
+        ):
+            migrations_table_exists = connection.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'schema_migrations'
+                """
             ).fetchone()
-            if applied is not None:
-                return
-
-        for statement in statements:
-            connection.execute(statement)
-        connection.execute(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-            (SCHEMA_V01_VERSION, datetime.now(UTC).isoformat()),
-        )
+            if migrations_table_exists is not None:
+                applied = connection.execute(
+                    "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
+                ).fetchone()
+                if applied is not None:
+                    continue
+            statements = _split_sql_script(path.read_text(encoding="utf-8"))
+            for statement in statements:
+                connection.execute(statement)
+            connection.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                (version, datetime.now(UTC).isoformat()),
+            )

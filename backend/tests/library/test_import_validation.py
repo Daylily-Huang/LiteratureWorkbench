@@ -231,6 +231,13 @@ def test_preexisting_same_hash_final_with_source_present_is_rejected(
     assert not (tmp_path / "imports" / ".incoming" / f"{created.intent_id}.verify.pdf").exists()
     with database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM confirmed_imports").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT cleanup_authorized FROM import_promotions"
+        ).fetchone()[0] == 0
+
+    service.sweep_failed_promotions()
+
+    assert final.read_bytes() == body
 
 
 def test_destination_created_after_precheck_fails_precisely_and_preserves_both(
@@ -239,7 +246,7 @@ def test_destination_created_after_precheck_fails_precisely_and_preserves_both(
     from literature_workbench.features.library.import_files import TrustedImportFile
 
     body = _valid_pdf()
-    attacker = b"attacker-destination"
+    attacker = body
     repository = ImportIntentRepository(database, _now)
     queue = TaskQueue(database, _now)
     created = repository.create("generation-a", "paper.pdf", len(body), "application/pdf")
@@ -266,6 +273,14 @@ def test_destination_created_after_precheck_fails_precisely_and_preserves_both(
     assert (view.status, view.error_code) == ("failed", "promotion_path_conflict")
     assert target[0].read_bytes() == attacker
     assert trusted.incoming_path(created.intent_id, "verify.pdf").read_bytes() == body
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT cleanup_authorized FROM import_promotions"
+        ).fetchone()[0] == 0
+
+    service.sweep_failed_promotions()
+
+    assert target[0].read_bytes() == attacker
 
 
 def test_worker_rejects_encrypted_pdf(tmp_path: Path, database) -> None:
@@ -1129,6 +1144,200 @@ def test_generic_owner_failure_atomically_fails_promotion_and_waiter_takes_over(
     validator.validate_and_promote(waiter.intent_id)
 
     assert repository.get(waiter.intent_id, "generation-a").status == "completed"
+
+
+def test_failed_claimed_waiter_takeover_never_deletes_unowned_target(
+    tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    owner = repository.create("generation-a", "owner.pdf", len(body), "application/pdf")
+    waiter = repository.create("generation-a", "waiter.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    for item in (owner, waiter):
+        asyncio.run(service.consume(item.intent_id, item.upload_token, _chunks(body)))
+    validator = ImportValidator(database, queue, trusted)
+    original_claim = validator._claim_or_read_promotion
+
+    def fail_after_claim(*args, **kwargs):
+        original_claim(*args, **kwargs)
+        raise ValueError("generic_after_claim")
+
+    monkeypatch.setattr(validator, "_claim_or_read_promotion", fail_after_claim)
+    validator.validate_and_promote(owner.intent_id)
+    monkeypatch.undo()
+    with database.connect() as connection:
+        promotion = connection.execute(
+            "SELECT final_path_key,status,cleanup_authorized FROM import_promotions"
+        ).fetchone()
+    assert (str(promotion["status"]), int(promotion["cleanup_authorized"])) == (
+        "failed",
+        0,
+    )
+    target = Path(str(promotion["final_path_key"]))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(body)
+
+    validator.validate_and_promote(waiter.intent_id)
+
+    assert target.read_bytes() == body
+    view = repository.get(waiter.intent_id, "generation-a")
+    assert (view.status, view.error_code) == ("failed", "promotion_path_conflict")
+
+
+def test_failed_moved_exact_owned_final_is_cleanup_authorized_and_deleted(
+    tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    created = repository.create("generation-a", "owner.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    asyncio.run(service.consume(created.intent_id, created.upload_token, _chunks(body)))
+    validator = ImportValidator(database, queue, trusted)
+    monkeypatch.setattr(
+        validator,
+        "_verify_final",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("generic_after_move")),
+    )
+
+    validator.validate_and_promote(created.intent_id)
+    monkeypatch.undo()
+    with database.connect() as connection:
+        promotion = connection.execute(
+            """
+            SELECT final_path_key,status,cleanup_authorized,moved_volume_id,moved_file_id,
+                   moved_size_bytes,moved_hard_link_count
+            FROM import_promotions
+            """
+        ).fetchone()
+    assert (str(promotion["status"]), int(promotion["cleanup_authorized"])) == (
+        "failed",
+        1,
+    )
+    assert all(
+        promotion[column] is not None
+        for column in (
+            "moved_volume_id",
+            "moved_file_id",
+            "moved_size_bytes",
+            "moved_hard_link_count",
+        )
+    )
+    final_path = Path(str(promotion["final_path_key"]))
+    assert final_path.exists()
+
+    service.sweep_failed_promotions()
+
+    assert not final_path.exists()
+
+
+def test_failed_moved_same_bytes_replacement_is_preserved_by_file_identity(
+    tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    created = repository.create("generation-a", "owner.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    asyncio.run(service.consume(created.intent_id, created.upload_token, _chunks(body)))
+    validator = ImportValidator(database, queue, trusted)
+    monkeypatch.setattr(
+        validator,
+        "_verify_final",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("generic_after_move")),
+    )
+    validator.validate_and_promote(created.intent_id)
+    monkeypatch.undo()
+    with database.connect() as connection:
+        promotion = connection.execute(
+            "SELECT final_path_key,moved_file_id FROM import_promotions"
+        ).fetchone()
+    final_path = Path(str(promotion["final_path_key"]))
+    owned_file_id = str(promotion["moved_file_id"])
+    replacement_path = final_path.with_name("replacement.pdf")
+    replacement_path.write_bytes(body)
+    final_path.unlink()
+    replacement_path.rename(final_path)
+    replacement = trusted.open_final(final_path)
+    try:
+        assert replacement.metadata().file_id != owned_file_id
+    finally:
+        replacement.close()
+
+    service.sweep_failed_promotions()
+
+    assert final_path.read_bytes() == body
+    assert repository.get(created.intent_id, "generation-a").error_code == (
+        "recovery_failed_promotion_identity_mismatch"
+    )
+
+
+def test_crash_after_move_before_moved_mark_recovers_owned_identity(
+    tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    created = repository.create("generation-a", "owner.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    asyncio.run(service.consume(created.intent_id, created.upload_token, _chunks(body)))
+    validator = ImportValidator(database, queue, trusted)
+    original_cas = validator._cas_promotion
+
+    def crash_before_moved_mark(*args, **kwargs) -> None:
+        raise RuntimeError("crash_before_moved_mark")
+
+    monkeypatch.setattr(validator, "_cas_promotion", crash_before_moved_mark)
+    with pytest.raises(RuntimeError, match="crash_before_moved_mark"):
+        validator.validate_and_promote(created.intent_id)
+    with database.connect() as connection:
+        promotion = connection.execute(
+            """
+            SELECT final_path_key,status,cleanup_authorized,expected_volume_id,
+                   expected_file_id,expected_size_bytes,expected_hard_link_count
+            FROM import_promotions
+            """
+        ).fetchone()
+    assert (str(promotion["status"]), int(promotion["cleanup_authorized"])) == (
+        "claimed",
+        0,
+    )
+    assert all(
+        promotion[column] is not None
+        for column in (
+            "expected_volume_id",
+            "expected_file_id",
+            "expected_size_bytes",
+            "expected_hard_link_count",
+        )
+    )
+    assert Path(str(promotion["final_path_key"])).exists()
+    assert not trusted.incoming_path(created.intent_id, "verify.pdf").exists()
+
+    monkeypatch.setattr(validator, "_cas_promotion", original_cas)
+    validator.validate_and_promote(created.intent_id)
+
+    assert repository.get(created.intent_id, "generation-a").status == "completed"
+    with database.connect() as connection:
+        promotion = connection.execute(
+            """
+            SELECT status,cleanup_authorized,ownership_provenance,moved_file_id
+            FROM import_promotions
+            """
+        ).fetchone()
+        document_file_id = connection.execute("SELECT file_id FROM documents").fetchone()[0]
+    assert tuple(promotion) == (
+        "completed",
+        1,
+        "crash_recovery",
+        str(document_file_id),
+    )
 
 
 def test_single_worker_prioritizes_crashed_owner_after_older_waiter_requeue(
