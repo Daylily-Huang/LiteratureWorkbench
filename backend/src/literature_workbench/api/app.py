@@ -17,6 +17,7 @@ from literature_workbench.db.migrations import run_migrations
 from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.features.settings.service import SettingsService
+from literature_workbench.features.library.coordinator import LibraryScanCoordinator
 from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.features.library.roots import LibraryRootService
 from literature_workbench.features.library.scanner import LibraryScanner
@@ -76,8 +77,14 @@ def create_app(
         app.state.library_root_service = LibraryRootService(
             library_repository, resolved_inspector
         )
+        library_scan_coordinator = LibraryScanCoordinator()
+        app.state.library_scan_coordinator = library_scan_coordinator
         app.state.library_scanner = LibraryScanner(
-            database, library_repository, resolved_inspector, task_queue
+            database,
+            library_repository,
+            resolved_inspector,
+            task_queue,
+            coordinator=library_scan_coordinator,
         )
         if register_initial_library and library_repository.count() == 0:
             app.state.library_root_service.register_initial_approved_library()

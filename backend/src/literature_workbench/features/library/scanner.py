@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 from literature_workbench.db.database import Database
 from literature_workbench.db.task_queue import TaskQueue
+from literature_workbench.features.library.coordinator import LibraryScanCoordinator
 from literature_workbench.features.library.fingerprint import (
     ContentFingerprint,
     fingerprint_verified_pdf,
@@ -62,13 +63,20 @@ class LibraryScanner:
         repository: LibraryRepository,
         inspector: SafeFileInspector,
         queue: TaskQueue,
+        *,
+        coordinator: LibraryScanCoordinator | None = None,
     ) -> None:
         self._database = database
         self._repository = repository
         self._inspector = inspector
         self._queue = queue
+        self._coordinator = coordinator or LibraryScanCoordinator()
 
     def scan_library(self, library_id: UUID) -> ScanSummary:
+        with self._coordinator.acquire(library_id):
+            return self._scan_library(library_id)
+
+    def _scan_library(self, library_id: UUID) -> ScanSummary:
         library = self._repository.get(library_id)
         if library.discovery_mode == "managed_import":
             return ScanSummary(0, 0, 0, 0, ())
@@ -100,6 +108,12 @@ class LibraryScanner:
         return self.reconcile_paths(library_id, (path,))
 
     def reconcile_paths(self, library_id: UUID, paths: list[Path] | tuple[Path, ...]) -> ScanSummary:
+        with self._coordinator.acquire(library_id):
+            return self._reconcile_paths(library_id, paths)
+
+    def _reconcile_paths(
+        self, library_id: UUID, paths: list[Path] | tuple[Path, ...]
+    ) -> ScanSummary:
         library = self._repository.get(library_id)
         if library.discovery_mode == "managed_import":
             return ScanSummary(0, 0, 0, 0, ())
@@ -147,11 +161,16 @@ class LibraryScanner:
             elif stat.S_ISREG(metadata.st_mode):
                 candidates.append(candidate)
 
+        final_root_failed = False
         try:
             self._require_current_root(library)
         except (OSError, UnsafePath):
             unsafe_paths += 1
             incomplete = True
+            final_root_failed = True
+        if final_root_failed:
+            candidates = []
+            incomplete_paths = [root]
 
         unique_candidates = {
             os.path.normcase(os.path.abspath(path)): path for path in candidates

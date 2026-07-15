@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event, Thread, current_thread
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,6 +15,7 @@ from literature_workbench.db.database import Database
 from literature_workbench.db.migrations import run_migrations
 from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.library.repository import LibraryRepository
+from literature_workbench.features.library.coordinator import LibraryScanCoordinator
 from literature_workbench.features.library.scanner import LibraryScanner
 import literature_workbench.features.library.scanner as scanner_module
 from literature_workbench.platform.windows.filesystem import (
@@ -268,6 +271,60 @@ def test_last_root_check_failure_discards_every_discovered_candidate(tmp_path: P
     assert rows[0]["auto_cloud_eligible"] == 0
 
 
+def test_incremental_last_root_check_failure_discards_batch_and_invalidates_root(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "library"
+    root.mkdir()
+    existing = root / "existing.pdf"
+    existing.write_bytes(_pdf(b"existing"))
+    delegate = SafeWindowsFileInspector()
+    root_identity = delegate.inspect_root_directory(root)
+    database = Database.open(tmp_path / "db.sqlite3")
+    run_migrations(database)
+    repository = LibraryRepository(database)
+    queue = TaskQueue(database, lambda: datetime.now(UTC))
+    library = repository.register(
+        root_identity, recursive=True, authorization_source="native_picker_confirmed"
+    )
+    LibraryScanner(database, repository, delegate, queue).scan_library(library.id)
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE documents SET status = 'valid_pdf', auto_cloud_eligible = 1"
+        )
+    added = root / "added.pdf"
+    added.write_bytes(_pdf(b"added"))
+    checks = 0
+
+    class LastIncrementalCheckFails:
+        def __getattr__(self, name: str):
+            return getattr(delegate, name)
+
+        def inspect_root_directory(self, candidate: Path) -> RootIdentity:
+            nonlocal checks
+            checks += 1
+            if checks == 2:
+                raise UnsafePath("final_incremental_root_identity_failed")
+            return delegate.inspect_root_directory(candidate)
+
+    scanner = LibraryScanner(
+        database,
+        repository,
+        LastIncrementalCheckFails(),
+        queue,
+    )
+
+    summary = scanner.reconcile_paths(library.id, (existing, added))
+
+    assert summary.unsafe_paths >= 1
+    with database.connect() as connection:
+        rows = connection.execute("SELECT * FROM documents").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["display_name"] == "existing.pdf"
+    assert rows[0]["status"] == "incomplete"
+    assert rows[0]["auto_cloud_eligible"] == 0
+
+
 def test_incremental_scan_status_remains_full_library_aggregate(
     scanner_env: tuple[LibraryScanner, Database, LibraryRepository, TaskQueue],
     tmp_path: Path,
@@ -293,6 +350,90 @@ def test_incremental_scan_status_remains_full_library_aggregate(
     assert status["pdf_paths"] == 3
     assert status["unique_contents"] == 3
     assert status["duplicate_groups"] == 0
+
+
+def test_full_and_incremental_scans_share_one_snapshot_lock(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    root.mkdir()
+    paper = root / "paper.pdf"
+    paper.write_bytes(_pdf(b"old"))
+    delegate = SafeWindowsFileInspector()
+    database = Database.open(tmp_path / "db.sqlite3")
+    run_migrations(database)
+    repository = LibraryRepository(database)
+    queue = TaskQueue(database, lambda: datetime.now(UTC))
+    library = repository.register(
+        delegate.inspect_root_directory(root),
+        recursive=True,
+        authorization_source="native_picker_confirmed",
+    )
+    coordinator = LibraryScanCoordinator()
+    old_reconcile_reached = Event()
+    release_old = Event()
+    new_started = Event()
+    new_root_check = Event()
+    errors: list[BaseException] = []
+
+    class SignalingInspector:
+        def __getattr__(self, name: str):
+            return getattr(delegate, name)
+
+        def inspect_root_directory(self, candidate: Path) -> RootIdentity:
+            if current_thread().name == "scan-new":
+                new_root_check.set()
+            return delegate.inspect_root_directory(candidate)
+
+    class PausingScanner(LibraryScanner):
+        def _reconcile(self, *args, **kwargs):
+            old_reconcile_reached.set()
+            if not release_old.wait(5):
+                raise TimeoutError("old_scan_not_released")
+            return super()._reconcile(*args, **kwargs)
+
+    inspector = SignalingInspector()
+    old_scanner = PausingScanner(
+        database, repository, inspector, queue, coordinator=coordinator
+    )
+    new_scanner = LibraryScanner(
+        database, repository, inspector, queue, coordinator=coordinator
+    )
+
+    def run_old() -> None:
+        try:
+            old_scanner.scan_library(library.id)
+        except BaseException as error:
+            errors.append(error)
+
+    def run_new() -> None:
+        new_started.set()
+        try:
+            new_scanner.reconcile_path(library.id, paper)
+        except BaseException as error:
+            errors.append(error)
+
+    old_thread = Thread(target=run_old, name="scan-old")
+    new_thread = Thread(target=run_new, name="scan-new")
+    old_thread.start()
+    assert old_reconcile_reached.wait(2)
+    paper.write_bytes(_pdf(b"new"))
+    expected_stat = paper.stat()
+    expected_hash = hashlib.sha256(paper.read_bytes()).hexdigest()
+    new_thread.start()
+    assert new_started.wait(1)
+    overtook_old_scan = new_root_check.wait(0.5)
+    release_old.set()
+    old_thread.join(5)
+    new_thread.join(5)
+
+    assert not overtook_old_scan
+    assert not old_thread.is_alive()
+    assert not new_thread.is_alive()
+    assert errors == []
+    with database.connect() as connection:
+        document = connection.execute("SELECT * FROM documents").fetchone()
+    assert document["content_sha256"] == expected_hash
+    assert document["size_bytes"] == expected_stat.st_size
+    assert document["mtime_ns"] == expected_stat.st_mtime_ns
 
 
 def test_deleted_hardlink_refreshes_active_peer_and_never_resurrects_missing_history(
