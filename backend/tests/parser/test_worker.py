@@ -7,7 +7,7 @@ import os
 import threading
 from dataclasses import replace
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import literature_workbench.features.parser.workspace as parser_workspace
@@ -20,6 +20,7 @@ from literature_workbench.features.parser.worker import ParseJobFailure, ParseWo
 from literature_workbench.features.parser.workspace import (
     TrustedParserFile,
     TrustedParserDirectory,
+    TrustedMinerUResult,
     TrustedParserWorkspace,
     UnsafeParserWorkspace,
 )
@@ -323,6 +324,55 @@ def test_journal_first_frame_and_delete_flush_parent_after_handle_close(
     journal.close()
 
     assert calls == [journal.path.parent, journal.path.parent]
+    workspace.close()
+
+
+@pytest.mark.parametrize("replace_entry", [False, True])
+def test_copying_recovery_uses_complete_identity_ledger(
+    parser_library: ParserLibraryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    replace_entry: bool,
+) -> None:
+    registered = parser_library.register("copy-ledger.pdf", _pdf_bytes(text=False))
+    run_id = uuid4()
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    work = workspace.create_mineru_work(run_id)
+    (work.path / "result.json").write_text("original", encoding="utf-8")
+    sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
+    original_update = TrustedMinerUResult.update_journal
+    original_delete = TrustedParserDirectory.delete
+
+    def crash_before_promoted(self: TrustedMinerUResult, state: str) -> None:
+        if state == "promoted":
+            raise OSError("crash before promoted frame")
+        original_update(self, state)
+
+    def preserve_root(self: TrustedParserDirectory) -> None:
+        if self.path.name == str(run_id):
+            raise OSError("simulate hard crash")
+        original_delete(self)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(TrustedMinerUResult, "update_journal", crash_before_promoted)
+        scoped.setattr(TrustedParserDirectory, "delete", preserve_root)
+        with pytest.raises(OSError, match="crash before promoted frame"):
+            workspace.promote_sealed_mineru_result(sealed)
+
+    parent = parser_library.data_root / "parse-results" / registered.content_id
+    replacement = parent / str(run_id) / "result.json"
+    if replace_entry:
+        replacement.unlink()
+        replacement.write_text("replacement", encoding="utf-8")
+
+    cleaned = workspace.cleanup_interrupted_promotion(sealed)
+    assert cleaned is not replace_entry
+    if replace_entry:
+        assert replacement.exists()
+        assert (parent / f"{run_id}.promotion.json").exists()
+    else:
+        promoted = workspace.promote_sealed_mineru_result(sealed)
+        promoted.close()
+    sealed.close()
     workspace.close()
 
 
@@ -762,6 +812,19 @@ def test_retry_recovers_promoted_manifest_after_database_failure(
     assert len(str(long_result_file)) > 260
     latest_frame = journal.read_bytes().splitlines()[-1]
     assert json.loads(latest_frame.split(b":", 1)[1])["state"] == expected_journal_state
+    leftover_workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    leftover_work = leftover_workspace.create_mineru_work(UUID(run_id))
+    leftover_journal = leftover_workspace.create_mineru_work_journal(
+        leftover_work,
+        registered.content_id,
+        UUID(run_id),
+        job.id,
+        int(job.payload["request_revision"]),
+        str(cancellation.state["mineru_input_stem"]),
+    )
+    leftover_journal.close()
+    leftover_work.close()
+    leftover_workspace.close()
 
     class MustNotRerunMinerU:
         def run(self, *_args: object) -> ProcessOutcome:
@@ -792,9 +855,10 @@ def test_retry_recovers_promoted_manifest_after_database_failure(
         ).read_text(encoding="utf-8")
     )
     assert pointer["manifest_digest"] == cancellation.state["mineru_manifest_digest"]
+    assert list((parser_library.data_root / "mineru-work").iterdir()) == []
 
 
-@pytest.mark.parametrize("work_state", ["runner_finished", "sealed"])
+@pytest.mark.parametrize("work_state", ["created", "runner_finished", "sealed"])
 def test_empty_checkpoint_recovers_finished_work_without_rerunning_mineru(
     parser_library: ParserLibraryFixture,
     work_state: str,

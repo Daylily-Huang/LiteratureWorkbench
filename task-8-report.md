@@ -1,10 +1,10 @@
-# Task 8 交付报告：PDF 解析链路第四轮加固
+# Task 8 交付报告：PDF 解析链路第五轮加固
 
 日期：2026-07-15
 
 ## 交付结论
 
-本报告累计覆盖 Task 8 第二至第四轮审查修复。实现及测试仅使用临时目录、合成 PDF 和假的 MinerU runner；未调用真实 MinerU、未读取真实论文、未创建或写入 `D:\LiteratureWorkbenchData`。
+本报告累计覆盖 Task 8 第二至第五轮审查修复。实现及测试仅使用临时目录、合成 PDF 和假的 MinerU runner；未调用真实 MinerU、未读取真实论文、未创建或写入 `D:\LiteratureWorkbenchData`。
 
 ## 已完成项
 
@@ -20,7 +20,10 @@
 - copying 故障通过仍持有的文件和目录句柄逆序清理 partial result 与 promotion journal；未知对象不做路径式删除。
 - work journal 首帧绑定 work root volume/file identity；空 checkpoint 的新进程可从数据库 running run 恢复 created、runner_finished、sealed 三态。created 仅在有证清理后重新开始，后两态不重跑 MinerU。
 - copying journal 先写 fail-closed intent，destination 创建后再追加 root identity frame；硬崩溃恢复只清理来源 manifest 的安全前缀，未知额外项保留。
+- copying journal 逐项记录目录及文件身份、大小与摘要；完整 destination 已复制但尚未写入 promoted 时，可按最新完整 ledger 精确清理并重新发布。同名替换、额外项或缺失身份帧均保留现场。
 - promotion 异常只有在 destination root 句柄确认删除成功后才删除 journal；root delete 失败会保留 journal 与现场。
+- created work 恢复优先尝试封存、打开并验证现有输出；输出有效时不重跑 MinerU，只有验证失败且精确清理成功后才开始一次新 run。
+- 直接打开已 promoted 的结果后，会 best-effort 清理同一 run 的 work 与 journal；清理失败不改变已验证结果的业务成功状态。
 - 所有 append-only journal 首帧在文件 flush 后同步 flush 父目录；journal 删除在 delete handle 真正 close 后同步 flush 父目录。
 - Windows 长路径统一使用 `\\?\` Win32 路径拼写，覆盖深层结果树的创建、扫描和重新打开。
 - Windows Job Object 实测可并发排空大于 64 KiB 的 stdout/stderr，保留各自最后 64 KiB；取消后派生进程无残留。
@@ -28,7 +31,7 @@
 
 ## 验证结果
 
-- 后端：`390 passed, 2 skipped`（跳过项为显式 opt-in 测试）。
+- 后端：`393 passed, 2 skipped`（跳过项为显式 opt-in 测试）。
 - Ruff：`All checks passed!`
 - mypy：`Success: no issues found in 48 source files`
 - Web Vitest：`6 passed`，共 `25 passed`

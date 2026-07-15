@@ -501,12 +501,19 @@ class ParseWorkerService:
             raise ParseJobFailure("stale_parse_publication", retryable=False)
         result: TrustedMinerUResult | None = None
         pages: list[ParsedPage] | None = None
+        opened_promoted_result = False
         try:
             try:
                 result = self._ensure_workspace().open_sealed_mineru_result(
                     content_id, run_id
                 )
-            except FileNotFoundError:
+                opened_promoted_result = True
+            except (FileNotFoundError, UnsafeParserWorkspace) as open_error:
+                if (
+                    isinstance(open_error, UnsafeParserWorkspace)
+                    and str(open_error) != "mineru_promotion_journal_mismatch"
+                ):
+                    raise
                 work, work_journal, work_state, work_stem = (
                     self._ensure_workspace().open_recoverable_mineru_work(
                         content_id,
@@ -517,22 +524,7 @@ class ParseWorkerService:
                     )
                 )
                 work_journal.close()
-                if work_state == "created":
-                    work.close()
-                    cleaned = self._ensure_workspace().cleanup_mineru_work(
-                        run_id,
-                        content_id,
-                        job.id,
-                        request_revision,
-                        work_stem,
-                    )
-                    if not cleaned:
-                        raise ParseJobFailure(
-                            "mineru_work_recovery_unsafe", retryable=False
-                        )
-                    self._fail_run_if_running(run_id, "mineru_interrupted_before_run")
-                    return False
-                if work_state == "runner_finished":
+                if work_state in {"created", "runner_finished"}:
                     try:
                         result = self._ensure_workspace().seal_mineru_work(
                             content_id,
@@ -550,13 +542,32 @@ class ParseWorkerService:
                     result = self._ensure_workspace().open_sealed_mineru_work(
                         content_id, run_id, work
                     )
-                pages = validate_mineru_output(
-                    staged,
-                    run_id,
-                    result.path,
-                    str(run["parser_version"]),
-                    output_stem=work_stem,
-                )
+                try:
+                    pages = validate_mineru_output(
+                        staged,
+                        run_id,
+                        result.path,
+                        str(run["parser_version"]),
+                        output_stem=work_stem,
+                    )
+                except MinerUFailed:
+                    if work_state != "created":
+                        raise
+                    result.close()
+                    result = None
+                    cleaned = self._ensure_workspace().cleanup_mineru_work(
+                        run_id,
+                        content_id,
+                        job.id,
+                        request_revision,
+                        work_stem,
+                    )
+                    if not cleaned:
+                        raise ParseJobFailure(
+                            "mineru_work_recovery_unsafe", retryable=False
+                        )
+                    self._fail_run_if_running(run_id, "mineru_interrupted_before_run")
+                    return False
                 try:
                     result = self._ensure_workspace().promote_sealed_mineru_result(result)
                 except FileExistsError:
@@ -584,6 +595,14 @@ class ParseWorkerService:
             ):
                 raise ParseJobFailure(
                     "mineru_recovery_manifest_mismatch", retryable=False
+                )
+            if opened_promoted_result:
+                self._ensure_workspace().cleanup_mineru_work(
+                    run_id,
+                    content_id,
+                    job.id,
+                    request_revision,
+                    result.input_stem,
                 )
             checkpoint_state.update(
                 {
