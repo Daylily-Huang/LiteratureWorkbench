@@ -36,7 +36,8 @@ _DACL_SCRIPT = (
     "$sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value;"
     "[pscustomobject]@{sid=$sid;rights=$_.FileSystemRights.ToString();"
     "allow=($_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow);"
-    "inherited=$_.IsInherited}});"
+    "inherited=$_.IsInherited;inheritance_flags=$_.InheritanceFlags.ToString();"
+    "propagation_flags=$_.PropagationFlags.ToString()}});"
     "[pscustomobject]@{owner_sid=$ownerSid;valid=$valid;protected=$protected;entries=$entries}"
     "| ConvertTo-Json -Compress -Depth 4"
 )
@@ -59,14 +60,17 @@ class AclCommandRunner(Protocol):
 
 class SubprocessAclCommandRunner:
     def run(self, arguments: list[str]) -> AclCommandResult:
-        completed = subprocess.run(
-            arguments,
-            shell=False,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        try:
+            completed = subprocess.run(
+                arguments,
+                shell=False,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise AclSecurityError("acl_command_failed") from None
         return AclCommandResult(completed.returncode, completed.stdout, completed.stderr)
 
 
@@ -76,6 +80,8 @@ class AccessControlEntry:
     rights: str
     allow: bool
     inherited: bool
+    inheritance_flags: str
+    propagation_flags: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,9 +103,12 @@ class PowerShellDaclReader:
     def read(self, target: Path) -> DaclSnapshot:
         encoded_target = base64.b64encode(str(target).encode("utf-8")).decode("ascii")
         script = _DACL_SCRIPT.replace("__TARGET_B64__", encoded_target)
-        result = self._runner.run(
-            ["pwsh.exe", "-NoProfile", "-Command", script]
-        )
+        try:
+            result = self._runner.run(
+                ["pwsh.exe", "-NoProfile", "-Command", script]
+            )
+        except (OSError, subprocess.TimeoutExpired, AclSecurityError):
+            raise AclSecurityError("dacl_read_failed") from None
         if result.returncode != 0:
             raise AclSecurityError("dacl_read_failed")
         try:
@@ -122,6 +131,8 @@ class PowerShellDaclReader:
                     rights=entry["rights"],
                     allow=entry["allow"],
                     inherited=entry["inherited"],
+                    inheritance_flags=entry["inheritance_flags"],
+                    propagation_flags=entry["propagation_flags"],
                 )
                 for entry in raw_entries
             )
@@ -130,6 +141,8 @@ class PowerShellDaclReader:
                 or not isinstance(entry.rights, str)
                 or not isinstance(entry.allow, bool)
                 or not isinstance(entry.inherited, bool)
+                or not isinstance(entry.inheritance_flags, str)
+                or not isinstance(entry.propagation_flags, str)
                 for entry in entries
             ):
                 raise TypeError("invalid DACL entry")
@@ -251,12 +264,19 @@ class WindowsAclPathVerifier:
 
 
 def _run_required(runner: AclCommandRunner, arguments: list[str]) -> None:
-    if runner.run(arguments).returncode != 0:
+    try:
+        result = runner.run(arguments)
+    except (OSError, subprocess.TimeoutExpired, AclSecurityError):
+        raise AclSecurityError("acl_command_failed") from None
+    if result.returncode != 0:
         raise AclSecurityError("acl_command_failed")
 
 
 def _current_user_sid(runner: AclCommandRunner) -> str:
-    result = runner.run(["whoami.exe", "/user", "/fo", "csv", "/nh"])
+    try:
+        result = runner.run(["whoami.exe", "/user", "/fo", "csv", "/nh"])
+    except (OSError, subprocess.TimeoutExpired, AclSecurityError):
+        raise AclSecurityError("invalid_current_user_sid") from None
     if result.returncode != 0:
         raise AclSecurityError("invalid_current_user_sid")
     try:
@@ -278,6 +298,15 @@ def _has_required_rights(entry: AccessControlEntry, *, directory: bool) -> bool:
     return rights == "F"
 
 
+def _has_required_directory_inheritance(entry: AccessControlEntry) -> bool:
+    flags = {
+        flag.strip().casefold()
+        for flag in entry.inheritance_flags.split(",")
+        if flag.strip()
+    }
+    return {"containerinherit", "objectinherit"}.issubset(flags)
+
+
 def _verify_final_dacl(
     snapshot: DaclSnapshot,
     *,
@@ -297,6 +326,11 @@ def _verify_final_dacl(
         raise AclSecurityError("dacl_verification_failed")
     if any(
         not _has_required_rights(by_sid[sid], directory=directory)
+        for sid in expected
+    ):
+        raise AclSecurityError("dacl_verification_failed")
+    if directory and any(
+        not _has_required_directory_inheritance(by_sid[sid])
         for sid in expected
     ):
         raise AclSecurityError("dacl_verification_failed")

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import subprocess
+import traceback
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -13,6 +17,7 @@ from literature_workbench.platform.windows.acl import (
     AclSecurityError,
     DaclSnapshot,
     PowerShellDaclReader,
+    SubprocessAclCommandRunner,
     TrustedRuntimeRoot,
     VerifiedAclTarget,
     WindowsAclPathVerifier,
@@ -23,6 +28,7 @@ from literature_workbench.platform.windows.filesystem import HandleMetadata
 
 OWNER_SID = "S-1-5-21-100-200-300-400"
 FOREIGN_SID = "S-1-5-32-545"
+HOSTILE_SENTINEL = r"C:\private\token-secret-should-not-escape"
 
 
 class FakeRunner:
@@ -35,6 +41,14 @@ class FakeRunner:
         if self.results:
             return self.results.popleft()
         return AclCommandResult(0, "", "")
+
+
+@dataclass(slots=True)
+class RaisingAclRunner:
+    error: BaseException
+
+    def run(self, arguments: list[str]) -> AclCommandResult:
+        raise self.error
 
 
 class FakeDaclReader:
@@ -158,7 +172,14 @@ class FakePathVerifier:
 
 
 def _ace(sid: str, rights: str = "F") -> AccessControlEntry:
-    return AccessControlEntry(sid=sid, rights=rights, allow=True, inherited=False)
+    return AccessControlEntry(
+        sid=sid,
+        rights=rights,
+        allow=True,
+        inherited=False,
+        inheritance_flags="ContainerInherit, ObjectInherit",
+        propagation_flags="None",
+    )
 
 
 def _snapshot(*aces: AccessControlEntry, valid: bool = True, protected: bool = True) -> DaclSnapshot:
@@ -431,3 +452,158 @@ def test_acl_command_exit_failure_is_fatal_even_before_dacl_verification(tmp_pat
         )
 
     assert "sensitive diagnostic" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError(f"launch failed: {HOSTILE_SENTINEL}"),
+        subprocess.TimeoutExpired(
+            ["icacls.exe", HOSTILE_SENTINEL],
+            60,
+            output=HOSTILE_SENTINEL,
+            stderr=HOSTILE_SENTINEL,
+        ),
+    ],
+)
+def test_subprocess_acl_runner_sanitizes_process_failures_at_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error: BaseException,
+) -> None:
+    def fail_run(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(subprocess, "run", fail_run)
+
+    with pytest.raises(AclSecurityError) as exc_info:
+        SubprocessAclCommandRunner().run(["icacls.exe", HOSTILE_SENTINEL])
+
+    rendered = "".join(traceback.format_exception(exc_info.value))
+    assert str(exc_info.value) == "acl_command_failed"
+    assert HOSTILE_SENTINEL not in repr(exc_info.value)
+    assert HOSTILE_SENTINEL not in rendered
+    assert HOSTILE_SENTINEL not in caplog.text
+
+
+@pytest.mark.parametrize("surface", ["sid", "icacls", "descriptor"])
+def test_acl_call_surfaces_sanitize_injected_runner_failures(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    surface: str,
+) -> None:
+    target = tmp_path / "private-token-root"
+    hostile_error = OSError(f"{HOSTILE_SENTINEL}; target={target}")
+    sid_runner = (
+        RaisingAclRunner(hostile_error)
+        if surface == "sid"
+        else FakeRunner(AclCommandResult(0, f'"user","{OWNER_SID}"', ""))
+    )
+    acl_runner = RaisingAclRunner(hostile_error) if surface == "icacls" else FakeRunner()
+    reader = (
+        PowerShellDaclReader(RaisingAclRunner(hostile_error))
+        if surface == "descriptor"
+        else FakeDaclReader(
+            _snapshot(),
+            _snapshot(_ace(OWNER_SID, "(OI)(CI)F"), _ace(SYSTEM_SID, "(OI)(CI)F")),
+        )
+    )
+
+    with pytest.raises(AclSecurityError) as exc_info:
+        secure_owner_directory(
+            target,
+            _trusted(tmp_path),
+            sid_runner=sid_runner,
+            acl_runner=acl_runner,
+            dacl_reader=reader,
+            path_verifier=FakePathVerifier(_verified(target)),
+        )
+
+    expected = {
+        "sid": "invalid_current_user_sid",
+        "icacls": "acl_command_failed",
+        "descriptor": "dacl_read_failed",
+    }[surface]
+    rendered = "".join(traceback.format_exception(exc_info.value))
+    assert str(exc_info.value) == expected
+    assert HOSTILE_SENTINEL not in repr(exc_info.value)
+    assert HOSTILE_SENTINEL not in rendered
+    assert str(target) not in rendered
+    assert HOSTILE_SENTINEL not in caplog.text
+
+
+def test_dacl_reader_collects_inheritance_and_propagation_flags(tmp_path: Path) -> None:
+    payload = (
+        '{"owner_sid":"S-1-5-21-7","valid":true,"protected":true,'
+        '"entries":[{"sid":"S-1-5-21-7","rights":"FullControl",'
+        '"allow":true,"inherited":false,'
+        '"inheritance_flags":"ContainerInherit, ObjectInherit",'
+        '"propagation_flags":"None"}]}'
+    )
+    runner = FakeRunner(AclCommandResult(0, payload, ""))
+
+    snapshot = PowerShellDaclReader(runner).read(tmp_path / "tokens")
+
+    assert snapshot.entries[0].inheritance_flags == "ContainerInherit, ObjectInherit"
+    assert snapshot.entries[0].propagation_flags == "None"
+    assert "InheritanceFlags" in runner.calls[0][3]
+    assert "PropagationFlags" in runner.calls[0][3]
+
+
+def test_dacl_reader_rejects_non_string_inheritance_flags(tmp_path: Path) -> None:
+    payload = (
+        '{"owner_sid":"S-1-5-21-7","valid":true,"protected":true,'
+        '"entries":[{"sid":"S-1-5-21-7","rights":"FullControl",'
+        '"allow":true,"inherited":false,"inheritance_flags":[], '
+        '"propagation_flags":"None"}]}'
+    )
+
+    with pytest.raises(AclSecurityError, match="dacl_read_failed"):
+        PowerShellDaclReader(FakeRunner(AclCommandResult(0, payload, ""))).read(
+            tmp_path / "tokens"
+        )
+
+
+def test_directory_full_control_without_container_and_object_inherit_fails_closed(
+    tmp_path: Path,
+) -> None:
+    missing_flags = cast(
+        AccessControlEntry,
+        SimpleNamespace(
+            sid=OWNER_SID,
+            rights="FullControl",
+            allow=True,
+            inherited=False,
+            inheritance_flags="None",
+            propagation_flags="None",
+        ),
+    )
+    system_missing_flags = cast(
+        AccessControlEntry,
+        SimpleNamespace(
+            sid=SYSTEM_SID,
+            rights="FullControl",
+            allow=True,
+            inherited=False,
+            inheritance_flags="ObjectInherit",
+            propagation_flags="None",
+        ),
+    )
+
+    with pytest.raises(AclSecurityError, match="dacl_verification_failed"):
+        secure_owner_directory(
+            tmp_path / "tokens",
+            _trusted(tmp_path),
+            sid_runner=FakeRunner(AclCommandResult(0, f'"user","{OWNER_SID}"', "")),
+            acl_runner=FakeRunner(),
+            dacl_reader=FakeDaclReader(
+                _snapshot(),
+                DaclSnapshot(
+                    owner_sid=OWNER_SID,
+                    valid=True,
+                    protected=True,
+                    entries=(missing_flags, system_missing_flags),
+                ),
+            ),
+            path_verifier=FakePathVerifier(_verified(tmp_path / "tokens")),
+        )
