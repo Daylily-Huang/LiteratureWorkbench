@@ -114,6 +114,37 @@ def test_healthy_service_with_unprovable_listener_owner_fails_closed(
     assert stops == []
 
 
+@pytest.mark.parametrize("mutation", ["changed_ctx_size", "extra_flag"])
+def test_healthy_same_exe_service_with_nonexact_fixed_command_fails_closed(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    identity = expected_identity()
+    command = list(identity.cmdline)
+    if mutation == "changed_ctx_size":
+        command[command.index("--ctx-size") + 1] = "4096"
+    else:
+        command.append("--metrics")
+    hostile = ProcessIdentity(
+        identity.pid,
+        identity.create_time,
+        identity.exe,
+        tuple(command),
+    )
+    launches: list[tuple[str, ...]] = []
+    manager = QwenProcessManager(
+        tmp_path / "qwen",
+        transport=healthy_transport([]),
+        launcher=lambda args, log: launches.append(args) or 321,
+        listener_owner=lambda host, port: hostile,
+    )
+
+    with pytest.raises(QwenProcessError, match="qwen_port_identity_mismatch"):
+        manager.ensure_running()
+
+    assert launches == []
+
+
 def test_windows_listener_owner_resolver_uses_exact_loopback_endpoint_and_pid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -207,16 +238,22 @@ def test_unavailable_service_launches_only_fixed_assets_and_records_ownership(
 def test_start_timeout_is_fixed_and_sanitized(tmp_path: Path) -> None:
     clock = FakeClock()
     stops: list[int] = []
+    live = True
 
     def offline(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("private network detail", request=request)
+
+    def stop(pid: int) -> None:
+        nonlocal live
+        stops.append(pid)
+        live = False
 
     manager = QwenProcessManager(
         tmp_path / "qwen",
         transport=httpx.MockTransport(offline),
         launcher=lambda args, log: 321,
-        identity_lookup=lambda pid: expected_identity(pid),
-        stopper=stops.append,
+        identity_lookup=lambda pid: expected_identity(pid) if live else None,
+        stopper=stop,
         clock=clock,
     )
     with pytest.raises(QwenProcessError) as caught:
@@ -419,6 +456,7 @@ def test_ownership_persistence_failure_cleans_exact_launched_process(
 ) -> None:
     original_write_text = Path.write_text
     stops: list[int] = []
+    live = True
 
     def fail_record_write(self: Path, *args: object, **kwargs: object) -> int:
         if self.name == "owned-process.tmp":
@@ -430,12 +468,17 @@ def test_ownership_persistence_failure_cleans_exact_launched_process(
     def offline(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("offline", request=request)
 
+    def stop(pid: int) -> None:
+        nonlocal live
+        stops.append(pid)
+        live = False
+
     manager = QwenProcessManager(
         tmp_path / "qwen",
         transport=httpx.MockTransport(offline),
         launcher=lambda args, log: 321,
-        identity_lookup=lambda pid: expected_identity(pid),
-        stopper=stops.append,
+        identity_lookup=lambda pid: expected_identity(pid) if live else None,
+        stopper=stop,
     )
     with pytest.raises(QwenProcessError) as caught:
         manager.ensure_running()
@@ -449,6 +492,7 @@ def test_post_launch_oversized_probe_is_fatal_and_cleans_launched_process(
 ) -> None:
     requests = 0
     stops: list[int] = []
+    live = True
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal requests
@@ -457,13 +501,18 @@ def test_post_launch_oversized_probe_is_fatal_and_cleans_launched_process(
             raise httpx.ConnectError("offline", request=request)
         return httpx.Response(200, content=b"x" * (64 * 1024 + 1), request=request)
 
+    def stop(pid: int) -> None:
+        nonlocal live
+        stops.append(pid)
+        live = False
+
     runtime = tmp_path / "qwen"
     manager = QwenProcessManager(
         runtime,
         transport=httpx.MockTransport(handler),
         launcher=lambda args, log: 321,
-        identity_lookup=lambda pid: expected_identity(pid),
-        stopper=stops.append,
+        identity_lookup=lambda pid: expected_identity(pid) if live else None,
+        stopper=stop,
     )
     with pytest.raises(QwenProcessError, match="qwen_probe_response_too_large"):
         manager.ensure_running()
@@ -539,3 +588,22 @@ def test_stop_owned_keeps_evidence_when_stopper_does_not_end_exact_process(
         manager.stop_owned()
 
     assert record_path.exists()
+
+
+def test_startup_cleanup_keeps_evidence_when_exact_launched_process_survives(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "qwen"
+    runtime.mkdir(parents=True)
+    identity = expected_identity()
+    manager = QwenProcessManager(
+        runtime,
+        identity_lookup=lambda pid: identity,
+        stopper=lambda pid: None,
+    )
+    manager._write_ownership(identity)
+
+    with pytest.raises(QwenProcessError, match="qwen_cleanup_failed"):
+        manager._cleanup_launched(identity)
+
+    assert (runtime / "owned-process.json").exists()

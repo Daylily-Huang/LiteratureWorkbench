@@ -354,35 +354,22 @@ class QwenProcessManager:
     def _same_path(left: str, right: str) -> bool:
         return str(Path(left)).casefold() == str(Path(right)).casefold()
 
-    @classmethod
-    def _has_exact_option(
-        cls,
-        cmdline: tuple[str, ...],
-        option: str,
-        expected: str,
-        *,
-        path_value: bool = False,
-    ) -> bool:
-        positions = [index for index, argument in enumerate(cmdline) if argument == option]
-        if len(positions) != 1 or positions[0] + 1 >= len(cmdline):
-            return False
-        actual = cmdline[positions[0] + 1]
-        return cls._same_path(actual, expected) if path_value else actual == expected
-
     def _matches_fixed_process(self, identity: ProcessIdentity) -> bool:
+        expected = self._fixed_args()
+        path_positions = {
+            0,
+            expected.index("--model") + 1,
+            expected.index("--mmproj") + 1,
+        }
         return (
             self._same_path(identity.exe, str(QWEN_EXE))
-            and bool(identity.cmdline)
-            and self._same_path(identity.cmdline[0], str(QWEN_EXE))
-            and self._has_exact_option(
-                identity.cmdline, "--model", str(QWEN_MODEL), path_value=True
+            and len(identity.cmdline) == len(expected)
+            and all(
+                self._same_path(actual, wanted)
+                if index in path_positions
+                else actual == wanted
+                for index, (actual, wanted) in enumerate(zip(identity.cmdline, expected))
             )
-            and self._has_exact_option(
-                identity.cmdline, "--mmproj", str(QWEN_MMPROJ), path_value=True
-            )
-            and self._has_exact_option(identity.cmdline, "--host", QWEN_HOST)
-            and self._has_exact_option(identity.cmdline, "--port", str(QWEN_PORT))
-            and self._has_exact_option(identity.cmdline, "--alias", QWEN_ALIAS)
         )
 
     @staticmethod
@@ -398,14 +385,17 @@ class QwenProcessManager:
     def _cleanup_launched(self, launched: ProcessIdentity) -> None:
         try:
             current = self._identity_lookup(launched.pid)
-            if (
-                current is not None
-                and current.create_time == launched.create_time
-                and self._matches_fixed_process(current)
-            ):
+            if self._same_process_instance(launched, current):
+                assert current is not None
+                if not self._matches_fixed_process(current):
+                    raise QwenProcessError("qwen_cleanup_failed")
                 self._stopper(launched.pid)
+                current = self._identity_lookup(launched.pid)
+                if self._same_process_instance(launched, current):
+                    raise QwenProcessError("qwen_cleanup_failed")
+        except QwenProcessError:
+            raise
         except (psutil.Error, OSError):
-            self._remove_ownership_files()
             raise QwenProcessError("qwen_cleanup_failed") from None
         self._remove_ownership_files()
 
