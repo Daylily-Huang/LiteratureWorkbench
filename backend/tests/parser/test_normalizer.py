@@ -1,0 +1,208 @@
+from __future__ import annotations
+
+from uuid import UUID, uuid4
+
+import pytest
+from pydantic import ValidationError
+
+from conftest import ParserLibraryFixture
+from literature_workbench.features.parser.models import ParsedBlock, ParsedPage
+from literature_workbench.features.parser.normalizer import ParseRunRepository
+
+
+def _block(source: str = "pymupdf") -> ParsedBlock:
+    return ParsedBlock(
+        block_id="0:0",
+        kind="text",
+        text="raw block",
+        bbox_1000=(10, 20, 300, 80),
+        source=source,  # type: ignore[arg-type]
+        confidence=None if source == "pymupdf" else 0.85,
+    )
+
+
+def _page(
+    content_id: str,
+    run_id: UUID,
+    page_index: int,
+    parser: str,
+    text: str,
+) -> ParsedPage:
+    return ParsedPage(
+        content_id=content_id,  # type: ignore[arg-type]
+        page_index=page_index,
+        physical_page=page_index + 1,
+        parse_run_id=run_id,
+        parser_name=parser,  # type: ignore[arg-type]
+        parser_version=f"{parser}-1",
+        normalized_text=text,
+        raw_text=text,
+        width_points=400,
+        height_points=600,
+        coordinate_reliable=True,
+        blocks=[] if text == "" else [_block("pymupdf" if parser == "pymupdf" else "mineru_ocr")],
+    )
+
+
+def _prepare_content(parser_library: ParserLibraryFixture, payload: bytes, pages: int) -> str:
+    registered = parser_library.register("normalizer.pdf", payload)
+    with parser_library.database.transaction() as connection:
+        connection.execute(
+            "UPDATE contents SET page_count=?,status='valid_pdf' WHERE sha256=?",
+            (pages, registered.content_id),
+        )
+    return str(registered.content_id)
+
+
+def test_pymupdf_and_mineru_pages_round_trip_exactly_including_blank(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    content_id = _prepare_content(parser_library, b"%PDF-normalizer", 2)
+    repository = ParseRunRepository(parser_library.database)
+
+    direct_run = repository.create_run(content_id, "pymupdf", "pymupdf-1")
+    direct_pages = [
+        _page(content_id, direct_run, 0, "pymupdf", "direct text"),
+        _page(content_id, direct_run, 1, "pymupdf", ""),
+    ]
+    repository.complete_run(direct_run, direct_pages)
+    assert repository.read_current_page(content_id, 1) == direct_pages[0]
+    assert repository.read_current_page(content_id, 2) == direct_pages[1]
+
+    mineru_run = repository.create_run(content_id, "mineru", "mineru-1")
+    mineru_pages = [
+        _page(content_id, mineru_run, 0, "mineru", "ocr text"),
+        _page(content_id, mineru_run, 1, "mineru", ""),
+    ]
+    repository.complete_run(mineru_run, mineru_pages)
+    assert repository.read_current_page(content_id, 1) == mineru_pages[0]
+    assert repository.read_current_page(content_id, 2) == mineru_pages[1]
+
+
+def test_failed_retry_preserves_old_completed_pointer_and_pages(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    content_id = _prepare_content(parser_library, b"%PDF-old-pointer", 2)
+    repository = ParseRunRepository(parser_library.database)
+    first = repository.create_run(content_id, "pymupdf", "pymupdf-1")
+    old_pages = [
+        _page(content_id, first, 0, "pymupdf", "old page one"),
+        _page(content_id, first, 1, "pymupdf", "old page two"),
+    ]
+    repository.complete_run(first, old_pages)
+    failed = repository.create_run(content_id, "mineru", "mineru-1")
+
+    repository.fail_run(failed, "mineru_invalid_output")
+
+    assert repository.current_run_id(content_id) == first
+    assert repository.read_current_page(content_id, 1) == old_pages[0]
+    assert repository.read_current_page(content_id, 2) == old_pages[1]
+
+
+def test_second_success_switches_pointer_atomically_without_mixed_pages(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    content_id = _prepare_content(parser_library, b"%PDF-new-pointer", 2)
+    repository = ParseRunRepository(parser_library.database)
+    first = repository.create_run(content_id, "pymupdf", "pymupdf-1")
+    repository.complete_run(
+        first,
+        [
+            _page(content_id, first, 0, "pymupdf", "old one"),
+            _page(content_id, first, 1, "pymupdf", "old two"),
+        ],
+    )
+    second = repository.create_run(content_id, "mineru", "mineru-1")
+    new_pages = [
+        _page(content_id, second, 0, "mineru", "new one"),
+        _page(content_id, second, 1, "mineru", "new two"),
+    ]
+
+    repository.complete_run(second, new_pages)
+
+    assert repository.current_run_id(content_id) == second
+    assert repository.read_current_page(content_id, 1) == new_pages[0]
+    assert repository.read_current_page(content_id, 2) == new_pages[1]
+    with parser_library.database.connect() as connection:
+        old_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM pages WHERE parse_run_id=?", (str(first),)
+        ).fetchone()
+    assert old_count is not None
+    assert int(old_count["count"]) == 2
+
+
+def test_incomplete_attempt_cannot_switch_pointer(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    content_id = _prepare_content(parser_library, b"%PDF-incomplete", 2)
+    repository = ParseRunRepository(parser_library.database)
+    run_id = repository.create_run(content_id, "pymupdf", "pymupdf-1")
+
+    with pytest.raises(ValueError, match="parse_pages_incomplete"):
+        repository.complete_run(
+            run_id,
+            [_page(content_id, run_id, 0, "pymupdf", "only one")],
+        )
+
+    assert repository.current_run_id(content_id) is None
+    with parser_library.database.connect() as connection:
+        page_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM pages WHERE parse_run_id=?", (str(run_id),)
+        ).fetchone()
+    assert page_count is not None
+    assert int(page_count["count"]) == 0
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"width_points": float("nan")},
+        {"height_points": 0},
+        {"physical_page": 2},
+    ],
+)
+def test_parsed_page_rejects_invalid_dimensions_and_physical_mapping(
+    kwargs: dict[str, object],
+) -> None:
+    values: dict[str, object] = {
+        "content_id": "a" * 64,
+        "page_index": 0,
+        "physical_page": 1,
+        "parse_run_id": uuid4(),
+        "parser_name": "pymupdf",
+        "parser_version": "v",
+        "normalized_text": "",
+        "raw_text": "",
+        "width_points": 400,
+        "height_points": 600,
+        "coordinate_reliable": True,
+        "blocks": [],
+    }
+    values.update(kwargs)
+
+    with pytest.raises(ValidationError):
+        ParsedPage.model_validate(values)
+
+
+@pytest.mark.parametrize(
+    ("bbox", "confidence"),
+    [
+        ((-1, 0, 1, 1), None),
+        ((10, 0, 1, 1), None),
+        ((0, 0, 1, 1), 1.1),
+        ((0, 0, float("inf"), 1), None),
+    ],
+)
+def test_parsed_block_rejects_invalid_bbox_or_confidence(
+    bbox: tuple[float, float, float, float],
+    confidence: float | None,
+) -> None:
+    with pytest.raises(ValidationError):
+        ParsedBlock(
+            block_id="bad",
+            kind="text",
+            text=None,
+            bbox_1000=bbox,
+            source="mineru_ocr",
+            confidence=confidence,
+        )

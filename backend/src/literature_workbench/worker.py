@@ -10,6 +10,7 @@ from literature_workbench.features.library.import_service import (
     ImportPromotionPending,
     ImportValidator,
 )
+from literature_workbench.features.parser.worker import ParseJobFailure, ParseWorkerService
 
 
 class JobCancellation:
@@ -53,6 +54,16 @@ class JobCancellation:
             self._worker_id,
         )
 
+    def checkpoint(self, stage: str, payload: Mapping[str, object]) -> None:
+        if self._queue is None or self._job_id is None or self._worker_id is None:
+            raise RuntimeError("job_checkpoint_unavailable")
+        self._queue.checkpoint(
+            self._job_id,
+            self._worker_id,
+            stage,
+            payload,  # type: ignore[arg-type]
+        )
+
 
 JobHandler = Callable[[Job, JobCancellation], Awaitable[None]]
 
@@ -89,6 +100,15 @@ def library_job_handlers(
     if import_validator is not None:
         handlers["validate_import"] = validate_import
     return handlers
+
+
+def parser_job_handlers(parser: ParseWorkerService) -> Mapping[str, JobHandler]:
+    async def parse_pdf(job: Job, cancellation: JobCancellation) -> None:
+        cancellation.raise_if_cancelled()
+        await asyncio.to_thread(parser.process, job, cancellation)
+        cancellation.raise_if_cancelled()
+
+    return {"parse_pdf": parse_pdf}
 
 
 class Worker:
@@ -157,6 +177,16 @@ class Worker:
         except ImportPromotionPending:
             try:
                 self._queue.requeue_running(job.id, self._worker_id)
+            except LostLease:
+                cancellation.cancel()
+        except ParseJobFailure as error:
+            try:
+                self._queue.fail(
+                    job.id,
+                    self._worker_id,
+                    error.error_code,
+                    retryable=error.retryable,
+                )
             except LostLease:
                 cancellation.cancel()
         except Exception:

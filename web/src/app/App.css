@@ -54,6 +54,23 @@ body { margin: 0; }
   transform-origin: 0 0;
 }
 
+.ocr-text-layer {
+  color: transparent;
+  pointer-events: auto;
+  user-select: text;
+  z-index: 3;
+}
+
+.ocr-text-layer__text {
+  color: transparent;
+  cursor: text;
+  overflow: hidden;
+  position: absolute;
+  transform-origin: 0 0;
+  user-select: text;
+  white-space: pre;
+}
+
 .selection-overlay {
   inset: 0;
   pointer-events: none;

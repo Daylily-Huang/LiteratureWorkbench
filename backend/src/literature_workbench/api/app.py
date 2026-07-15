@@ -8,6 +8,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from literature_workbench.api.health import router as health_router
 from literature_workbench.api.imports import router as imports_router
 from literature_workbench.api.pdf_files import router as pdf_files_router
+from literature_workbench.api.parsing import router as parsing_router
 from literature_workbench.api.libraries import NativeFolderDialog
 from literature_workbench.api.libraries import router as libraries_router
 from literature_workbench.api.documents import router as documents_router
@@ -19,6 +20,7 @@ from literature_workbench.db.migrations import run_migrations
 from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.features.settings.service import SettingsService
+from literature_workbench.features.parser.normalizer import ParseRunRepository
 from literature_workbench.features.library.coordinator import LibraryScanCoordinator
 from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.features.library.roots import LibraryRootService
@@ -84,6 +86,7 @@ def create_app(
             task_queue = TaskQueue(database, queue_clock)
             app.state.queue_clock = queue_clock
             app.state.task_queue = task_queue
+            app.state.parse_run_repository = ParseRunRepository(database)
             import_repository = ImportIntentRepository(database, queue_clock)
             import_repository.expire_pending()
             app.state.import_intent_repository = import_repository
@@ -153,5 +156,6 @@ def create_app(
     app.include_router(libraries_router)
     app.include_router(documents_router)
     app.include_router(pdf_files_router)
+    app.include_router(parsing_router)
     app.include_router(imports_router)
     return app

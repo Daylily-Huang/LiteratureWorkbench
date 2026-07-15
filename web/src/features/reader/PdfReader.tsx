@@ -9,6 +9,7 @@ import {
 import "pdfjs-dist/web/pdf_viewer.css";
 
 import "./pdfWorker";
+import { OcrTextLayer, type OcrBlock } from "./OcrTextLayer";
 import { PdfToolbar } from "./PdfToolbar";
 import { SelectionOverlay } from "./SelectionOverlay";
 import {
@@ -42,12 +43,16 @@ function visiblePageIndexes(current: number, total: number): number[] {
 
 function PdfPage({
   document,
+  documentId,
+  contentId,
   pageIndex,
   scale,
   selected,
   onTranslateSelection,
 }: {
   document: PDFDocumentProxy;
+  documentId: string;
+  contentId: string;
   pageIndex: number;
   scale: number;
   selected: SelectedText | null;
@@ -56,6 +61,37 @@ function PdfPage({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState(false);
+  const [renderedSize, setRenderedSize] = useState({ width: 0, height: 0 });
+  const [ocrPage, setOcrPage] = useState<{
+    parser_name: "pymupdf" | "mineru";
+    coordinate_reliable: boolean;
+    blocks: OcrBlock[];
+  } | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setOcrPage(null);
+    void fetch(`/api/documents/${documentId}/pages/${pageIndex + 1}/text`, {
+      credentials: "same-origin",
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) return;
+      const value = await response.json() as {
+        content_id: string;
+        parser_name: "pymupdf" | "mineru";
+        coordinate_reliable: boolean;
+        blocks: OcrBlock[];
+      };
+      if (value.content_id === contentId && value.parser_name === "mineru") {
+        setOcrPage(value);
+      }
+    }).catch((reason: unknown) => {
+      if (!(reason instanceof DOMException && reason.name === "AbortError")) {
+        setOcrPage(null);
+      }
+    });
+    return () => controller.abort();
+  }, [contentId, documentId, pageIndex]);
 
   useEffect(() => {
     let disposed = false;
@@ -76,6 +112,7 @@ function PdfPage({
       text.replaceChildren();
       text.style.width = `${viewport.width}px`;
       text.style.height = `${viewport.height}px`;
+      setRenderedSize({ width: viewport.width, height: viewport.height });
       renderTask = page.render({ canvas, canvasContext: context, viewport });
       textLayer = new TextLayer({
         container: text,
@@ -103,6 +140,15 @@ function PdfPage({
     >
       <canvas aria-hidden="true" ref={canvasRef} />
       <div className="textLayer" ref={textRef} />
+      {ocrPage !== null && renderedSize.width > 0 && renderedSize.height > 0 && (
+        <OcrTextLayer
+          blocks={ocrPage.blocks}
+          coordinateReliable={ocrPage.coordinate_reliable}
+          parserName={ocrPage.parser_name}
+          renderedHeight={renderedSize.height}
+          renderedWidth={renderedSize.width}
+        />
+      )}
       {selected?.pdfPage === pageIndex + 1 && (
         <SelectionOverlay
           onTranslate={() => onTranslateSelection?.(selected)}
@@ -222,7 +268,9 @@ export function PdfReader({
       <div className="pdf-reader__pages" onPointerUp={captureSelection} ref={rootRef}>
         {pageIndexes.map((index) => (
           <PdfPage
+            contentId={contentId}
             document={pdf}
+            documentId={documentId}
             key={index}
             onTranslateSelection={onTranslateSelection}
             pageIndex={index}
