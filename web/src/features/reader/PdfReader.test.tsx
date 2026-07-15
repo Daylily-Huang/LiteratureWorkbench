@@ -12,6 +12,15 @@ const pdf = vi.hoisted(() => ({
   renderCancels: [] as Array<ReturnType<typeof vi.fn>>,
 }));
 
+async function renderedTextNode(page: HTMLElement): Promise<ChildNode> {
+  await waitFor(() => {
+    expect(page.querySelector(".textLayer")?.firstChild).toBeTruthy();
+  });
+  const node = page.querySelector(".textLayer")?.firstChild;
+  if (node === null || node === undefined) throw new Error("mock text missing");
+  return node;
+}
+
 vi.mock("pdfjs-dist/build/pdf.worker.min.mjs?url", () => ({
   default: "/assets/pdf.worker.min.test.mjs",
 }));
@@ -295,11 +304,8 @@ describe("PdfReader", () => {
     const onSelection = vi.fn();
     render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
     const pages = await screen.findAllByRole("region", { name: /PDF 第 \d+ 页/ });
-    const firstText = pages[0]?.querySelector(".textLayer")?.firstChild;
-    const secondText = pages[1]?.querySelector(".textLayer")?.firstChild;
-    if (firstText === null || firstText === undefined || secondText === null || secondText === undefined) {
-      throw new Error("mock text layers missing");
-    }
+    const firstText = await renderedTextNode(pages[0] as HTMLElement);
+    const secondText = await renderedTextNode(pages[1] as HTMLElement);
     setSelection(firstText, firstText, "   \n ", [], true);
     fireEvent.pointerUp(pages[0] as HTMLElement);
     expect(onSelection).not.toHaveBeenCalled();
@@ -318,8 +324,7 @@ describe("PdfReader", () => {
     const onSelection = vi.fn();
     render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
     const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
-    const textNode = pageElement.querySelector(".textLayer")?.firstChild;
-    if (textNode === null || textNode === undefined) throw new Error("mock text missing");
+    const textNode = await renderedTextNode(pageElement);
     const oversized = "😀".repeat(8001);
     setSelection(textNode, textNode, oversized, [
       { left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 },
@@ -391,8 +396,7 @@ describe("PdfReader", () => {
   it("recalculates overlay coordinates on zoom and clears selection on page change", async () => {
     render(<PdfReader {...readerProps()} />);
     const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
-    const textNode = pageElement.querySelector(".textLayer")?.firstChild;
-    if (textNode === null || textNode === undefined) throw new Error("mock text missing");
+    const textNode = await renderedTextNode(pageElement);
     vi.spyOn(pageElement, "getBoundingClientRect").mockReturnValue({
       left: 10,
       top: 10,
@@ -421,8 +425,7 @@ describe("PdfReader", () => {
   it("clears frozen selection when refreshed metadata changes identity", async () => {
     const { rerender } = render(<PdfReader {...readerProps()} />);
     const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
-    const textNode = pageElement.querySelector(".textLayer")?.firstChild;
-    if (textNode === null || textNode === undefined) throw new Error("mock text missing");
+    const textNode = await renderedTextNode(pageElement);
     setSelection(textNode, textNode, "selected", [
       { left: 1, top: 1, right: 11, bottom: 11, width: 10, height: 10 },
     ]);
