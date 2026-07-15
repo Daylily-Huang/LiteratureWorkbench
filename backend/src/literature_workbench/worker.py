@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from threading import Event, Lock, Thread
 
-from literature_workbench.db.task_queue import Job, LostLease, TaskQueue
+from literature_workbench.db.task_queue import Job, JobId, LostLease, TaskQueue
 from literature_workbench.features.library.scanner import LibraryScanner
 from literature_workbench.features.library.import_service import (
     ImportPromotionPending,
@@ -13,10 +13,19 @@ from literature_workbench.features.library.import_service import (
 
 
 class JobCancellation:
-    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        queue: TaskQueue | None = None,
+        job_id: JobId | None = None,
+        worker_id: str | None = None,
+    ) -> None:
         self._loop = loop
         self._async_event = asyncio.Event()
         self._thread_event = Event()
+        self._queue = queue
+        self._job_id = job_id
+        self._worker_id = worker_id
 
     @property
     def is_cancelled(self) -> bool:
@@ -34,6 +43,15 @@ class JobCancellation:
     def raise_if_cancelled(self) -> None:
         if self.is_cancelled:
             raise asyncio.CancelledError
+
+    def require_current_lease(self, connection: object) -> None:
+        if self._queue is None or self._job_id is None or self._worker_id is None:
+            return
+        self._queue.require_current_lease(
+            connection,  # type: ignore[arg-type]
+            self._job_id,
+            self._worker_id,
+        )
 
 
 JobHandler = Callable[[Job, JobCancellation], Awaitable[None]]
@@ -110,7 +128,9 @@ class Worker:
             self._queue.fail(job.id, self._worker_id, "unknown_job_kind", retryable=False)
             return True
 
-        cancellation = JobCancellation(asyncio.get_running_loop())
+        cancellation = JobCancellation(
+            asyncio.get_running_loop(), self._queue, job.id, self._worker_id
+        )
         with self._active_lock:
             self._active_cancellation = cancellation
         if self._shutdown.is_set():

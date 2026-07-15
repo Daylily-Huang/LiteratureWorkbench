@@ -141,6 +141,24 @@ class TaskQueue:
             self._require_lease(changed, job_id, worker_id)
         return expiry
 
+    def require_current_lease(
+        self, connection: sqlite3.Connection, job_id: JobId, worker_id: str
+    ) -> None:
+        row = connection.execute(
+            """
+            SELECT status,lease_owner,lease_expires_at FROM jobs WHERE id=?
+            """,
+            (job_id,),
+        ).fetchone()
+        if (
+            row is None
+            or str(row["status"]) != "running"
+            or str(row["lease_owner"]) != worker_id
+            or row["lease_expires_at"] is None
+            or datetime.fromisoformat(str(row["lease_expires_at"])) <= self._now_utc()
+        ):
+            raise LostLease(f"job {job_id} is not currently leased by {worker_id}")
+
     def checkpoint(
         self,
         job_id: JobId,
@@ -209,10 +227,15 @@ class TaskQueue:
                 """
                 UPDATE jobs
                 SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL,
-                    updated_at = ?
+                    created_at = ?, updated_at = ?
                 WHERE id = ? AND status = 'running' AND lease_owner = ?
                 """,
-                (self._timestamp(self._now_utc()), job_id, worker_id),
+                (
+                    self._timestamp(self._now_utc()),
+                    self._timestamp(self._now_utc()),
+                    job_id,
+                    worker_id,
+                ),
             )
             self._require_lease(changed, job_id, worker_id)
 

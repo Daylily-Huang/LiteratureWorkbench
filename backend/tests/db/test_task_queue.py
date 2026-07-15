@@ -92,6 +92,18 @@ def test_renew_and_mutations_require_the_current_running_owner(
     assert queue.count(status="failed") == 1
 
 
+def test_transaction_lease_fence_rejects_expired_owner(
+    database: Database, fake_clock: FakeClock
+) -> None:
+    queue = TaskQueue(database, fake_clock.now)
+    job_id = queue.enqueue("validate_import", "import:fence", {})
+    assert queue.lease_next("worker-a", lease_seconds=30) is not None
+    fake_clock.advance(seconds=31)
+
+    with database.transaction() as connection, pytest.raises(LostLease):
+        queue.require_current_lease(connection, job_id, "worker-a")
+
+
 def test_enqueue_in_transaction_uses_callers_transaction(database: Database) -> None:
     queue = TaskQueue(database, lambda: datetime.now(UTC))
 
@@ -239,3 +251,23 @@ async def test_promotion_waiter_is_requeued_instead_of_failed(database: Database
     assert queue.count(status="failed") == 0
     leased_again = queue.lease_next("worker-b", lease_seconds=30)
     assert leased_again is not None and leased_again.id == job_id
+
+
+def test_requeued_waiter_moves_behind_queued_owner(database: Database) -> None:
+    current = datetime(2026, 7, 15, 9, 0, tzinfo=UTC)
+
+    def now() -> datetime:
+        return current
+
+    queue = TaskQueue(database, now)
+    waiter = queue.enqueue("validate_import", "waiter", {})
+    leased = queue.lease_next("worker-a", lease_seconds=30)
+    assert leased is not None and leased.id == waiter
+    current += timedelta(seconds=1)
+    owner = queue.enqueue("validate_import", "owner", {})
+    current += timedelta(seconds=1)
+
+    queue.requeue_running(waiter, "worker-a")
+
+    next_job = queue.lease_next("worker-b", lease_seconds=30)
+    assert next_job is not None and next_job.id == owner

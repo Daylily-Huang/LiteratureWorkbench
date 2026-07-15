@@ -154,17 +154,6 @@ class ImportIntentRepository:
             raise KeyError("import_not_found")
         return claimed
 
-    def mark_uploaded(self, intent_id: UUID, connection: sqlite3.Connection | None = None) -> None:
-        now = self._aware_now().isoformat()
-        if connection is not None:
-            connection.execute(
-                "UPDATE import_intents SET status='uploaded', updated_at=? WHERE id=? AND status='receiving'",
-                (now, str(intent_id)),
-            )
-            return
-        with self._database.transaction() as own:
-            self.mark_uploaded(intent_id, own)
-
     def expire_pending(self) -> int:
         now = self._aware_now().isoformat()
         with self._database.transaction() as connection:

@@ -24,8 +24,7 @@ from literature_workbench.features.library.roots import LibraryRootService
 from literature_workbench.features.library.scanner import LibraryScanner
 from literature_workbench.features.library.import_intents import ImportIntentRepository
 from literature_workbench.features.library.import_service import ImportService, ImportValidator
-from literature_workbench.features.library.import_files import TrustedImportRoot
-from filelock import FileLock, Timeout
+from literature_workbench.features.library.import_files import MutexTimeout, TrustedImportRoot
 from literature_workbench.platform.windows.folder_dialog import FolderDialog
 from literature_workbench.platform.windows.filesystem import (
     SafeFileInspector,
@@ -68,12 +67,11 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         trusted_root = TrustedImportRoot.create(resolved.data_root)
-        supervisor_lock = FileLock(
-            str(trusted_root.locks_directory / "api-supervisor.lock")
-        )
+        supervisor_lock = trusted_root.mutex("api-supervisor")
         try:
             supervisor_lock.acquire(timeout=0)
-        except Timeout:
+        except MutexTimeout:
+            supervisor_lock.close()
             trusted_root.close()
             raise RuntimeError("api_supervisor_already_running") from None
         try:
@@ -97,6 +95,7 @@ def create_app(
                 now=queue_clock,
             )
             app.state.import_service.reconcile_stale_receiving()
+            app.state.import_service.sweep_failed_residue()
             app.state.settings_service = SettingsService(
                 SettingsRepository(database), resolved_secret_store
             )
@@ -125,6 +124,7 @@ def create_app(
             yield
         finally:
             supervisor_lock.release()
+            supervisor_lock.close()
             trusted_root.close()
 
     app = FastAPI(

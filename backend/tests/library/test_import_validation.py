@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Barrier, Event
 import sys
+from time import sleep
 
 import fitz
 import pytest
@@ -24,6 +25,7 @@ from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.features.library.scanner import LibraryScanner
 from literature_workbench.platform.windows.filesystem import SafeWindowsFileInspector
 from literature_workbench.worker import Worker
+from literature_workbench.worker import library_job_handlers
 
 
 @pytest.fixture
@@ -231,6 +233,41 @@ def test_preexisting_same_hash_final_with_source_present_is_rejected(
         assert connection.execute("SELECT COUNT(*) FROM confirmed_imports").fetchone()[0] == 0
 
 
+def test_destination_created_after_precheck_fails_precisely_and_preserves_both(
+    tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from literature_workbench.features.library.import_files import TrustedImportFile
+
+    body = _valid_pdf()
+    attacker = b"attacker-destination"
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    created = repository.create("generation-a", "paper.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    asyncio.run(service.consume(created.intent_id, created.upload_token, _chunks(body)))
+    original = TrustedImportFile.rename_final
+    target: list[Path] = []
+
+    def create_then_rename(file, year: str, month: str, file_name: str) -> None:
+        directories = trusted.final_directories(year, month)
+        for directory in reversed(directories):
+            directory.close()
+        destination = trusted.library_directory / year / month / file_name
+        destination.write_bytes(attacker)
+        target.append(destination)
+        original(file, year, month, file_name)
+
+    monkeypatch.setattr(TrustedImportFile, "rename_final", create_then_rename)
+
+    ImportValidator(database, queue, trusted).validate_and_promote(created.intent_id)
+
+    view = repository.get(created.intent_id, "generation-a")
+    assert (view.status, view.error_code) == ("failed", "promotion_path_conflict")
+    assert target[0].read_bytes() == attacker
+    assert trusted.incoming_path(created.intent_id, "verify.pdf").read_bytes() == body
+
+
 def test_worker_rejects_encrypted_pdf(tmp_path: Path, database) -> None:
     document = fitz.open()
     document.new_page()
@@ -278,6 +315,34 @@ def test_supervisor_recovers_full_receiving_part_but_worker_restart_does_not_tou
     assert (part.parent / f"{created.intent_id}.uploaded.pdf").exists()
     assert repository.get(created.intent_id, "prior-generation").status == "uploaded"
     assert queue.count(kind="validate_import") == 1
+
+
+def test_full_part_recovery_flushes_again_before_rename_and_enqueue(
+    tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from literature_workbench.features.library.import_files import TrustedImportFile
+
+    repository = ImportIntentRepository(database, _now)
+    body = _valid_pdf()
+    created = repository.create("prior-generation", "paper.pdf", len(body), "application/pdf")
+    repository.claim(created.intent_id, "prior-generation", created.upload_token)
+    trusted = _trusted(tmp_path)
+    part = trusted.create_incoming(created.intent_id)
+    part.write(body)
+    part.close()
+    flushed: list[str] = []
+    original = TrustedImportFile.flush
+
+    def record_flush(file) -> None:
+        flushed.append(file.metadata().final_path.name)
+        original(file)
+
+    monkeypatch.setattr(TrustedImportFile, "flush", record_flush)
+
+    ImportService(database, repository, trusted, "generation-a").reconcile_stale_receiving()
+
+    assert f"{created.intent_id}.part" in flushed
+    assert repository.get(created.intent_id, "prior-generation").status == "uploaded"
 
 
 def test_supervisor_never_touches_current_generation_receiving_file(
@@ -328,7 +393,12 @@ def test_receive_crash_recovery_matrix(
         live.rename_incoming(created.intent_id, "uploaded.pdf")
     live.close()
     if phase == "after_enqueue":
-        repository.mark_uploaded(created.intent_id)
+        with database.transaction() as connection:
+            changed = connection.execute(
+                "UPDATE import_intents SET status='uploaded' WHERE id=? AND status='receiving'",
+                (str(created.intent_id),),
+            )
+            assert changed.rowcount == 1
         queue.enqueue(
             "validate_import",
             f"validate_import:{created.intent_id}",
@@ -397,6 +467,84 @@ def test_supervisor_cleans_only_exact_invalid_receiving_files(
     assert unrelated.read_bytes() == b"keep"
 
 
+def test_supervisor_preserves_oversized_receiving_residue_for_manual_review(
+    tmp_path: Path, database
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    created = repository.create("prior-generation", "paper.pdf", 9, "application/pdf")
+    repository.claim(created.intent_id, "prior-generation", created.upload_token)
+    trusted = _trusted(tmp_path)
+    residue = trusted.create_incoming(created.intent_id)
+    residue.write(b"%PDF-1.7oversized")
+    residue.flush()
+    residue.close()
+
+    ImportService(database, repository, trusted, "generation-a").reconcile_stale_receiving()
+
+    assert trusted.incoming_path(created.intent_id, "part").exists()
+    view = repository.get(created.intent_id, "prior-generation")
+    assert (view.status, view.error_code) == ("failed", "recovery_residue_oversize")
+
+
+def test_unsafe_receiving_residue_fails_precisely_without_blocking_next_intent(
+    tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    trusted = _trusted(tmp_path)
+    body = _valid_pdf()
+    unsafe = repository.create("prior-generation", "unsafe.pdf", len(body), "application/pdf")
+    safe = repository.create("prior-generation", "safe.pdf", len(body), "application/pdf")
+    for item in (unsafe, safe):
+        repository.claim(item.intent_id, "prior-generation", item.upload_token)
+    held = trusted.create_incoming(safe.intent_id)
+    held.write(body)
+    held.flush()
+    held.close()
+    original = trusted.open_incoming
+
+    def unsafe_first(intent_id, suffix: str):
+        if intent_id == unsafe.intent_id:
+            raise ValueError("trusted_import_file_unsafe")
+        return original(intent_id, suffix)
+
+    monkeypatch.setattr(trusted, "open_incoming", unsafe_first)
+
+    ImportService(database, repository, trusted, "generation-a").reconcile_stale_receiving()
+
+    unsafe_view = repository.get(unsafe.intent_id, "prior-generation")
+    assert (unsafe_view.status, unsafe_view.error_code) == (
+        "failed",
+        "recovery_unsafe_residue",
+    )
+    assert repository.get(safe.intent_id, "prior-generation").status == "uploaded"
+
+
+@pytest.mark.parametrize("unsafe", [False, True])
+def test_failed_terminal_sweep_cleans_only_size_bound_residue(
+    tmp_path: Path, database, unsafe: bool
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    trusted = _trusted(tmp_path)
+    created = repository.create("prior-generation", "failed.pdf", 9, "application/pdf")
+    repository.claim(created.intent_id, "prior-generation", created.upload_token)
+    repository.fail(created.intent_id, "simulated_crash", allowed=("receiving",))
+    held = trusted.create_incoming(created.intent_id)
+    held.write(b"%PDF-1.7" + (b"oversized" if unsafe else b""))
+    held.flush()
+    held.rename_incoming(created.intent_id, "uploaded.pdf")
+    held.close()
+
+    ImportService(database, repository, trusted, "generation-a").sweep_failed_residue()
+
+    residue = trusted.incoming_path(created.intent_id, "uploaded.pdf")
+    view = repository.get(created.intent_id, "prior-generation")
+    if unsafe:
+        assert residue.exists()
+        assert view.error_code == "recovery_residue_oversize"
+    else:
+        assert not residue.exists()
+
+
 def test_move_before_database_completion_is_recovered_only_by_recorded_owner(
     tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -432,6 +580,120 @@ def test_move_before_database_completion_is_recovered_only_by_recorded_owner(
     validator.reconcile_ready_promotions()
 
     assert repository.get(created.intent_id, "generation-a").status == "completed"
+
+
+def test_lost_lease_while_final_begin_is_blocked_creates_no_authorization(
+    tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    created = repository.create("generation-a", "paper.pdf", len(body), "application/pdf")
+    service = ImportService(database, repository, _trusted(tmp_path), "generation-a", queue=queue)
+    asyncio.run(service.consume(created.intent_id, created.upload_token, _chunks(body)))
+    trusted = _trusted(tmp_path)
+    validator = ImportValidator(database, queue, trusted)
+    original_complete = validator._complete
+    monkeypatch.setattr(
+        validator,
+        "_complete",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("before_complete")),
+    )
+    with pytest.raises(RuntimeError, match="before_complete"):
+        validator.validate_and_promote(created.intent_id)
+    monkeypatch.setattr(validator, "_complete", original_complete)
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT content_sha256,final_path_key,file_name FROM import_intents WHERE id=?",
+            (str(created.intent_id),),
+        ).fetchone()
+    digest, final_path, display_name = str(row[0]), Path(str(row[1])), str(row[2])
+    final = trusted.open_final(final_path)
+    managed = validator.ensure_managed_import_library()
+    monkeypatch.setattr(validator, "ensure_managed_import_library", lambda: managed)
+    cancelled = Event()
+    entered = Event()
+
+    class Cancellation:
+        def raise_if_cancelled(self) -> None:
+            entered.set()
+            if cancelled.is_set():
+                raise asyncio.CancelledError
+
+    blocker = __import__("sqlite3").connect(database.path, isolation_level=None)
+    blocker.execute("PRAGMA busy_timeout=5000")
+    blocker.execute("BEGIN IMMEDIATE")
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            original_complete,
+            created.intent_id,
+            digest,
+            final_path,
+            display_name,
+            final,
+            owner=True,
+            cancellation=Cancellation(),
+        )
+        assert entered.wait(2)
+        sleep(0.2)
+        cancelled.set()
+        blocker.rollback()
+        blocker.close()
+        with pytest.raises(asyncio.CancelledError):
+            future.result(timeout=5)
+    final.close()
+
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM confirmed_imports").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM jobs WHERE kind='parse_pdf'").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("stage", ["hash", "probe", "verify_rename", "final_rename"])
+def test_lost_lease_at_each_validation_stage_blocks_authorization(
+    tmp_path: Path,
+    database,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    from literature_workbench.features.library.import_files import TrustedImportFile
+
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    created = repository.create("generation-a", "paper.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    asyncio.run(service.consume(created.intent_id, created.upload_token, _chunks(body)))
+    cancelled = Event()
+
+    class Cancellation:
+        def raise_if_cancelled(self) -> None:
+            if cancelled.is_set():
+                raise asyncio.CancelledError
+
+    method_name = {
+        "hash": "sha256",
+        "probe": "probe_pdf",
+        "verify_rename": "rename_incoming",
+        "final_rename": "rename_final",
+    }[stage]
+    original = getattr(TrustedImportFile, method_name)
+
+    def lose_after(*args, **kwargs):
+        result = original(*args, **kwargs)
+        cancelled.set()
+        return result
+
+    monkeypatch.setattr(TrustedImportFile, method_name, lose_after)
+
+    with pytest.raises(asyncio.CancelledError):
+        ImportValidator(database, queue, trusted).validate_and_promote(
+            created.intent_id, Cancellation()
+        )
+
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM confirmed_imports").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM jobs WHERE kind='parse_pdf'").fetchone()[0] == 0
 
 
 def test_worker_recovers_validation_rename_before_ready_commit(
@@ -503,7 +765,11 @@ def test_hashed_verify_cleanup_obeys_journal_state(
         assert repository.get(created.intent_id, "generation-a").status == "failed"
     else:
         assert verify.read_bytes() == body
-        assert repository.get(created.intent_id, "generation-a").status == "ready_to_promote"
+        view = repository.get(created.intent_id, "generation-a")
+        assert (view.status, view.error_code) == (
+            "failed",
+            "recovery_promotion_source_hash_mismatch",
+        )
     trusted.close()
 
 
@@ -560,6 +826,63 @@ def test_existing_document_must_match_full_confirmed_import_binding(
     assert (view.status, view.error_code) == ("failed", "document_binding_conflict")
     with database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM confirmed_imports").fetchone()[0] == 1
+
+
+def test_byte_identical_final_replacement_fails_document_identity_binding(
+    tmp_path: Path, database
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    first = repository.create("generation-a", "first.pdf", len(body), "application/pdf")
+    second = repository.create("generation-a", "second.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    validator = ImportValidator(database, queue, trusted)
+    asyncio.run(service.consume(first.intent_id, first.upload_token, _chunks(body)))
+    validator.validate_and_promote(first.intent_id)
+    with database.connect() as connection:
+        document = connection.execute(
+            "SELECT path,file_id FROM documents"
+        ).fetchone()
+    final_path = Path(str(document["path"]))
+    recorded_file_id = str(document["file_id"])
+    final_path.unlink()
+    final_path.write_bytes(body)
+    replaced = trusted.open_final(final_path)
+    assert replaced.metadata().file_id != recorded_file_id
+    replaced.close()
+    asyncio.run(service.consume(second.intent_id, second.upload_token, _chunks(body)))
+
+    validator.validate_and_promote(second.intent_id)
+
+    view = repository.get(second.intent_id, "generation-a")
+    assert (view.status, view.error_code) == ("failed", "document_binding_conflict")
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM confirmed_imports").fetchone()[0] == 1
+
+
+def test_existing_content_row_must_match_size_and_mime_binding(
+    tmp_path: Path, database
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    first = repository.create("generation-a", "first.pdf", len(body), "application/pdf")
+    second = repository.create("generation-a", "second.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    validator = ImportValidator(database, queue, trusted)
+    asyncio.run(service.consume(first.intent_id, first.upload_token, _chunks(body)))
+    validator.validate_and_promote(first.intent_id)
+    with database.transaction() as connection:
+        connection.execute("UPDATE contents SET size_bytes=size_bytes+1,mime_type='text/plain'")
+    asyncio.run(service.consume(second.intent_id, second.upload_token, _chunks(body)))
+
+    validator.validate_and_promote(second.intent_id)
+
+    view = repository.get(second.intent_id, "generation-a")
+    assert (view.status, view.error_code) == ("failed", "content_binding_conflict")
 
 
 def test_true_concurrent_same_hash_imports_complete_once_each(
@@ -656,6 +979,50 @@ def test_owner_crash_wakes_waiter_and_reuses_persisted_path_across_month(
     assert repository.get(waiter.intent_id, "generation-a").status == "completed"
 
 
+def test_single_worker_prioritizes_crashed_owner_after_older_waiter_requeue(
+    tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    waiter = repository.create("generation-a", "waiter.pdf", len(body), "application/pdf")
+    owner = repository.create("generation-a", "owner.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    for item in (waiter, owner):
+        asyncio.run(service.consume(item.intent_id, item.upload_token, _chunks(body)))
+    validator = ImportValidator(database, queue, trusted)
+    original_complete = validator._complete
+    monkeypatch.setattr(
+        validator,
+        "_complete",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("owner_crash")),
+    )
+    with pytest.raises(RuntimeError, match="owner_crash"):
+        validator.validate_and_promote(owner.intent_id)
+    monkeypatch.setattr(validator, "_complete", original_complete)
+    scanner = LibraryScanner(
+        database,
+        LibraryRepository(database, queue),
+        SafeWindowsFileInspector(),
+        queue,
+    )
+    worker = Worker(
+        queue,
+        "single-worker",
+        library_job_handlers(scanner, validator),
+        lease_seconds=30,
+    )
+
+    assert asyncio.run(worker.run_once()) is True
+    assert repository.get(waiter.intent_id, "generation-a").status == "ready_to_promote"
+    assert repository.get(owner.intent_id, "generation-a").status == "ready_to_promote"
+    assert asyncio.run(worker.run_once()) is True
+    assert repository.get(owner.intent_id, "generation-a").status == "completed"
+    assert asyncio.run(worker.run_once()) is True
+    assert repository.get(waiter.intent_id, "generation-a").status == "completed"
+
+
 def test_exact_cleanup_never_deletes_unrelated_incoming_file(tmp_path: Path, database) -> None:
     now = _now
     repository = ImportIntentRepository(database, now)
@@ -740,6 +1107,38 @@ def test_trusted_handle_blocks_content_swap_and_preserves_identity_through_renam
     trusted.close()
 
 
+def test_handle_rename_flushes_before_and_after_directory_entry_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import literature_workbench.features.library.import_files as import_files
+
+    trusted = TrustedImportRoot.create(tmp_path / "data")
+    intent_id = __import__("uuid").uuid4()
+    handle = trusted.create_incoming(intent_id)
+    handle.write(_valid_pdf())
+    events: list[str] = []
+    real_flush = import_files._FlushFileBuffers
+    real_set = import_files._SetFileInformationByHandle
+
+    def flush(*args):
+        events.append("flush")
+        return real_flush(*args)
+
+    def set_info(raw, info_class, *args):
+        if info_class == import_files.FILE_RENAME_INFO_CLASS:
+            events.append("rename")
+        return real_set(raw, info_class, *args)
+
+    monkeypatch.setattr(import_files, "_FlushFileBuffers", flush)
+    monkeypatch.setattr(import_files, "_SetFileInformationByHandle", set_info)
+
+    handle.rename_incoming(intent_id, "uploaded.pdf")
+
+    assert events == ["flush", "rename", "flush", "flush"]
+    handle.close()
+    trusted.close()
+
+
 def test_trusted_handle_cleanup_is_exact_and_keeps_sibling(tmp_path: Path) -> None:
     trusted = TrustedImportRoot.create(tmp_path / "data")
     intent_id = __import__("uuid").uuid4()
@@ -801,6 +1200,55 @@ def test_held_month_parent_blocks_check_after_replace(tmp_path: Path) -> None:
     trusted.close()
 
 
+def test_trusted_named_mutex_serializes_same_key_and_allows_different_key(
+    tmp_path: Path
+) -> None:
+    trusted = TrustedImportRoot.create(tmp_path / "data")
+    first = trusted.mutex("content:same")
+    same = trusted.mutex("content:same")
+    different = trusted.mutex("content:different")
+    first.acquire(timeout=0)
+    same_acquired = Event()
+
+    def wait_same() -> None:
+        same.acquire(timeout=2)
+        same_acquired.set()
+        same.release()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(wait_same)
+        sleep(0.1)
+        assert not same_acquired.is_set()
+        different.acquire(timeout=0)
+        different.release()
+        first.release()
+        future.result(timeout=2)
+    first.close()
+    same.close()
+    different.close()
+    trusted.close()
+
+
+def test_trusted_named_mutex_recovers_abandoned_owner(tmp_path: Path) -> None:
+    trusted = TrustedImportRoot.create(tmp_path / "data")
+    abandoned = trusted.mutex("intent:abandoned")
+
+    def acquire_and_exit() -> None:
+        abandoned.acquire(timeout=0)
+
+    thread = __import__("threading").Thread(target=acquire_and_exit)
+    thread.start()
+    thread.join(timeout=2)
+    recovered = trusted.mutex("intent:abandoned")
+
+    recovered.acquire(timeout=1)
+    recovered.release()
+
+    recovered.close()
+    abandoned.close()
+    trusted.close()
+
+
 def test_probe_cancellation_terminates_only_its_owned_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -844,5 +1292,73 @@ def test_probe_cancellation_terminates_only_its_owned_child(
 
     assert len(children) == 1
     assert children[0].poll() is not None
+    handle.close()
+    trusted.close()
+
+
+def test_probe_inherits_one_read_only_handle_without_console(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import literature_workbench.features.library.import_files as import_files
+
+    trusted = TrustedImportRoot.create(tmp_path / "data")
+    handle = trusted.create_incoming(__import__("uuid").uuid4())
+    body = _valid_pdf()
+    handle.write(body)
+    handle.flush()
+    real_popen = import_files.subprocess.Popen
+    audited = Event()
+
+    def audited_popen(*args, **kwargs):
+        startupinfo = kwargs["startupinfo"]
+        inherited = startupinfo.lpAttributeList["handle_list"]
+        assert kwargs["close_fds"] is True
+        assert len(inherited) == 1
+        assert kwargs["creationflags"] & import_files.CREATE_NO_WINDOW
+        audited.set()
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(import_files.subprocess, "Popen", audited_popen)
+
+    assert handle.probe_pdf(timeout_seconds=10) is True
+    assert audited.is_set()
+    assert handle.sha256() == __import__("hashlib").sha256(body).hexdigest()
+    handle.close()
+    trusted.close()
+
+
+def test_large_pdf_probe_does_not_copy_file_into_parent_process(
+    tmp_path: Path
+) -> None:
+    import gc
+    import psutil
+
+    trusted = TrustedImportRoot.create(tmp_path / "data")
+    intent_id = __import__("uuid").uuid4()
+    path = trusted.incoming_path(intent_id, "part")
+    body = _valid_pdf()
+    xref = body.find(b"xref\n")
+    assert xref > 0
+    padding_size = 64 * 1024**2
+    tail = body[xref:]
+    marker = tail.rfind(b"startxref\n") + len(b"startxref\n")
+    marker_end = tail.find(b"\n", marker)
+    tail = tail[:marker] + str(xref + padding_size).encode("ascii") + tail[marker_end:]
+    with path.open("wb") as stream:
+        stream.write(body[:xref])
+        padding = b"\n" * 1024**2
+        for _ in range(64):
+            stream.write(padding)
+        stream.write(tail)
+    handle = trusted.open_incoming(intent_id, "part")
+    gc.collect()
+    process = psutil.Process()
+    before = process.memory_info().rss
+
+    assert handle.probe_pdf(timeout_seconds=20) is True
+
+    gc.collect()
+    after = process.memory_info().rss
+    assert after - before < 16 * 1024**2
     handle.close()
     trusted.close()

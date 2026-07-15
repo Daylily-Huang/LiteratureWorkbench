@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Protocol, cast
 from uuid import UUID, uuid4
 
-from filelock import FileLock, Timeout
-
 from literature_workbench.db.database import Database
 from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.library.import_files import (
+    MutexTimeout,
     TrustedImportFile,
     TrustedImportRoot,
+    TrustedNamedMutex,
 )
 from literature_workbench.features.library.import_intents import (
     ImportIntentRepository,
@@ -44,6 +44,17 @@ class ImportPromotionRejected(RuntimeError):
 def _check(cancellation: Cancellation | None) -> None:
     if cancellation is not None:
         cancellation.raise_if_cancelled()
+
+
+def _check_transaction(
+    cancellation: Cancellation | None, connection: sqlite3.Connection
+) -> None:
+    _check(cancellation)
+    if cancellation is None:
+        return
+    fence = getattr(cancellation, "require_current_lease", None)
+    if callable(fence):
+        fence(connection)
 
 
 class ImportService:
@@ -211,22 +222,66 @@ class ImportService:
                 metadata = file.metadata()
                 valid = metadata.size == expected and file.read_prefix(5) == b"%PDF-"
                 if not valid:
-                    file.delete()
+                    oversized = metadata.size > expected
+                    if not oversized:
+                        file.delete()
                     file.close()
                     file = None
                     self._delete_incoming_exact(
-                        intent_id, "part" if suffix == "uploaded.pdf" else "uploaded.pdf"
+                        intent_id,
+                        "part" if suffix == "uploaded.pdf" else "uploaded.pdf",
+                        expected,
                     )
-                    self._fail_receiving(intent_id, "upload_interrupted")
+                    self._fail_receiving(
+                        intent_id,
+                        "recovery_residue_oversize" if oversized else "upload_interrupted",
+                    )
                     continue
                 if suffix == "part":
                     file.rename_incoming(intent_id, "uploaded.pdf")
                 self._mark_stale_uploaded_and_enqueue(intent_id)
             except OSError:
                 self._fail_receiving(intent_id, "upload_interrupted")
+            except ValueError:
+                self._fail_receiving(intent_id, "recovery_unsafe_residue")
             finally:
                 if file is not None:
                     file.close()
+
+    def sweep_failed_residue(self) -> None:
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id,expected_size,content_sha256 FROM import_intents
+                WHERE status='failed'
+                """
+            ).fetchall()
+        for row in rows:
+            intent_id = UUID(str(row["id"]))
+            expected_size = int(row["expected_size"])
+            digest = None if row["content_sha256"] is None else str(row["content_sha256"])
+            for suffix in ("part", "uploaded.pdf", "verify.pdf"):
+                file: TrustedImportFile | None = None
+                try:
+                    file = self._root.open_incoming(intent_id, suffix)
+                    metadata = file.metadata()
+                    if metadata.size > expected_size:
+                        self._record_failed_recovery(intent_id, "recovery_residue_oversize")
+                        continue
+                    if suffix == "verify.pdf" and digest is not None:
+                        if file.sha256() != digest:
+                            self._record_failed_recovery(
+                                intent_id, "recovery_residue_hash_mismatch"
+                            )
+                            continue
+                    file.delete()
+                except OSError:
+                    continue
+                except ValueError:
+                    self._record_failed_recovery(intent_id, "recovery_unsafe_residue")
+                finally:
+                    if file is not None:
+                        file.close()
 
     def _mark_stale_uploaded_and_enqueue(self, intent_id: UUID) -> None:
         now = datetime.now(UTC).isoformat()
@@ -254,10 +309,26 @@ class ImportService:
             allowed=("receiving",),
         )
 
-    def _delete_incoming_exact(self, intent_id: UUID, suffix: str) -> None:
+    def _record_failed_recovery(self, intent_id: UUID, error_code: str) -> None:
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE import_intents SET error_code=?,updated_at=?
+                WHERE id=? AND status='failed'
+                """,
+                (error_code, datetime.now(UTC).isoformat(), str(intent_id)),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("import_state_conflict")
+
+    def _delete_incoming_exact(
+        self, intent_id: UUID, suffix: str, expected_size: int
+    ) -> None:
         file: TrustedImportFile | None = None
         try:
             file = self._root.open_incoming(intent_id, suffix)
+            if file.metadata().size > expected_size:
+                return
             file.delete()
         except OSError:
             return
@@ -287,14 +358,13 @@ class ImportValidator:
         intent_id: UUID,
         cancellation: Cancellation | None = None,
     ) -> None:
-        intent_lock = FileLock(
-            str(self._root.locks_directory / f"intent-{intent_id}.lock")
-        )
+        intent_lock = self._root.mutex(f"intent:{intent_id}")
         self._acquire_lock(intent_lock, cancellation)
         try:
             self._validate_locked(intent_id, cancellation)
         finally:
             intent_lock.release()
+            intent_lock.close()
 
     def _validate_locked(
         self,
@@ -322,7 +392,9 @@ class ImportValidator:
                     source = self._root.open_incoming(intent_id, "uploaded.pdf")
                     suffix = "uploaded.pdf"
                 if status == "uploaded":
-                    self._cas_intent(intent_id, "uploaded", "validating")
+                    self._cas_intent(
+                        intent_id, "uploaded", "validating", cancellation
+                    )
                     status = "validating"
                 digest = self._validate_held(source, expected_size, cancellation)
                 _check(cancellation)
@@ -330,7 +402,7 @@ class ImportValidator:
                     source.rename_incoming(intent_id, "verify.pdf")
                     _check(cancellation)
                 final_path = self._promotion_path_or_current(digest)
-                self._cas_ready(intent_id, digest, final_path)
+                self._cas_ready(intent_id, digest, final_path, cancellation)
                 status = "ready_to_promote"
                 _check(cancellation)
             else:
@@ -367,6 +439,9 @@ class ImportValidator:
             self._fail_intent(intent_id, str(error), status)
         except OSError as error:
             if status == "ready_to_promote":
+                if getattr(error, "winerror", None) in {80, 183}:
+                    self._fail_destination_conflict(intent_id, digest)
+                    return
                 raise ImportPromotionPending("promotion_io_retry") from error
             if source is not None:
                 try:
@@ -412,12 +487,14 @@ class ImportValidator:
         source: TrustedImportFile | None,
         cancellation: Cancellation | None,
     ) -> None:
-        content_lock = FileLock(str(self._root.locks_directory / f"content-{digest}.lock"))
+        content_lock = self._root.mutex(f"content:{digest}")
         self._acquire_lock(content_lock, cancellation)
         final: TrustedImportFile | None = None
         try:
             _check(cancellation)
-            promotion = self._claim_or_read_promotion(intent_id, digest, proposed_path)
+            promotion = self._claim_or_read_promotion(
+                intent_id, digest, proposed_path, cancellation
+            )
             final_path = Path(str(promotion["final_path_key"]))
             owner = str(promotion["owner_intent_id"]) == str(intent_id)
             promotion_status = str(promotion["status"])
@@ -442,9 +519,14 @@ class ImportValidator:
                         cancellation=cancellation,
                     )
                 except ValueError as error:
-                    if str(error) != "document_binding_conflict":
+                    if str(error) not in {
+                        "document_binding_conflict",
+                        "content_binding_conflict",
+                    }:
                         raise
-                    self._reject_document_binding(intent_id, digest, owner=False)
+                    self._reject_binding(
+                        intent_id, digest, owner=False, error_code=str(error)
+                    )
                 return
 
             if source is not None:
@@ -461,7 +543,9 @@ class ImportValidator:
                 _check(cancellation)
                 source.rename_final(relative.parts[0], relative.parts[1], relative.parts[2])
                 _check(cancellation)
-                self._cas_promotion(digest, intent_id, "claimed", "moved")
+                self._cas_promotion(
+                    digest, intent_id, "claimed", "moved", cancellation
+                )
                 final = source
                 source = None
             else:
@@ -481,14 +565,20 @@ class ImportValidator:
                     cancellation=cancellation,
                 )
             except ValueError as error:
-                if str(error) != "document_binding_conflict":
+                if str(error) not in {
+                    "document_binding_conflict",
+                    "content_binding_conflict",
+                }:
                     raise
                 final.delete()
-                self._reject_document_binding(intent_id, digest, owner=True)
+                self._reject_binding(
+                    intent_id, digest, owner=True, error_code=str(error)
+                )
         finally:
             if final is not None:
                 final.close()
             content_lock.release()
+            content_lock.close()
 
     def _verify_final(
         self,
@@ -528,6 +618,7 @@ class ImportValidator:
         now = datetime.now(UTC).isoformat()
         final_key = os.path.normcase(os.path.abspath(final_path))
         with self._database.transaction() as connection:
+            _check_transaction(cancellation, connection)
             current = connection.execute(
                 "SELECT status,content_sha256,final_path_key FROM import_intents WHERE id=?",
                 (str(intent_id),),
@@ -546,17 +637,45 @@ class ImportValidator:
                 """,
                 (digest, metadata.size, now, now),
             )
+            content = connection.execute(
+                "SELECT size_bytes,mime_type FROM contents WHERE sha256=?", (digest,)
+            ).fetchone()
+            if (
+                content is None
+                or int(content["size_bytes"]) != metadata.size
+                or str(content["mime_type"]) != "application/pdf"
+            ):
+                raise ValueError("content_binding_conflict")
             document = connection.execute(
                 "SELECT * FROM documents WHERE path_key=?", (final_key,)
             ).fetchone()
             document_id = str(document["id"]) if document else str(uuid4())
             if document is not None:
+                version = connection.execute(
+                    """
+                    SELECT * FROM document_versions WHERE document_id=?
+                    ORDER BY observed_at DESC,id DESC LIMIT 1
+                    """,
+                    (document_id,),
+                ).fetchone()
                 if (
                     str(document["library_id"]) != str(managed.id)
                     or str(document["content_sha256"]) != digest
                     or os.path.normcase(os.path.abspath(str(document["path"]))) != final_key
+                    or str(document["format"]) != "pdf"
+                    or str(document["status"]) != "valid_pdf"
+                    or int(document["size_bytes"]) != metadata.size
+                    or str(document["volume_id"]) != metadata.volume_id
+                    or str(document["file_id"]) != metadata.file_id
+                    or int(document["hard_link_count"]) != metadata.hard_link_count
                     or str(document["authorization_source"]) != "confirmed_import"
                     or int(document["auto_cloud_eligible"]) != 1
+                    or version is None
+                    or str(version["content_sha256"]) != digest
+                    or int(version["size_bytes"]) != metadata.size
+                    or str(version["volume_id"]) != metadata.volume_id
+                    or str(version["file_id"]) != metadata.file_id
+                    or int(version["hard_link_count"]) != metadata.hard_link_count
                 ):
                     raise ValueError("document_binding_conflict")
             else:
@@ -732,8 +851,15 @@ class ImportValidator:
             raise ValueError("import_not_found")
         return cast(sqlite3.Row, row)
 
-    def _cas_intent(self, intent_id: UUID, expected: str, target: str) -> None:
+    def _cas_intent(
+        self,
+        intent_id: UUID,
+        expected: str,
+        target: str,
+        cancellation: Cancellation | None,
+    ) -> None:
         with self._database.transaction() as connection:
+            _check_transaction(cancellation, connection)
             changed = connection.execute(
                 "UPDATE import_intents SET status=?,updated_at=? WHERE id=? AND status=?",
                 (target, datetime.now(UTC).isoformat(), str(intent_id), expected),
@@ -741,9 +867,16 @@ class ImportValidator:
             if changed.rowcount != 1:
                 raise ValueError("import_state_conflict")
 
-    def _cas_ready(self, intent_id: UUID, digest: str, final_path: Path) -> None:
+    def _cas_ready(
+        self,
+        intent_id: UUID,
+        digest: str,
+        final_path: Path,
+        cancellation: Cancellation | None,
+    ) -> None:
         final_key = os.path.normcase(os.path.abspath(final_path))
         with self._database.transaction() as connection:
+            _check_transaction(cancellation, connection)
             changed = connection.execute(
                 """
                 UPDATE import_intents SET status='ready_to_promote',content_sha256=?,
@@ -771,11 +904,16 @@ class ImportValidator:
         )
 
     def _claim_or_read_promotion(
-        self, intent_id: UUID, digest: str, final_path: Path
+        self,
+        intent_id: UUID,
+        digest: str,
+        final_path: Path,
+        cancellation: Cancellation | None,
     ) -> sqlite3.Row:
         final_key = os.path.normcase(os.path.abspath(final_path))
         now = datetime.now(UTC).isoformat()
         with self._database.transaction() as connection:
+            _check_transaction(cancellation, connection)
             row = connection.execute(
                 "SELECT * FROM import_promotions WHERE content_sha256=?", (digest,)
             ).fetchone()
@@ -801,8 +939,10 @@ class ImportValidator:
         intent_id: UUID,
         expected: str,
         target: str,
+        cancellation: Cancellation | None,
     ) -> None:
         with self._database.transaction() as connection:
+            _check_transaction(cancellation, connection)
             changed = connection.execute(
                 """
                 UPDATE import_promotions SET status=?,updated_at=?
@@ -850,18 +990,23 @@ class ImportValidator:
         source.close()
         raise ImportPromotionRejected("promotion_path_conflict")
 
-    def _reject_document_binding(
-        self, intent_id: UUID, digest: str, *, owner: bool
+    def _reject_binding(
+        self,
+        intent_id: UUID,
+        digest: str,
+        *,
+        owner: bool,
+        error_code: str,
     ) -> None:
         now = datetime.now(UTC).isoformat()
         with self._database.transaction() as connection:
             changed = connection.execute(
                 """
-                UPDATE import_intents SET status='failed',error_code='document_binding_conflict',
+                UPDATE import_intents SET status='failed',error_code=?,
                   updated_at=? WHERE id=? AND status='ready_to_promote'
                   AND content_sha256=?
                 """,
-                (now, str(intent_id), digest),
+                (error_code, now, str(intent_id), digest),
             )
             if changed.rowcount != 1:
                 raise ValueError("import_state_conflict")
@@ -875,28 +1020,59 @@ class ImportValidator:
                 )
                 if changed.rowcount != 1:
                     raise ValueError("promotion_state_conflict")
-        raise ImportPromotionRejected("document_binding_conflict")
+        raise ImportPromotionRejected(error_code)
+
+    def _fail_destination_conflict(self, intent_id: UUID, digest: str) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE import_intents SET status='failed',error_code='promotion_path_conflict',
+                  updated_at=? WHERE id=? AND status='ready_to_promote'
+                  AND content_sha256=?
+                """,
+                (now, str(intent_id), digest),
+            )
+            if changed.rowcount != 1:
+                raise ImportPromotionPending("promotion_conflict_state_retry")
+            changed = connection.execute(
+                """
+                UPDATE import_promotions SET status='failed',updated_at=?
+                WHERE content_sha256=? AND owner_intent_id=? AND status='claimed'
+                """,
+                (now, digest, str(intent_id)),
+            )
+            if changed.rowcount != 1:
+                raise ImportPromotionPending("promotion_conflict_state_retry")
 
     def _fail_intent(self, intent_id: UUID, error_code: str, current: str) -> None:
-        if current == "ready_to_promote":
-            return
+        persisted_error = (
+            f"recovery_{error_code}" if current == "ready_to_promote" else error_code
+        )
         with self._database.transaction() as connection:
             changed = connection.execute(
                 """
                 UPDATE import_intents SET status='failed',error_code=?,updated_at=?
                 WHERE id=? AND status=?
                 """,
-                (error_code, datetime.now(UTC).isoformat(), str(intent_id), current),
+                (
+                    persisted_error,
+                    datetime.now(UTC).isoformat(),
+                    str(intent_id),
+                    current,
+                ),
             )
             if changed.rowcount != 1:
                 raise ValueError("import_state_conflict")
 
     @staticmethod
-    def _acquire_lock(lock: FileLock, cancellation: Cancellation | None) -> None:
+    def _acquire_lock(
+        lock: TrustedNamedMutex, cancellation: Cancellation | None
+    ) -> None:
         while True:
             _check(cancellation)
             try:
                 lock.acquire(timeout=0.1)
                 return
-            except Timeout:
+            except MutexTimeout:
                 continue
