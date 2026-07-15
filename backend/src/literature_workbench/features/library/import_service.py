@@ -268,7 +268,12 @@ class ImportService:
                     if metadata.size > expected_size:
                         self._record_failed_recovery(intent_id, "recovery_residue_oversize")
                         continue
-                    if suffix == "verify.pdf" and digest is not None:
+                    if suffix == "verify.pdf":
+                        if digest is None:
+                            self._record_failed_recovery(
+                                intent_id, "recovery_verify_digest_missing"
+                            )
+                            continue
                         if file.sha256() != digest:
                             self._record_failed_recovery(
                                 intent_id, "recovery_residue_hash_mismatch"
@@ -282,6 +287,42 @@ class ImportService:
                 finally:
                     if file is not None:
                         file.close()
+
+    def sweep_failed_promotions(self) -> None:
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT p.content_sha256,p.final_path_key,i.id,i.expected_size
+                FROM import_promotions AS p
+                JOIN import_intents AS i ON i.id=p.owner_intent_id
+                WHERE p.status='failed' AND i.status='failed'
+                """
+            ).fetchall()
+        for row in rows:
+            final: TrustedImportFile | None = None
+            intent_id = UUID(str(row["id"]))
+            try:
+                final = self._root.open_final(Path(str(row["final_path_key"])))
+                metadata = final.metadata()
+                if (
+                    metadata.size != int(row["expected_size"])
+                    or metadata.hard_link_count != 1
+                    or final.sha256() != str(row["content_sha256"])
+                ):
+                    self._record_failed_recovery(
+                        intent_id, "recovery_failed_promotion_mismatch"
+                    )
+                    continue
+                final.delete()
+            except OSError:
+                continue
+            except ValueError:
+                self._record_failed_recovery(
+                    intent_id, "recovery_failed_promotion_unsafe"
+                )
+            finally:
+                if final is not None:
+                    final.close()
 
     def _mark_stale_uploaded_and_enqueue(self, intent_id: UUID) -> None:
         now = datetime.now(UTC).isoformat()
@@ -359,11 +400,14 @@ class ImportValidator:
         cancellation: Cancellation | None = None,
     ) -> None:
         intent_lock = self._root.mutex(f"intent:{intent_id}")
-        self._acquire_lock(intent_lock, cancellation)
+        acquired = False
         try:
+            self._acquire_lock(intent_lock, cancellation)
+            acquired = True
             self._validate_locked(intent_id, cancellation)
         finally:
-            intent_lock.release()
+            if acquired:
+                intent_lock.release()
             intent_lock.close()
 
     def _validate_locked(
@@ -488,9 +532,11 @@ class ImportValidator:
         cancellation: Cancellation | None,
     ) -> None:
         content_lock = self._root.mutex(f"content:{digest}")
-        self._acquire_lock(content_lock, cancellation)
+        acquired = False
         final: TrustedImportFile | None = None
         try:
+            self._acquire_lock(content_lock, cancellation)
+            acquired = True
             _check(cancellation)
             promotion = self._claim_or_read_promotion(
                 intent_id, digest, proposed_path, cancellation
@@ -498,6 +544,16 @@ class ImportValidator:
             final_path = Path(str(promotion["final_path_key"]))
             owner = str(promotion["owner_intent_id"]) == str(intent_id)
             promotion_status = str(promotion["status"])
+            if promotion_status == "failed" and source is not None:
+                promotion = self._takeover_failed_promotion(
+                    intent_id,
+                    digest,
+                    final_path,
+                    expected_size,
+                    cancellation,
+                )
+                owner = True
+                promotion_status = "claimed"
             if not owner and promotion_status != "completed":
                 raise ImportPromotionPending("promotion_owner_pending")
             if not owner:
@@ -527,6 +583,7 @@ class ImportValidator:
                     self._reject_binding(
                         intent_id, digest, owner=False, error_code=str(error)
                     )
+                    raise ImportPromotionRejected(str(error))
                 return
 
             if source is not None:
@@ -570,14 +627,16 @@ class ImportValidator:
                     "content_binding_conflict",
                 }:
                     raise
-                final.delete()
                 self._reject_binding(
                     intent_id, digest, owner=True, error_code=str(error)
                 )
+                final.delete()
+                raise ImportPromotionRejected(str(error))
         finally:
             if final is not None:
                 final.close()
-            content_lock.release()
+            if acquired:
+                content_lock.release()
             content_lock.close()
 
     def _verify_final(
@@ -1020,7 +1079,6 @@ class ImportValidator:
                 )
                 if changed.rowcount != 1:
                     raise ValueError("promotion_state_conflict")
-        raise ImportPromotionRejected(error_code)
 
     def _fail_destination_conflict(self, intent_id: UUID, digest: str) -> None:
         now = datetime.now(UTC).isoformat()
@@ -1050,6 +1108,10 @@ class ImportValidator:
             f"recovery_{error_code}" if current == "ready_to_promote" else error_code
         )
         with self._database.transaction() as connection:
+            row = connection.execute(
+                "SELECT content_sha256 FROM import_intents WHERE id=? AND status=?",
+                (str(intent_id), current),
+            ).fetchone()
             changed = connection.execute(
                 """
                 UPDATE import_intents SET status='failed',error_code=?,updated_at=?
@@ -1064,6 +1126,64 @@ class ImportValidator:
             )
             if changed.rowcount != 1:
                 raise ValueError("import_state_conflict")
+            if current == "ready_to_promote" and row is not None:
+                digest = row["content_sha256"]
+                if digest is not None:
+                    connection.execute(
+                        """
+                        UPDATE import_promotions SET status='failed',updated_at=?
+                        WHERE content_sha256=? AND owner_intent_id=?
+                          AND status IN ('claimed','moved')
+                        """,
+                        (
+                            datetime.now(UTC).isoformat(),
+                            str(digest),
+                            str(intent_id),
+                        ),
+                    )
+
+    def _takeover_failed_promotion(
+        self,
+        intent_id: UUID,
+        digest: str,
+        final_path: Path,
+        expected_size: int,
+        cancellation: Cancellation | None,
+    ) -> sqlite3.Row:
+        failed_final: TrustedImportFile | None = None
+        try:
+            failed_final = self._root.open_final(final_path)
+            self._verify_final(
+                failed_final, final_path, digest, expected_size, cancellation
+            )
+            _check(cancellation)
+            failed_final.delete()
+        except OSError:
+            pass
+        finally:
+            if failed_final is not None:
+                failed_final.close()
+        with self._database.transaction() as connection:
+            _check_transaction(cancellation, connection)
+            changed = connection.execute(
+                """
+                UPDATE import_promotions SET owner_intent_id=?,status='claimed',updated_at=?
+                WHERE content_sha256=? AND status='failed'
+                """,
+                (
+                    str(intent_id),
+                    datetime.now(UTC).isoformat(),
+                    digest,
+                ),
+            )
+            if changed.rowcount != 1:
+                raise ImportPromotionPending("promotion_takeover_retry")
+            row = connection.execute(
+                "SELECT * FROM import_promotions WHERE content_sha256=?", (digest,)
+            ).fetchone()
+        if row is None:
+            raise ImportPromotionPending("promotion_takeover_retry")
+        return cast(sqlite3.Row, row)
 
     @staticmethod
     def _acquire_lock(

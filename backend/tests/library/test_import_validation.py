@@ -545,6 +545,28 @@ def test_failed_terminal_sweep_cleans_only_size_bound_residue(
         assert not residue.exists()
 
 
+def test_failed_verify_without_recorded_digest_is_preserved_with_precise_error(
+    tmp_path: Path, database
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    trusted = _trusted(tmp_path)
+    body = _valid_pdf()
+    created = repository.create("prior-generation", "failed.pdf", len(body), "application/pdf")
+    repository.claim(created.intent_id, "prior-generation", created.upload_token)
+    repository.fail(created.intent_id, "simulated_crash", allowed=("receiving",))
+    held = trusted.create_incoming(created.intent_id)
+    held.write(body)
+    held.flush()
+    held.rename_incoming(created.intent_id, "verify.pdf")
+    held.close()
+
+    ImportService(database, repository, trusted, "generation-a").sweep_failed_residue()
+
+    assert trusted.incoming_path(created.intent_id, "verify.pdf").exists()
+    view = repository.get(created.intent_id, "prior-generation")
+    assert view.error_code == "recovery_verify_digest_missing"
+
+
 def test_move_before_database_completion_is_recovered_only_by_recorded_owner(
     tmp_path: Path, database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -885,6 +907,83 @@ def test_existing_content_row_must_match_size_and_mime_binding(
     assert (view.status, view.error_code) == ("failed", "content_binding_conflict")
 
 
+@pytest.mark.parametrize(
+    "crash_boundary", ["before_journal", "before_delete", "after_delete", "none"]
+)
+def test_owner_binding_rejection_journals_before_cleanup_and_recovers_boundaries(
+    tmp_path: Path,
+    database,
+    monkeypatch: pytest.MonkeyPatch,
+    crash_boundary: str,
+) -> None:
+    from literature_workbench.features.library.import_files import TrustedImportFile
+
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    digest = __import__("hashlib").sha256(body).hexdigest()
+    created = repository.create("generation-a", "owner.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    asyncio.run(service.consume(created.intent_id, created.upload_token, _chunks(body)))
+    with database.transaction() as connection:
+        now = datetime.now(UTC).isoformat()
+        connection.execute(
+            """
+            INSERT INTO contents(sha256,size_bytes,mime_type,status,created_at,updated_at)
+            VALUES(?,?,'text/plain','queued',?,?)
+            """,
+            (digest, len(body) + 1, now, now),
+        )
+    validator = ImportValidator(database, queue, trusted)
+    if crash_boundary == "before_journal":
+        monkeypatch.setattr(
+            validator,
+            "_reject_binding",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("before_journal")
+            ),
+        )
+    elif crash_boundary in {"before_delete", "after_delete"}:
+        original_delete = TrustedImportFile.delete
+
+        def crashing_delete(file) -> None:
+            if crash_boundary == "after_delete":
+                original_delete(file)
+            raise RuntimeError(crash_boundary)
+
+        monkeypatch.setattr(TrustedImportFile, "delete", crashing_delete)
+
+    if crash_boundary == "none":
+        validator.validate_and_promote(created.intent_id)
+    else:
+        with pytest.raises(RuntimeError, match=crash_boundary):
+            validator.validate_and_promote(created.intent_id)
+    with database.connect() as connection:
+        intent = connection.execute(
+            "SELECT status,final_path_key FROM import_intents WHERE id=?",
+            (str(created.intent_id),),
+        ).fetchone()
+        promotion = connection.execute("SELECT status FROM import_promotions").fetchone()
+    final_path = Path(str(intent["final_path_key"]))
+
+    if crash_boundary == "before_journal":
+        assert (str(intent["status"]), str(promotion["status"])) == (
+            "ready_to_promote",
+            "moved",
+        )
+        assert final_path.exists()
+        monkeypatch.undo()
+        validator.validate_and_promote(created.intent_id)
+    else:
+        assert (str(intent["status"]), str(promotion["status"])) == ("failed", "failed")
+        monkeypatch.undo()
+        service.sweep_failed_promotions()
+
+    assert repository.get(created.intent_id, "generation-a").status == "failed"
+    assert not final_path.exists()
+
+
 def test_true_concurrent_same_hash_imports_complete_once_each(
     tmp_path: Path, database
 ) -> None:
@@ -976,6 +1075,59 @@ def test_owner_crash_wakes_waiter_and_reuses_persisted_path_across_month(
     validator.validate_and_promote(waiter.intent_id)
 
     assert repository.get(owner.intent_id, "generation-a").status == "completed"
+    assert repository.get(waiter.intent_id, "generation-a").status == "completed"
+
+
+@pytest.mark.parametrize("failure_stage", ["claimed", "moved"])
+def test_generic_owner_failure_atomically_fails_promotion_and_waiter_takes_over(
+    tmp_path: Path,
+    database,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    owner = repository.create("generation-a", "owner.pdf", len(body), "application/pdf")
+    waiter = repository.create("generation-a", "waiter.pdf", len(body), "application/pdf")
+    trusted = _trusted(tmp_path)
+    service = ImportService(database, repository, trusted, "generation-a", queue=queue)
+    for item in (owner, waiter):
+        asyncio.run(service.consume(item.intent_id, item.upload_token, _chunks(body)))
+    validator = ImportValidator(database, queue, trusted)
+    if failure_stage == "claimed":
+        original = validator._claim_or_read_promotion
+
+        def fail_after_claim(*args, **kwargs):
+            original(*args, **kwargs)
+            raise ValueError("generic_after_claim")
+
+        monkeypatch.setattr(validator, "_claim_or_read_promotion", fail_after_claim)
+    else:
+        def fail_after_move(*_args, **_kwargs):
+            raise ValueError("generic_after_move")
+
+        monkeypatch.setattr(validator, "_verify_final", fail_after_move)
+
+    validator.validate_and_promote(owner.intent_id)
+    with database.connect() as connection:
+        state = connection.execute(
+            "SELECT status,error_code FROM import_intents WHERE id=?", (str(owner.intent_id),)
+        ).fetchone()
+        promotion = connection.execute(
+            "SELECT owner_intent_id,status FROM import_promotions"
+        ).fetchone()
+    expected_error = (
+        "recovery_generic_after_claim"
+        if failure_stage == "claimed"
+        else "recovery_generic_after_move"
+    )
+    assert tuple(state) == ("failed", expected_error)
+    assert tuple(promotion) == (str(owner.intent_id), "failed")
+
+    monkeypatch.undo()
+    validator.validate_and_promote(waiter.intent_id)
+
     assert repository.get(waiter.intent_id, "generation-a").status == "completed"
 
 
@@ -1246,6 +1398,41 @@ def test_trusted_named_mutex_recovers_abandoned_owner(tmp_path: Path) -> None:
 
     recovered.close()
     abandoned.close()
+    trusted.close()
+
+
+def test_cancel_before_mutex_acquire_closes_every_created_handle(
+    tmp_path: Path, database
+) -> None:
+    import gc
+    import psutil
+
+    trusted = _trusted(tmp_path)
+    validator = ImportValidator(database, TaskQueue(database, _now), trusted)
+
+    class Cancelled:
+        def raise_if_cancelled(self) -> None:
+            raise asyncio.CancelledError
+
+    process = psutil.Process()
+    before = process.num_handles()
+    for _ in range(64):
+        with pytest.raises(asyncio.CancelledError):
+            validator.validate_and_promote(__import__("uuid").uuid4(), Cancelled())
+        with pytest.raises(asyncio.CancelledError):
+            validator._promote(
+                __import__("uuid").uuid4(),
+                "0" * 64,
+                trusted.library_directory / "2026" / "07" / ("0" * 64 + ".pdf"),
+                "cancelled.pdf",
+                1,
+                None,
+                Cancelled(),
+            )
+    gc.collect()
+    after = process.num_handles()
+
+    assert after - before < 4
     trusted.close()
 
 

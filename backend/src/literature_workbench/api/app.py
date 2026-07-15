@@ -96,6 +96,7 @@ def create_app(
             )
             app.state.import_service.reconcile_stale_receiving()
             app.state.import_service.sweep_failed_residue()
+            app.state.import_service.sweep_failed_promotions()
             app.state.settings_service = SettingsService(
                 SettingsRepository(database), resolved_secret_store
             )
