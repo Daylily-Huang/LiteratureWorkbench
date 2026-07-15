@@ -85,7 +85,7 @@ class LocalSession:
             if matched_key is None:
                 return False
             entry = self._bootstrap_tokens.pop(matched_key)
-            return entry.expires_at >= self._now()
+            return self._now() < entry.expires_at
 
     def valid_session(self, candidate: str | None) -> bool:
         return candidate is not None and hmac.compare_digest(candidate, self.session_cookie)

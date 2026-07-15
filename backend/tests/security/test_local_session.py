@@ -49,6 +49,15 @@ def test_expired_bootstrap_token_is_rejected() -> None:
     assert session.consume_bootstrap_token(token) is False
 
 
+def test_bootstrap_token_is_rejected_at_exact_expiry() -> None:
+    clock = FakeMonotonic()
+    session = LocalSession(now=clock)
+    token = session.issue_bootstrap_token(ttl_seconds=60)
+    clock.value = 160.0
+
+    assert session.consume_bootstrap_token(token) is False
+
+
 def test_bootstrap_is_posted_once_and_never_uses_query_string(
     client: TestClient,
     session: LocalSession,
@@ -126,7 +135,6 @@ def test_cross_origin_write_is_rejected(
 ) -> None:
     response = client.patch(
         "/api/settings",
-        cookies=authenticated.cookies,
         headers={"Origin": "https://malicious.example", "X-LW-CSRF": authenticated.csrf},
         json={"default_translation_mode": "local_only"},
     )
@@ -139,7 +147,6 @@ def test_missing_csrf_is_rejected_with_correct_origin_and_session(
 ) -> None:
     response = client.patch(
         "/api/settings",
-        cookies=authenticated.cookies,
         headers={"Origin": "http://testserver"},
         json={"default_translation_mode": "local_only"},
     )
@@ -164,7 +171,6 @@ def test_every_authenticated_api_write_denies_missing_csrf(
     response = client.request(
         method,
         path,
-        cookies=authenticated.cookies,
         headers={"Origin": "http://testserver"},
         json=body,
     )
@@ -177,7 +183,6 @@ def test_incorrect_csrf_is_rejected_with_correct_origin_and_session(
 ) -> None:
     response = client.patch(
         "/api/settings",
-        cookies=authenticated.cookies,
         headers={"Origin": "http://testserver", "X-LW-CSRF": "wrong"},
         json={},
     )
@@ -190,10 +195,10 @@ def test_missing_or_incorrect_session_is_rejected(
     authenticated,
     cookie: str | None,
 ) -> None:
-    cookies = {} if cookie is None else {"lw_session": cookie}
-    if cookie is None:
-        client.cookies.delete("lw_session")
-    response = client.get("/api/settings", cookies=cookies)
+    client.cookies.clear()
+    if cookie is not None:
+        client.cookies.set("lw_session", cookie)
+    response = client.get("/api/settings")
     assert response.status_code == 403
 
 
@@ -203,7 +208,6 @@ def test_wrong_host_is_rejected_with_otherwise_correct_credentials(
 ) -> None:
     response = client.patch(
         "/api/settings",
-        cookies=authenticated.cookies,
         headers={
             "Host": "malicious.example",
             "Origin": "http://malicious.example",
@@ -234,7 +238,6 @@ def test_every_browser_write_method_requires_origin(
     response = client.request(
         method,
         path,
-        cookies=authenticated.cookies,
         headers=headers,
         json=body,
     )
@@ -260,7 +263,6 @@ def test_non_exact_origin_is_rejected(
 ) -> None:
     response = client.patch(
         "/api/settings",
-        cookies=authenticated.cookies,
         headers={"Origin": origin, "X-LW-CSRF": authenticated.csrf},
         json={},
     )
@@ -273,7 +275,6 @@ def test_cross_origin_read_is_rejected_when_origin_is_supplied(
 ) -> None:
     response = client.get(
         "/api/settings",
-        cookies=authenticated.cookies,
         headers={"Origin": "http://localhost"},
     )
     assert response.status_code == 403
@@ -298,7 +299,6 @@ def test_forwarding_headers_are_always_rejected(
 ) -> None:
     response = client.get(
         "/api/settings",
-        cookies=authenticated.cookies,
         headers={header: "127.0.0.1"},
     )
     assert response.status_code == 403

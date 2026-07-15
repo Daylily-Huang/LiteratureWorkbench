@@ -9,6 +9,23 @@ from fastapi.responses import JSONResponse
 
 LOGGER = logging.getLogger("literature_workbench.validation")
 VALIDATION_ERROR_CODE = "request_validation_error"
+_SAFE_LOCATION_ROOTS = frozenset({"body", "cookie", "header", "path", "query"})
+_SAFE_SCHEMA_FIELDS = frozenset({"api_key", "default_translation_mode", "token"})
+_REDACTED_LOCATION = "<redacted>"
+
+
+def _sanitize_location(location: tuple[object, ...]) -> list[str | int]:
+    sanitized: list[str | int] = []
+    for index, part in enumerate(location):
+        if isinstance(part, int):
+            sanitized.append(part)
+        elif index == 0 and part in _SAFE_LOCATION_ROOTS:
+            sanitized.append(str(part))
+        elif part in _SAFE_SCHEMA_FIELDS:
+            sanitized.append(str(part))
+        else:
+            sanitized.append(_REDACTED_LOCATION)
+    return sanitized
 
 
 def install_validation_error_handler(app: FastAPI) -> None:
@@ -19,7 +36,7 @@ def install_validation_error_handler(app: FastAPI) -> None:
     ) -> JSONResponse:
         errors = [
             {
-                "loc": [part for part in error.get("loc", ()) if isinstance(part, (str, int))],
+                "loc": _sanitize_location(tuple(error.get("loc", ()))),
                 "type": str(error.get("type", "value_error")),
             }
             for error in exception.errors()
