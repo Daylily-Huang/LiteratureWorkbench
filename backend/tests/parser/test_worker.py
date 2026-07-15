@@ -16,7 +16,11 @@ from literature_workbench.features.parser.mineru import ProcessOutcome
 from literature_workbench.features.parser.models import ParsedPage
 from literature_workbench.features.parser.normalizer import ParseRunRepository
 from literature_workbench.features.parser.worker import ParseJobFailure, ParseWorkerService
-from literature_workbench.features.parser.workspace import TrustedParserWorkspace
+from literature_workbench.features.parser.workspace import (
+    TrustedParserFile,
+    TrustedParserWorkspace,
+    UnsafeParserWorkspace,
+)
 from literature_workbench.worker import Worker, parser_job_handlers
 
 
@@ -206,6 +210,60 @@ def test_mineru_result_files_remain_immutable_from_validation_through_publish(
     manifest_bytes = manifest_path.read_bytes()
     assert pointer["manifest_digest"] == hashlib.sha256(manifest_bytes).hexdigest()
     promoted.close()
+    workspace.close()
+
+
+@pytest.mark.parametrize("extra_kind", ["file", "directory"])
+def test_mineru_result_manifest_rejects_entries_added_after_sealing(
+    parser_library: ParserLibraryFixture,
+    extra_kind: str,
+) -> None:
+    registered = parser_library.register("extra-result.pdf", _pdf_bytes(text=False))
+    run_id = uuid4()
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    work = workspace.create_mineru_work(run_id)
+    output = work.path / "paper" / "auto"
+    output.mkdir(parents=True)
+    (output / "paper_content_list.json").write_text("[]", encoding="utf-8")
+    sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
+    promoted = workspace.promote_sealed_mineru_result(sealed)
+    if extra_kind == "file":
+        (promoted.path / "injected.txt").write_text("hostile", encoding="utf-8")
+    else:
+        (promoted.path / "injected-dir").mkdir()
+
+    with pytest.raises(UnsafeParserWorkspace, match="mineru_result_entry_set_changed"):
+        workspace.publish_result_pointer(registered.content_id, run_id, promoted)
+
+    promoted.close()
+    workspace.close()
+
+
+def test_copying_failure_removes_only_held_partial_result_and_journal(
+    parser_library: ParserLibraryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered = parser_library.register("copy-failure.pdf", _pdf_bytes(text=False))
+    run_id = uuid4()
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    work = workspace.create_mineru_work(run_id)
+    (work.path / "result.json").write_text("{}", encoding="utf-8")
+    sealed = workspace.seal_mineru_work(registered.content_id, run_id, work)
+
+    def fail_copy(self: TrustedParserFile, destination: TrustedParserFile, **_: object) -> None:
+        destination.write(b"partial")
+        raise OSError("injected_copy_failure")
+
+    monkeypatch.setattr(TrustedParserFile, "copy_to", fail_copy)
+    with pytest.raises(OSError, match="injected_copy_failure"):
+        workspace.promote_sealed_mineru_result(sealed)
+
+    result_parent = (
+        parser_library.data_root / "parse-results" / registered.content_id
+    )
+    assert not (result_parent / str(run_id)).exists()
+    assert not (result_parent / f"{run_id}.promotion.json").exists()
+    sealed.close()
     workspace.close()
 
 
@@ -635,16 +693,25 @@ def test_retry_recovers_promoted_manifest_after_database_failure(
         / registered.content_id
         / f"{run_id}.promotion.json"
     )
-    assert (
-        json.loads(journal.read_text(encoding="utf-8"))["state"]
-        == expected_journal_state
+    long_result_file = (
+        journal.parent
+        / run_id
+        / str(cancellation.state["mineru_input_stem"])
+        / "auto"
+        / f"{cancellation.state['mineru_input_stem']}_content_list.json"
     )
+    assert len(str(long_result_file)) > 260
+    latest_frame = journal.read_bytes().splitlines()[-1]
+    assert json.loads(latest_frame.split(b":", 1)[1])["state"] == expected_journal_state
 
     class MustNotRerunMinerU:
         def run(self, *_args: object) -> ProcessOutcome:
             raise AssertionError("promoted immutable result must be recovered")
 
-    recovery = replace(job, checkpoint=cancellation.state, stage=cancellation.stage)
+    # Simulate a hard crash after the durable promotion state but before the
+    # job checkpoint transaction. Recovery must discover the running run from
+    # parse_runs.source_job_id + request_revision, not from checkpoint JSON.
+    recovery = replace(job, checkpoint={}, stage="pending")
     second_service = ParseWorkerService(
         parser_library.database,
         parser_library.inspector,

@@ -148,12 +148,12 @@ def stage_verified_pdf(
         if part.sha256(cancellation) != expected_hash:
             raise StagedContentMismatch("staged_handle_hash_mismatch")
         journal = workspace.create_journal(content_id, attempt_id)
-        journal.replace_bytes(
+        journal.append_journal_record(
             workspace.journal_payload(content_id, attempt_id, actual_hash, "prepared")
         )
         final_path = part.path.with_suffix(".pdf")
         part.rename(final_path)
-        journal.replace_bytes(
+        journal.append_journal_record(
             workspace.journal_payload(content_id, attempt_id, actual_hash, "renamed")
         )
         part = workspace.bind_staged_read_guard(part, actual_hash)
@@ -212,18 +212,17 @@ def recover_checkpointed_staging(
     journal: TrustedParserFile | None = None
     recovered = False
     try:
-        held = workspace.open_staging_file(content_id, attempt_id, suffix)
+        recovery_suffix = ".pdf" if suffix == ".part" else suffix
+        held = workspace.open_staging_file(content_id, attempt_id, recovery_suffix)
         if owns_workspace:
             held.adopt_owner(workspace)
-        if suffix == ".part":
-            return None
         actual_hash = held.sha256()
         if actual_hash != expected:
             return None
         journal = workspace.open_staging_file(
             content_id, attempt_id, ".promotion.json"
         )
-        record = json.loads(journal.read_bounded(64 * 1024).decode("utf-8"))
+        record = journal.read_latest_journal_record(64 * 1024)
         expected_record = json.loads(
             workspace.journal_payload(
                 content_id, attempt_id, actual_hash, "renamed"

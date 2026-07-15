@@ -33,6 +33,7 @@ OPEN_EXISTING = 3
 FILE_ATTRIBUTE_NORMAL = 0x00000080
 FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 FILE_BEGIN = 0
+FILE_END = 2
 FILE_RENAME_INFO_CLASS = 3
 FILE_DISPOSITION_INFO_CLASS = 4
 
@@ -140,6 +141,18 @@ class TrustedParserDirectory:
     def hold_parent(self, parent: Win32OwnedFileHandle) -> None:
         self._held_directories += (parent,)
 
+    def delete(self) -> None:
+        if self._handle is None:
+            raise ValueError("trusted_parser_directory_closed")
+        info = _FILE_DISPOSITION_INFO(True)
+        if not _SetFileInformationByHandle(
+            wintypes.HANDLE(self._handle.borrow_native_handle()),
+            FILE_DISPOSITION_INFO_CLASS,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        ):
+            _raise_last_error("SetFileInformationByHandle(parser directory delete)")
+
     def rename(
         self,
         destination: Path,
@@ -202,6 +215,9 @@ def _promotion_journal_payload(
     run_id: UUID,
     manifest_digest: str,
     state: str,
+    input_stem: str | None = None,
+    source_job_id: UUID | str | None = None,
+    request_revision: int | None = None,
 ) -> bytes:
     if state not in {
         "copying",
@@ -216,6 +232,9 @@ def _promotion_journal_payload(
             "content_id": str(content_id),
             "run_id": str(run_id),
             "manifest_digest": manifest_digest,
+            "input_stem": input_stem,
+            "source_job_id": None if source_job_id is None else str(source_job_id),
+            "request_revision": request_revision,
             "state": state,
         },
         ensure_ascii=False,
@@ -225,7 +244,7 @@ def _promotion_journal_payload(
 
 
 def _rename_handle(handle: int, destination: Path, *, replace: bool = False) -> None:
-    encoded = str(destination).encode("utf-16-le")
+    encoded = _extended_windows_path(destination).encode("utf-16-le")
     offset = _FILE_RENAME_INFO.FileName.offset
     buffer = ctypes.create_string_buffer(offset + len(encoded) + 2)
     info = _FILE_RENAME_INFO.from_buffer(buffer)
@@ -244,7 +263,7 @@ def _rename_handle(handle: int, destination: Path, *, replace: bool = False) -> 
 
 def _flush_directory(path: Path) -> None:
     raw = _CreateFileW(
-        str(path),
+        _extended_windows_path(path),
         GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
         None,
@@ -322,6 +341,42 @@ class TrustedParserFile:
             _raise_last_error("SetEndOfFile(parser workspace)")
         self.write(data)
         self.flush()
+
+    def append_journal_record(self, payload: bytes) -> None:
+        """Append a checksummed state record; a torn final record is ignorable."""
+        if b"\n" in payload or b"\r" in payload:
+            raise ValueError("journal_payload_must_be_single_line")
+        handle = self._require_handle()
+        if not _SetFilePointerEx(wintypes.HANDLE(handle), 0, None, FILE_END):
+            _raise_last_error("SetFilePointerEx(parser journal append)")
+        frame = hashlib.sha256(payload).hexdigest().encode("ascii") + b":" + payload + b"\n"
+        self.write(frame)
+        self.flush()
+
+    def read_latest_journal_record(self, maximum_bytes: int) -> dict[str, Any]:
+        raw = self.read_bounded(maximum_bytes)
+        if raw.startswith(b"{") and b"\n" not in raw:
+            legacy = json.loads(raw.decode("utf-8"))
+            if not isinstance(legacy, dict):
+                raise ValueError("parser_journal_record_invalid")
+            return legacy
+        latest: dict[str, Any] | None = None
+        lines = raw.splitlines()
+        for index, line in enumerate(lines):
+            try:
+                digest, payload = line.split(b":", 1)
+                if digest.decode("ascii") != hashlib.sha256(payload).hexdigest():
+                    raise ValueError("parser_journal_checksum_invalid")
+                record = json.loads(payload.decode("utf-8"))
+                if not isinstance(record, dict):
+                    raise ValueError("parser_journal_record_invalid")
+                latest = record
+            except (ValueError, UnicodeError, json.JSONDecodeError):
+                if index != len(lines) - 1:
+                    raise ValueError("parser_journal_record_invalid")
+        if latest is None:
+            raise ValueError("parser_journal_record_missing")
+        return latest
 
     def flush(self) -> None:
         if not _FlushFileBuffers(wintypes.HANDLE(self._require_handle())):
@@ -412,7 +467,7 @@ class TrustedParserFile:
 
     def rename(self, destination: Path, *, replace: bool = False) -> None:
         destination = Path(os.path.abspath(destination))
-        encoded = str(destination).encode("utf-16-le")
+        encoded = _extended_windows_path(destination).encode("utf-16-le")
         offset = _FILE_RENAME_INFO.FileName.offset
         buffer = ctypes.create_string_buffer(offset + len(encoded) + 2)
         info = _FILE_RENAME_INFO.from_buffer(buffer)
@@ -503,6 +558,9 @@ class TrustedMinerUResult:
         manifest: TrustedParserFile,
         manifest_digest: str,
         journal: TrustedParserFile | None = None,
+        input_stem: str | None = None,
+        source_job_id: str | None = None,
+        request_revision: int | None = None,
     ) -> None:
         self.content_id = content_id
         self.run_id = run_id
@@ -512,6 +570,9 @@ class TrustedMinerUResult:
         self._manifest = manifest
         self.manifest_digest = manifest_digest
         self._journal = journal
+        self.input_stem = input_stem
+        self.source_job_id = source_job_id
+        self.request_revision = request_revision
 
     @property
     def path(self) -> Path:
@@ -523,6 +584,7 @@ class TrustedMinerUResult:
             raise UnsafeParserWorkspace("mineru_result_root_unsafe")
         if self._manifest.sha256() != self.manifest_digest:
             raise UnsafeParserWorkspace("mineru_result_manifest_changed")
+        self._verify_entry_set()
         for directory_item in self._directories:
             metadata = directory_item.handle.current_metadata()
             expected = self.path.joinpath(*directory_item.relative_path.split("/"))
@@ -543,6 +605,38 @@ class TrustedMinerUResult:
                 or file_item.handle.sha256() != file_item.sha256
             ):
                 raise UnsafeParserWorkspace("mineru_result_file_changed")
+
+    def _verify_entry_set(self) -> None:
+        expected_directories = {item.relative_path for item in self._directories}
+        expected_files = {item.relative_path for item in self._files}
+        observed_directories: set[str] = set()
+        observed_files: set[str] = set()
+
+        def visit(current: Path, relative_parent: str) -> None:
+            for entry in os.scandir(_extended_windows_path(current)):
+                relative = (
+                    entry.name
+                    if not relative_parent
+                    else f"{relative_parent}/{entry.name}"
+                )
+                if relative == "manifest.json":
+                    continue
+                attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+                if entry.is_symlink() or attributes & 0x00000400:
+                    raise UnsafeParserWorkspace("mineru_result_entry_set_changed")
+                path = current / entry.name
+                if entry.is_dir(follow_symlinks=False):
+                    observed_directories.add(relative)
+                    visit(path, relative)
+                else:
+                    observed_files.add(relative)
+
+        visit(self.path, "")
+        if (
+            observed_directories != expected_directories
+            or observed_files != expected_files
+        ):
+            raise UnsafeParserWorkspace("mineru_result_entry_set_changed")
 
     def rebind_after_promotion(self, destination: Path) -> None:
         for file_item in self._files:
@@ -566,12 +660,15 @@ class TrustedMinerUResult:
     def update_journal(self, state: str) -> None:
         if self._journal is None:
             raise UnsafeParserWorkspace("mineru_promotion_journal_missing")
-        self._journal.replace_bytes(
+        self._journal.append_journal_record(
             _promotion_journal_payload(
                 self.content_id,
                 self.run_id,
                 self.manifest_digest,
                 state,
+                self.input_stem,
+                self.source_job_id,
+                self.request_revision,
             )
         )
 
@@ -717,6 +814,55 @@ class TrustedParserWorkspace:
         )
         return TrustedParserDirectory(path, handle)
 
+    def create_mineru_work_journal(
+        self,
+        content_id: ContentId,
+        run_id: UUID,
+        source_job_id: UUID | str,
+        request_revision: int,
+        input_stem: str,
+    ) -> TrustedParserFile:
+        journal = self._open_file(
+            self.mineru_work_directory / f"{run_id}.work.json",
+            create=True,
+            held_directories=(),
+        )
+        journal.append_journal_record(
+            self.mineru_work_journal_payload(
+                content_id,
+                run_id,
+                source_job_id,
+                request_revision,
+                input_stem,
+                "created",
+            )
+        )
+        return journal
+
+    @staticmethod
+    def mineru_work_journal_payload(
+        content_id: ContentId,
+        run_id: UUID,
+        source_job_id: UUID | str,
+        request_revision: int,
+        input_stem: str,
+        state: str,
+    ) -> bytes:
+        if state not in {"created", "runner_finished", "sealed"}:
+            raise ValueError("invalid_mineru_work_state")
+        return json.dumps(
+            {
+                "content_id": str(content_id),
+                "run_id": str(run_id),
+                "source_job_id": str(source_job_id),
+                "request_revision": request_revision,
+                "input_stem": input_stem,
+                "state": state,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+
     def open_mineru_work(self, run_id: UUID) -> TrustedParserDirectory:
         path = self.mineru_work_directory / str(run_id)
         handle = self._open_directory(path, allow_rename=True)
@@ -724,11 +870,102 @@ class TrustedParserWorkspace:
         work.metadata()
         return work
 
+    def cleanup_mineru_work(
+        self,
+        run_id: UUID,
+        content_id: ContentId,
+        source_job_id: UUID | str,
+        request_revision: int,
+        input_stem: str,
+    ) -> bool:
+        """Delete only a fully revalidated, non-linked tree owned by this run."""
+        work: TrustedParserDirectory | None = None
+        files: list[TrustedParserFile] = []
+        directories: list[TrustedParserDirectory] = []
+        journal: TrustedParserFile | None = None
+        try:
+            work = self.open_mineru_work(run_id)
+            journal = self._open_file(
+                self.mineru_work_directory / f"{run_id}.work.json",
+                create=False,
+                held_directories=(),
+            )
+            record = journal.read_latest_journal_record(64 * 1024)
+            if record not in [
+                json.loads(
+                    self.mineru_work_journal_payload(
+                        content_id,
+                        run_id,
+                        source_job_id,
+                        request_revision,
+                        input_stem,
+                        state,
+                    ).decode("utf-8")
+                )
+                for state in {"created", "runner_finished", "sealed"}
+            ]:
+                raise UnsafeParserWorkspace("mineru_work_cleanup_unsafe")
+
+            def visit(current: Path) -> None:
+                for entry in os.scandir(_extended_windows_path(current)):
+                    path = current / entry.name
+                    attributes = getattr(
+                        entry.stat(follow_symlinks=False), "st_file_attributes", 0
+                    )
+                    if entry.is_symlink() or attributes & 0x00000400:
+                        raise UnsafeParserWorkspace("mineru_work_cleanup_unsafe")
+                    if entry.is_dir(follow_symlinks=False):
+                        handle = self._open_directory(path, allow_rename=True)
+                        directory = TrustedParserDirectory(path, handle)
+                        directory.metadata()
+                        directories.append(directory)
+                        visit(path)
+                    else:
+                        file = self._open_file(
+                            path, create=False, held_directories=(), writable=True
+                        )
+                        if file.metadata().hard_link_count != 1:
+                            file.close()
+                            raise UnsafeParserWorkspace("mineru_work_cleanup_unsafe")
+                        files.append(file)
+
+            visit(work.path)
+            for file in files:
+                file.delete()
+                file.close()
+            files = []
+            for directory in reversed(directories):
+                directory.delete()
+                directory.close()
+            directories = []
+            work.delete()
+            work.close()
+            work = None
+            journal.delete()
+            journal.close()
+            journal = None
+            return True
+        except (FileNotFoundError, UnsafeParserWorkspace, OSError, ValueError):
+            return False
+        finally:
+            for file in files:
+                file.close()
+            for directory in reversed(directories):
+                directory.close()
+            if work is not None:
+                work.close()
+            if journal is not None:
+                journal.close()
+
     def seal_mineru_work(
         self,
         content_id: ContentId,
         run_id: UUID,
         work: TrustedParserDirectory,
+        *,
+        input_stem: str | None = None,
+        source_job_id: UUID | str | None = None,
+        request_revision: int | None = None,
     ) -> TrustedMinerUResult:
         expected = self.mineru_work_directory / str(run_id)
         if not _same_path(work.path, expected):
@@ -738,7 +975,15 @@ class TrustedParserWorkspace:
         manifest: TrustedParserFile | None = None
         try:
             directories, files = self._open_manifest_tree(work.path)
-            payload = self._manifest_payload(content_id, run_id, files)
+            payload = self._manifest_payload(
+                content_id,
+                run_id,
+                directories,
+                files,
+                input_stem,
+                source_job_id,
+                request_revision,
+            )
             manifest_path = work.path / "manifest.json"
             writable = self._open_file(
                 manifest_path,
@@ -756,6 +1001,10 @@ class TrustedParserWorkspace:
                 files,
                 manifest,
                 manifest_digest,
+                None,
+                input_stem,
+                None if source_job_id is None else str(source_job_id),
+                request_revision,
             )
             result.verify()
             return result
@@ -783,22 +1032,26 @@ class TrustedParserWorkspace:
         copied_files: list[_ManifestFile] = []
         manifest: TrustedParserFile | None = None
         journal: TrustedParserFile | None = None
+        pending_file: TrustedParserFile | None = None
         try:
             journal = self._open_file(
                 content.metadata.final_path / f"{result.run_id}.promotion.json",
                 create=True,
                 held_directories=(),
             )
-            journal.replace_bytes(
+            journal.append_journal_record(
                 _promotion_journal_payload(
                     result.content_id,
                     result.run_id,
                     result.manifest_digest,
                     "copying",
+                    result.input_stem,
+                    result.source_job_id,
+                    result.request_revision,
                 )
             )
             destination_handle = self._held_child_directory(
-                destination, require_new=True
+                destination, require_new=True, allow_rename=True
             )
             destination_directory = TrustedParserDirectory(
                 destination, destination_handle
@@ -811,7 +1064,9 @@ class TrustedParserWorkspace:
                 path = destination.joinpath(
                     *source_directory.relative_path.split("/")
                 )
-                handle = self._held_child_directory(path, require_new=True)
+                handle = self._held_child_directory(
+                    path, require_new=True, allow_rename=True
+                )
                 metadata = handle.current_metadata()
                 copied_directories.append(
                     _ManifestDirectory(
@@ -823,14 +1078,15 @@ class TrustedParserWorkspace:
                 )
             for source_file in result._files:
                 path = destination.joinpath(*source_file.relative_path.split("/"))
-                writable = self._open_file(
+                pending_file = self._open_file(
                     path,
                     create=True,
                     held_directories=(),
                 )
-                source_file.handle.copy_to(writable)
-                digest = writable.sha256()
-                guarded = self.bind_staged_read_guard(writable, digest)
+                source_file.handle.copy_to(pending_file)
+                digest = pending_file.sha256()
+                guarded = self.bind_staged_read_guard(pending_file, digest)
+                pending_file = None
                 metadata = guarded.metadata()
                 if metadata.hard_link_count != 1:
                     guarded.close()
@@ -846,7 +1102,13 @@ class TrustedParserWorkspace:
                     )
                 )
             payload = self._manifest_payload(
-                result.content_id, result.run_id, copied_files
+                result.content_id,
+                result.run_id,
+                copied_directories,
+                copied_files,
+                result.input_stem,
+                result.source_job_id,
+                result.request_revision,
             )
             manifest_writer = self._open_file(
                 destination / "manifest.json",
@@ -867,6 +1129,9 @@ class TrustedParserWorkspace:
                 manifest,
                 manifest_digest,
                 journal,
+                result.input_stem,
+                result.source_job_id,
+                result.request_revision,
             )
             promoted.verify()
             promoted.update_journal("promoted")
@@ -874,18 +1139,48 @@ class TrustedParserWorkspace:
             result.close()
             return promoted
         except BaseException:
-            if journal is not None:
-                journal.close()
             if manifest is not None:
+                try:
+                    manifest.delete()
+                except OSError:
+                    pass
                 manifest.close()
+            if pending_file is not None:
+                try:
+                    pending_file.delete()
+                except OSError:
+                    pass
+                pending_file.close()
             for file_item in copied_files:
+                try:
+                    file_item.handle.delete()
+                except OSError:
+                    pass
                 file_item.handle.close()
             for directory_item in reversed(copied_directories):
-                directory_item.handle.close()
+                directory = TrustedParserDirectory(
+                    destination.joinpath(*directory_item.relative_path.split("/")),
+                    directory_item.handle,
+                )
+                try:
+                    directory.delete()
+                except OSError:
+                    pass
+                directory.close()
             if destination_directory is not None:
+                try:
+                    destination_directory.delete()
+                except OSError:
+                    pass
                 destination_directory.close()
             else:
                 content.close()
+            if journal is not None:
+                try:
+                    journal.delete()
+                except OSError:
+                    pass
+                journal.close()
             raise
 
     def promote_mineru_work(
@@ -944,8 +1239,19 @@ class TrustedParserWorkspace:
             payload = manifest.read_bounded(8 * 1024 * 1024)
             parsed = json.loads(payload.decode("utf-8"))
             directories, files = self._open_manifest_tree(directory.path)
+            input_stem = parsed.get("input_stem")
+            source_job_id = parsed.get("source_job_id")
+            request_revision = parsed.get("request_revision")
             expected = json.loads(
-                self._manifest_payload(content_id, run_id, files).decode("utf-8")
+                self._manifest_payload(
+                    content_id,
+                    run_id,
+                    directories,
+                    files,
+                    input_stem,
+                    source_job_id,
+                    request_revision,
+                ).decode("utf-8")
             )
             if parsed != expected:
                 raise UnsafeParserWorkspace("mineru_result_manifest_mismatch")
@@ -954,9 +1260,7 @@ class TrustedParserWorkspace:
                 create=False,
                 held_directories=(),
             )
-            journal_record = json.loads(
-                journal.read_bounded(64 * 1024).decode("utf-8")
-            )
+            journal_record = journal.read_latest_journal_record(64 * 1024)
             allowed_states = {
                 "promoted",
                 "output_recorded",
@@ -967,7 +1271,13 @@ class TrustedParserWorkspace:
             if journal_record not in [
                 json.loads(
                     _promotion_journal_payload(
-                        content_id, run_id, manifest_digest, state
+                        content_id,
+                        run_id,
+                        manifest_digest,
+                        state,
+                        input_stem,
+                        source_job_id,
+                        request_revision,
                     ).decode("utf-8")
                 )
                 for state in allowed_states
@@ -982,6 +1292,9 @@ class TrustedParserWorkspace:
                 manifest,
                 manifest_digest,
                 journal,
+                input_stem,
+                source_job_id,
+                request_revision,
             )
             journal = None
             result.verify()
@@ -1127,11 +1440,22 @@ class TrustedParserWorkspace:
     def _manifest_payload(
         content_id: ContentId,
         run_id: UUID,
+        directories: tuple[_ManifestDirectory, ...] | list[_ManifestDirectory],
         files: tuple[_ManifestFile, ...] | list[_ManifestFile],
+        input_stem: str | None,
+        source_job_id: UUID | str | None,
+        request_revision: int | None,
     ) -> bytes:
         payload: dict[str, Any] = {
             "content_id": str(content_id),
             "run_id": str(run_id),
+            "input_stem": input_stem,
+            "source_job_id": None if source_job_id is None else str(source_job_id),
+            "request_revision": request_revision,
+            "directories": [
+                item.relative_path
+                for item in sorted(directories, key=lambda value: value.relative_path)
+            ],
             "files": [
                 {
                     "path": item.relative_path,
@@ -1169,7 +1493,7 @@ class TrustedParserWorkspace:
             journal = self.open_staging_file(
                 content_id, attempt_id, ".promotion.json"
             )
-            record = json.loads(journal.read_bounded(64 * 1024).decode("utf-8"))
+            record = journal.read_latest_journal_record(64 * 1024)
             if record != json.loads(
                 self.journal_payload(
                     content_id, attempt_id, expected_sha256, "renamed"

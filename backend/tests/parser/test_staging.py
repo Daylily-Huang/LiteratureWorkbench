@@ -463,6 +463,42 @@ def test_recovery_reuses_only_a_hash_valid_checkpointed_pdf(tmp_path: Path) -> N
     recovered.close()
 
 
+def test_recovery_finds_renamed_pdf_when_checkpoint_still_names_part(
+    tmp_path: Path,
+) -> None:
+    payload = b"%PDF-rename-crash"
+    content_id = ContentId(hashlib.sha256(payload).hexdigest())
+    attempt_id = uuid4()
+    path = tmp_path / "staging" / content_id / f"{attempt_id}.pdf"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(payload)
+    (path.parent / f"{attempt_id}.promotion.json").write_text(
+        __import__("json").dumps(
+            {
+                "attempt_id": str(attempt_id),
+                "content_id": str(content_id),
+                "sha256": str(content_id),
+                "state": "renamed",
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    recovered = recover_checkpointed_staging(
+        tmp_path,
+        content_id,
+        attempt_id,
+        f"staging/{content_id}/{attempt_id}.part",
+        content_id,
+    )
+
+    assert recovered is not None
+    assert recovered.path == path
+    recovered.close()
+
+
 def test_cleanup_rejects_nonmatching_parent_content_or_attempt(tmp_path: Path) -> None:
     content_id = ContentId("a" * 64)
     attempt_id = uuid4()
