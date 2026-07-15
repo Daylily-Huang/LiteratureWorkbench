@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-import shutil
+import sqlite3
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Literal, Protocol, cast
@@ -14,7 +14,11 @@ import fitz  # type: ignore[import-untyped]
 from literature_workbench.db.database import Database
 from literature_workbench.db.task_queue import Job, JsonValue
 from literature_workbench.features.library.models import ContentId
-from literature_workbench.features.parser.classifier import classify_staged_pdf
+from literature_workbench.features.library.fingerprint import fingerprint_verified_pdf
+from literature_workbench.features.parser.classifier import (
+    bounded_body_language_sample,
+    classify_staged_pdf,
+)
 from literature_workbench.features.parser.mineru import (
     MINERU_COMMAND_VERSION,
     MinerUAdapter,
@@ -22,7 +26,6 @@ from literature_workbench.features.parser.mineru import (
     MinerUFailed,
     ProcessOutcome,
     choose_ocr_language,
-    promote_mineru_result,
     validate_mineru_output,
 )
 from literature_workbench.features.parser.models import StagedPdf
@@ -33,12 +36,16 @@ from literature_workbench.features.parser.normalizer import (
 from literature_workbench.features.parser.staging import (
     AllSourcesUnavailable,
     StagingCheckpointSink,
-    cleanup_checkpointed_staging,
     open_current_source_for_content,
     persist_structure_validation,
     recover_checkpointed_staging,
     stage_verified_pdf,
     validate_staged_structure,
+)
+from literature_workbench.features.parser.workspace import (
+    TrustedParserDirectory,
+    TrustedParserFile,
+    TrustedParserWorkspace,
 )
 from literature_workbench.platform.windows.filesystem import SafeFileInspector
 from literature_workbench.platform.windows.job_object import (
@@ -60,6 +67,8 @@ class ParseCancellation(Protocol):
     def is_cancelled(self) -> bool: ...
 
     def raise_if_cancelled(self) -> None: ...
+
+    def require_current_lease(self, connection: object) -> None: ...
 
     def checkpoint(self, stage: str, payload: Mapping[str, JsonValue]) -> None: ...
 
@@ -111,14 +120,21 @@ class ParseWorkerService:
         self,
         database: Database,
         inspector: SafeFileInspector,
-        data_root: Path,
+        data_root: Path | TrustedParserWorkspace,
         *,
         reconcile: Callable[[UUID, Path], object] | None = None,
         mineru_factory: MinerUFactory | None = None,
     ) -> None:
         self._database = database
         self._inspector = inspector
-        self._data_root = Path(data_root)
+        self._workspace = (
+            data_root if isinstance(data_root, TrustedParserWorkspace) else None
+        )
+        self._data_root = (
+            data_root.data_root
+            if isinstance(data_root, TrustedParserWorkspace)
+            else Path(os.path.abspath(data_root))
+        )
         self._reconcile = reconcile
         self._mineru_factory = mineru_factory
         self._runs = ParseRunRepository(database)
@@ -128,11 +144,17 @@ class ParseWorkerService:
         manual_document = job.payload.get("document_id")
         if not isinstance(manual_document, str) and not self._automatic_parse_allowed(content_id):
             return
+        self._ensure_workspace()
+        if self._recover_completed_publication(job, content_id, cancellation):
+            return
         checkpoint_state = dict(job.checkpoint)
         source = None
         staged: StagedPdf | None = None
         run_id: UUID | None = None
         work_directory: Path | None = None
+        work_capability: TrustedParserDirectory | None = None
+        result_capability: TrustedParserDirectory | None = None
+        promoted_result: Path | None = None
         try:
             cancellation.raise_if_cancelled()
             source = open_current_source_for_content(
@@ -145,14 +167,20 @@ class ParseWorkerService:
             if staged is None:
                 attempt_id = uuid4()
                 staged = stage_verified_pdf(
-                    self._data_root,
+                    self._ensure_workspace(),
                     content_id,
                     source,
                     attempt_id,
                     _JobStagingCheckpoint(content_id, cancellation, checkpoint_state),
                 )
             validation = validate_staged_structure(staged)
-            persist_structure_validation(self._database, validation, source.identity)
+            persist_structure_validation(
+                self._database,
+                validation,
+                source,
+                cancellation=cancellation,
+                inspector=self._inspector,
+            )
             if validation.status != "valid_pdf":
                 raise ParseJobFailure("invalid_pdf_structure", retryable=False)
             staged = validation.staged
@@ -171,13 +199,31 @@ class ParseWorkerService:
             cancellation.raise_if_cancelled()
             if strategy == "pymupdf":
                 parser_version = str(fitz.VersionBind)
-                run_id = self._runs.create_run(content_id, "pymupdf", parser_version)
+                run_id = self._runs.create_run(
+                    content_id,
+                    "pymupdf",
+                    parser_version,
+                    cancellation=cancellation,
+                    source_job_id=job.id,
+                )
                 pages = extract_pymupdf_pages(staged, run_id)
             else:
                 parser_version = MINERU_COMMAND_VERSION
-                run_id = self._runs.create_run(content_id, "mineru", parser_version)
-                language = self._ocr_language(job, validation.title, validation.authors)
-                work_directory = self._data_root / "mineru-work" / str(run_id)
+                run_id = self._runs.create_run(
+                    content_id,
+                    "mineru",
+                    parser_version,
+                    cancellation=cancellation,
+                    source_job_id=job.id,
+                )
+                language = self._ocr_language(
+                    job,
+                    validation.title,
+                    validation.authors,
+                    bounded_body_language_sample(staged),
+                )
+                work_capability = self._ensure_workspace().create_mineru_work(run_id)
+                work_directory = work_capability.path
 
                 def record_identity(identity: ProcessIdentity) -> None:
                     checkpoint_state["process"] = {
@@ -208,14 +254,43 @@ class ParseWorkerService:
                 pages = validate_mineru_output(
                     staged, run_id, work_directory, parser_version
                 )
-                promoted = promote_mineru_result(
-                    self._data_root, content_id, run_id, work_directory
+                result_capability = self._ensure_workspace().promote_mineru_work(
+                    content_id, run_id, work_capability
                 )
+                work_capability = None
+                promoted_result = result_capability.path
                 work_directory = None
-                relative_output = Path(os.path.relpath(promoted, self._data_root)).as_posix()
-                self._runs.set_output_dir(run_id, relative_output)
+                relative_output = Path(
+                    os.path.relpath(promoted_result, self._data_root)
+                ).as_posix()
+                self._runs.set_output_dir(
+                    run_id, relative_output, cancellation=cancellation
+                )
             cancellation.raise_if_cancelled()
-            self._runs.complete_run(run_id, pages)
+            self._runs.complete_run(
+                run_id,
+                pages,
+                cancellation=cancellation,
+                verify_inputs=lambda: _verify_held_inputs(source, staged),
+            )
+            if promoted_result is not None:
+                with self._database.transaction() as connection:
+                    cancellation.require_current_lease(connection)
+                    _verify_held_inputs(source, staged)
+                    self._require_publishable_result(
+                        connection, job, content_id, run_id
+                    )
+                    if result_capability is None:
+                        raise ParseJobFailure(
+                            "mineru_result_capability_missing", retryable=True
+                        )
+                    self._ensure_workspace().publish_result_pointer(
+                        content_id, run_id, result_capability
+                    )
+                    cancellation.require_current_lease(connection)
+                    self._require_publishable_result(
+                        connection, job, content_id, run_id
+                    )
             checkpoint_state["completed_parse_run_id"] = str(run_id)
             cancellation.checkpoint("completed", checkpoint_state)
         except AllSourcesUnavailable as error:
@@ -240,20 +315,20 @@ class ParseWorkerService:
             if source is not None:
                 source.close()
             if staged is not None:
-                cleanup_checkpointed_staging(
-                    self._data_root,
-                    content_id,
-                    staged.attempt_id,
-                    f"staging/{content_id}/{staged.attempt_id}.pdf",
-                )
-                cleanup_checkpointed_staging(
-                    self._data_root,
-                    content_id,
-                    staged.attempt_id,
-                    f"staging/{content_id}/{staged.attempt_id}.part",
-                )
-            if work_directory is not None and work_directory.exists():
-                shutil.rmtree(work_directory)
+                held_staged = staged.held_file
+                if isinstance(held_staged, TrustedParserFile):
+                    self._ensure_workspace().cleanup_staged(
+                        held_staged,
+                        content_id,
+                        staged.attempt_id,
+                        staged.sha256,
+                    )
+                elif held_staged is not None:
+                    held_staged.close()
+            if work_capability is not None:
+                work_capability.close()
+            if result_capability is not None:
+                result_capability.close()
 
     def _recover(self, job: Job, content_id: ContentId) -> StagedPdf | None:
         raw_attempt = job.checkpoint.get("attempt_id")
@@ -266,7 +341,7 @@ class ParseWorkerService:
         except ValueError:
             return None
         return recover_checkpointed_staging(
-            self._data_root,
+            self._ensure_workspace(),
             content_id,
             attempt_id,
             relative,
@@ -285,11 +360,87 @@ class ParseWorkerService:
             ).fetchone()
         return row is not None
 
+    def _recover_completed_publication(
+        self,
+        job: Job,
+        content_id: ContentId,
+        cancellation: ParseCancellation,
+    ) -> bool:
+        with self._database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT r.id,r.parser_name,r.output_dir,c.current_parse_run_id
+                FROM parse_runs AS r
+                JOIN contents AS c ON c.sha256=r.content_sha256
+                WHERE r.source_job_id=? AND r.content_sha256=? AND r.status='completed'
+                """,
+                (str(job.id), str(content_id)),
+            ).fetchone()
+        if row is None:
+            return False
+        run_id = UUID(str(row["id"]))
+        if str(row["current_parse_run_id"] or "") != str(run_id):
+            raise ParseJobFailure("stale_parse_publication", retryable=False)
+        if str(row["parser_name"]) != "mineru":
+            return True
+        expected_output = f"parse-results/{content_id}/{run_id}"
+        if str(row["output_dir"] or "") != expected_output:
+            raise ParseJobFailure("mineru_recovery_output_mismatch", retryable=True)
+        result: TrustedParserDirectory | None = None
+        try:
+            result = self._ensure_workspace().open_mineru_result(content_id, run_id)
+            with self._database.transaction() as connection:
+                cancellation.require_current_lease(connection)
+                self._require_publishable_result(
+                    connection, job, content_id, run_id
+                )
+                self._ensure_workspace().publish_result_pointer(
+                    content_id, run_id, result
+                )
+                cancellation.require_current_lease(connection)
+                self._require_publishable_result(
+                    connection, job, content_id, run_id
+                )
+        except (OSError, ValueError) as error:
+            raise ParseJobFailure("mineru_recovery_failed", retryable=True) from error
+        finally:
+            if result is not None:
+                result.close()
+        return True
+
+    @staticmethod
+    def _require_publishable_result(
+        connection: sqlite3.Connection,
+        job: Job,
+        content_id: ContentId,
+        run_id: UUID,
+    ) -> None:
+        expected_output = f"parse-results/{content_id}/{run_id}"
+        current = connection.execute(
+            """
+            SELECT 1
+            FROM contents AS c
+            JOIN parse_runs AS r ON r.id=c.current_parse_run_id
+            WHERE c.sha256=? AND r.id=? AND r.source_job_id=?
+              AND r.status='completed' AND r.output_dir=?
+              AND r.request_revision=c.parse_request_revision
+            """,
+            (
+                str(content_id),
+                str(run_id),
+                str(job.id),
+                expected_output,
+            ),
+        ).fetchone()
+        if current is None:
+            raise ParseJobFailure("stale_parse_publication", retryable=False)
+
     def _ocr_language(
         self,
         job: Job,
         title: str | None,
         authors: tuple[str, ...],
+        body_sample: str,
     ) -> Literal["en", "ch"]:
         requested = job.payload.get("ocr_language")
         if requested is not None:
@@ -306,7 +457,7 @@ class ParseWorkerService:
                 ).fetchone()
             if row is not None and row["ocr_language_override"] in {"en", "ch"}:
                 override = str(row["ocr_language_override"])
-        sample = " ".join(filter(None, (title, *authors)))
+        sample = " ".join(filter(None, (body_sample, title, *authors)))
         return choose_ocr_language(sample, override)  # type: ignore[arg-type]
 
     def _mineru_runner(
@@ -333,7 +484,13 @@ class ParseWorkerService:
             launch=launch,
             record_identity=record_identity,
             audit=audit,
+            lease=self._ensure_workspace().mineru_lease(timeout_seconds=3600),
         )
+
+    def _ensure_workspace(self) -> TrustedParserWorkspace:
+        if self._workspace is None:
+            self._workspace = TrustedParserWorkspace.create(self._data_root)
+        return self._workspace
 
     def _fail_run_if_running(self, run_id: UUID, error_code: str) -> None:
         try:
@@ -359,3 +516,15 @@ def _mineru_error_retryable(error_code: str) -> bool:
         "mineru_nonzero_exit",
         "mineru_pwsh_unavailable",
     }
+
+
+def _verify_held_inputs(source: object, staged: StagedPdf) -> None:
+    if not staged.verify_current_hash():
+        raise ParseJobFailure("staged_identity_changed", retryable=True)
+    fingerprint = fingerprint_verified_pdf(source)  # type: ignore[arg-type]
+    if (
+        fingerprint.sha256 != staged.content_id
+        or source.current_identity() != source.identity  # type: ignore[attr-defined]
+    ):
+        raise ParseJobFailure("source_identity_changed", retryable=True)
+    source.stream.seek(0)  # type: ignore[attr-defined]

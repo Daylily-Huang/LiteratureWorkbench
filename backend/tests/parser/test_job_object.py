@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ctypes
+import msvcrt
+import os
 import subprocess
+import sys
 from ctypes import wintypes
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,6 +58,61 @@ def test_win32_child_construction_failure_terminates_exact_suspended_process(
     open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     open_process.restype = wintypes.HANDLE
     assert not open_process(0x1000, False, captured_pid)
+
+
+def test_startup_handle_list_does_not_leak_unrelated_inheritable_handle(
+    tmp_path: Path,
+) -> None:
+    descriptor = os.open(tmp_path / "sentinel.txt", os.O_CREAT | os.O_RDONLY)
+    sentinel_handle = msvcrt.get_osfhandle(descriptor)
+    os.set_handle_inheritable(sentinel_handle, True)
+    probe = (
+        "import ctypes,sys; h=int(sys.argv[1]); "
+        "kind=ctypes.windll.kernel32.GetFileType(h); "
+        "raise SystemExit(9 if kind else 0)"
+    )
+    args = (sys.executable, "-c", probe, str(sentinel_handle))
+    try:
+        process = launch_suspended_in_job(
+            ProcessSpec(
+                args=args,
+                command_line=subprocess.list2cmdline(args),
+                cwd=tmp_path,
+            ),
+            uuid4(),
+            lambda _: None,
+        )
+        exit_code, _, _ = process.wait_and_collect()
+    finally:
+        os.close(descriptor)
+
+    assert exit_code == 0
+
+
+def test_parent_can_close_only_child_stdin_to_deliver_eof(tmp_path: Path) -> None:
+    probe = (
+        "import sys; data=sys.stdin.buffer.read(); "
+        "raise SystemExit(0 if data == b'' else 8)"
+    )
+    args = (sys.executable, "-c", probe)
+    process = launch_suspended_in_job(
+        ProcessSpec(
+            args=args,
+            command_line=subprocess.list2cmdline(args),
+            cwd=tmp_path,
+        ),
+        uuid4(),
+        lambda _: None,
+    )
+
+    try:
+        process.close_stdin()
+    except BaseException:
+        process.cancel(process.identity, grace_seconds=1)
+        raise
+
+    exit_code, _, _ = process.wait_and_collect()
+    assert exit_code == 0
 
 
 @dataclass(slots=True)

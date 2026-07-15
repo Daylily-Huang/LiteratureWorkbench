@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, TypeAlias
+from typing import Literal, Protocol, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -15,6 +15,15 @@ ParseStrategy: TypeAlias = Literal["pymupdf", "mineru"]
 RequestedParseStrategy: TypeAlias = Literal["auto", "pymupdf", "mineru"]
 
 
+class StagedFileCapability(Protocol):
+    @property
+    def path(self) -> Path: ...
+
+    def sha256(self, cancellation: object | None = None) -> str: ...
+
+    def close(self) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class StagedPdf:
     content_id: ContentId
@@ -22,6 +31,20 @@ class StagedPdf:
     path: Path
     sha256: str
     page_count: int | None
+    held_file: StagedFileCapability | None = field(
+        default=None, compare=False, repr=False
+    )
+
+    def verify_current_hash(self, cancellation: object | None = None) -> bool:
+        return (
+            self.held_file is not None
+            and self.held_file.path == self.path
+            and self.held_file.sha256(cancellation) == self.sha256
+        )
+
+    def close(self) -> None:
+        if self.held_file is not None:
+            self.held_file.close()
 
 
 class ParsedBlock(BaseModel):

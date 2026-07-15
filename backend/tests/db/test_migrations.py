@@ -54,7 +54,7 @@ def _schema_snapshot(db: Database) -> list[tuple[str, str, str]]:
     return [(str(row["type"]), str(row["name"]), str(row["sql"])) for row in rows]
 
 
-def test_migration_creates_exact_v01_tables_and_is_idempotent(tmp_path: Path) -> None:
+def test_migration_creates_current_tables_and_is_idempotent(tmp_path: Path) -> None:
     db = Database.open(tmp_path / "nested" / "workbench.sqlite3")
 
     run_migrations(db)
@@ -73,7 +73,11 @@ def test_migration_creates_exact_v01_tables_and_is_idempotent(tmp_path: Path) ->
             "SELECT version, applied_at FROM schema_migrations ORDER BY version"
         ).fetchall()
     assert [tuple(row) for row in first_versions] == [tuple(row) for row in second_versions]
-    assert [row["version"] for row in second_versions] == ["0001_v01", "0002_import_ownership"]
+    assert [row["version"] for row in second_versions] == [
+        "0001_v01",
+        "0002_import_ownership",
+        "0003_parser_fencing",
+    ]
     with db.connect() as connection:
         columns = {
             str(row["name"]): (str(row["type"]), row["notnull"], row["dflt_value"])
@@ -89,6 +93,18 @@ def test_migration_creates_exact_v01_tables_and_is_idempotent(tmp_path: Path) ->
     assert columns["moved_hard_link_count"][0] == "INTEGER"
     assert columns["cleanup_authorized"] == ("INTEGER", 1, "0")
     assert columns["ownership_provenance"] == ("TEXT", 1, "'source_claim'")
+    with db.connect() as connection:
+        content_columns = {
+            str(row["name"]): (str(row["type"]), row["notnull"], row["dflt_value"])
+            for row in connection.execute("PRAGMA table_info(contents)")
+        }
+        run_columns = {
+            str(row["name"]): (str(row["type"]), row["notnull"], row["dflt_value"])
+            for row in connection.execute("PRAGMA table_info(parse_runs)")
+        }
+    assert content_columns["parse_request_revision"] == ("INTEGER", 1, "0")
+    assert run_columns["request_revision"] == ("INTEGER", 1, "0")
+    assert run_columns["source_job_id"] == ("TEXT", 0, None)
 
 
 def test_import_promotion_cleanup_authorization_requires_moved_identity(
@@ -168,6 +184,7 @@ def test_existing_v01_database_upgrades_fail_closed_and_remains_idempotent(
     assert [str(row["version"]) for row in versions] == [
         "0001_v01",
         "0002_import_ownership",
+        "0003_parser_fencing",
     ]
     assert tuple(legacy) == (0, "source_claim", None, None)
 

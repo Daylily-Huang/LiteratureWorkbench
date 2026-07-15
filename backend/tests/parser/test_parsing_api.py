@@ -246,3 +246,36 @@ def test_parse_api_rejects_unbounded_values_and_requires_composed_route(
     assert invalid_strategy.status_code == 422
     assert invalid_language.status_code == 422
     assert missing.status_code == 404
+
+
+def test_parse_api_rejects_missing_current_pdf_before_enqueue(tmp_path: Path) -> None:
+    session = LocalSession()
+    app = create_app(
+        AppSettings(data_root=tmp_path / "data", allowed_hosts=("testserver",)),
+        local_session=session,
+        register_initial_library=False,
+    )
+    headers = {"Origin": "http://testserver", "X-LW-CSRF": session.csrf_token}
+    with TestClient(
+        app,
+        base_url="http://testserver",
+        cookies={"lw_session": session.session_cookie},
+    ) as client:
+        document_id, _ = _register_document(client, tmp_path)
+        with client.app.state.database.connect() as connection:
+            row = connection.execute(
+                "SELECT path FROM documents WHERE id=?", (str(document_id),)
+            ).fetchone()
+        assert row is not None
+        Path(str(row["path"])).unlink()
+
+        response = client.post(
+            f"/api/documents/{document_id}/parse", headers=headers, json={}
+        )
+        with client.app.state.database.connect() as connection:
+            jobs = connection.execute(
+                "SELECT COUNT(*) AS count FROM jobs WHERE kind='parse_pdf'"
+            ).fetchone()
+
+    assert response.status_code == 409
+    assert jobs is not None and int(jobs["count"]) == 0

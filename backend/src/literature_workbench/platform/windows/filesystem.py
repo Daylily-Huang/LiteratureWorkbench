@@ -314,6 +314,13 @@ class Win32OwnedFileHandle:
             _CloseHandle(wintypes.HANDLE(self._handle))
             self._handle = None
 
+    def current_metadata(self) -> HandleMetadata:
+        return _metadata_for_handle(self._require_handle())
+
+    def borrow_native_handle(self) -> int:
+        """Borrow the live Win32 handle without transferring ownership."""
+        return self._require_handle()
+
     def _require_handle(self) -> int:
         if self._handle is None:
             raise ValueError("handle_is_closed")

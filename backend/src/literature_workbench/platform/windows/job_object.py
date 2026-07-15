@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 CREATE_SUSPENDED = 0x00000004
 CREATE_NO_WINDOW = 0x08000000
+EXTENDED_STARTUPINFO_PRESENT = 0x00080000
 STARTF_USESTDHANDLES = 0x00000100
 HANDLE_FLAG_INHERIT = 0x00000001
 WAIT_OBJECT_0 = 0
@@ -21,6 +22,7 @@ INFINITE = 0xFFFFFFFF
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
 MAX_CAPTURE_BYTES = 64 * 1024
+PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +117,9 @@ class ControlledProcess:
         self._child.wait(grace_seconds)
         self.close()
 
+    def close_stdin(self) -> None:
+        self._child.request_graceful_exit()
+
     def close(self) -> None:
         if self._closed:
             return
@@ -194,6 +199,21 @@ class _PROCESS_INFORMATION(ctypes.Structure):
     ]
 
 
+class _STARTUPINFOEXW(ctypes.Structure):
+    _fields_ = [
+        ("StartupInfo", _STARTUPINFOW),
+        ("lpAttributeList", ctypes.c_void_p),
+    ]
+
+
+class _SECURITY_ATTRIBUTES(ctypes.Structure):
+    _fields_ = [
+        ("nLength", wintypes.DWORD),
+        ("lpSecurityDescriptor", ctypes.c_void_p),
+        ("bInheritHandle", wintypes.BOOL),
+    ]
+
+
 class _JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
     _fields_ = [
         ("PerProcessUserTimeLimit", ctypes.c_longlong),
@@ -240,7 +260,7 @@ _kernel32.CreateProcessW.argtypes = [
     wintypes.DWORD,
     ctypes.c_void_p,
     wintypes.LPCWSTR,
-    ctypes.POINTER(_STARTUPINFOW),
+    ctypes.c_void_p,
     ctypes.POINTER(_PROCESS_INFORMATION),
 ]
 _kernel32.CreateProcessW.restype = wintypes.BOOL
@@ -289,6 +309,25 @@ _kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
 _kernel32.TerminateProcess.restype = wintypes.BOOL
 _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 _kernel32.CloseHandle.restype = wintypes.BOOL
+_kernel32.InitializeProcThreadAttributeList.argtypes = [
+    ctypes.c_void_p,
+    wintypes.DWORD,
+    wintypes.DWORD,
+    ctypes.POINTER(ctypes.c_size_t),
+]
+_kernel32.InitializeProcThreadAttributeList.restype = wintypes.BOOL
+_kernel32.UpdateProcThreadAttribute.argtypes = [
+    ctypes.c_void_p,
+    wintypes.DWORD,
+    ctypes.c_size_t,
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+_kernel32.UpdateProcThreadAttribute.restype = wintypes.BOOL
+_kernel32.DeleteProcThreadAttributeList.argtypes = [ctypes.c_void_p]
+_kernel32.DeleteProcThreadAttributeList.restype = None
 
 
 def _raise_last_error(operation: str) -> NoReturn:
@@ -420,26 +459,61 @@ class Win32ProcessBackend:
             owned_handles.update((stdout_read, stdout_write))
             stderr_read, stderr_write = _pipe()
             owned_handles.update((stderr_read, stderr_write))
-            startup = _STARTUPINFOW()
-            startup.cb = ctypes.sizeof(startup)
-            startup.dwFlags = STARTF_USESTDHANDLES
-            startup.hStdInput = wintypes.HANDLE(stdin_read)
-            startup.hStdOutput = wintypes.HANDLE(stdout_write)
-            startup.hStdError = wintypes.HANDLE(stderr_write)
-            information = _PROCESS_INFORMATION()
-            command = ctypes.create_unicode_buffer(spec.command_line)
-            created = _kernel32.CreateProcessW(
-                spec.args[0],
-                command,
-                None,
-                None,
-                True,
-                CREATE_SUSPENDED | CREATE_NO_WINDOW,
-                None,
-                str(spec.cwd),
-                ctypes.byref(startup),
-                ctypes.byref(information),
+            for parent_handle in (stdin_write, stdout_read, stderr_read):
+                _make_non_inheritable(parent_handle)
+            startup = _STARTUPINFOEXW()
+            startup.StartupInfo.cb = ctypes.sizeof(startup)
+            startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES
+            startup.StartupInfo.hStdInput = wintypes.HANDLE(stdin_read)
+            startup.StartupInfo.hStdOutput = wintypes.HANDLE(stdout_write)
+            startup.StartupInfo.hStdError = wintypes.HANDLE(stderr_write)
+            attribute_size = ctypes.c_size_t()
+            _kernel32.InitializeProcThreadAttributeList(
+                None, 1, 0, ctypes.byref(attribute_size)
             )
+            attribute_buffer = ctypes.create_string_buffer(attribute_size.value)
+            startup.lpAttributeList = ctypes.cast(
+                attribute_buffer, ctypes.c_void_p
+            ).value
+            inherited_handles = (wintypes.HANDLE * 3)(
+                stdin_read, stdout_write, stderr_write
+            )
+            attribute_initialized = False
+            try:
+                if not _kernel32.InitializeProcThreadAttributeList(
+                    startup.lpAttributeList, 1, 0, ctypes.byref(attribute_size)
+                ):
+                    _raise_last_error("InitializeProcThreadAttributeList")
+                attribute_initialized = True
+                if not _kernel32.UpdateProcThreadAttribute(
+                    startup.lpAttributeList,
+                    0,
+                    PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                    ctypes.cast(inherited_handles, ctypes.c_void_p),
+                    ctypes.sizeof(inherited_handles),
+                    None,
+                    None,
+                ):
+                    _raise_last_error("UpdateProcThreadAttribute")
+                information = _PROCESS_INFORMATION()
+                command = ctypes.create_unicode_buffer(spec.command_line)
+                created = _kernel32.CreateProcessW(
+                    spec.args[0],
+                    command,
+                    None,
+                    None,
+                    True,
+                    CREATE_SUSPENDED
+                    | CREATE_NO_WINDOW
+                    | EXTENDED_STARTUPINFO_PRESENT,
+                    None,
+                    str(spec.cwd),
+                    ctypes.byref(startup),
+                    ctypes.byref(information),
+                )
+            finally:
+                if attribute_initialized:
+                    _kernel32.DeleteProcThreadAttributeList(startup.lpAttributeList)
             if not created:
                 _raise_last_error("CreateProcessW")
             process_handle = _required_handle_value(
@@ -496,15 +570,23 @@ class Win32ProcessBackend:
 def _pipe() -> tuple[int, int]:
     read = wintypes.HANDLE()
     write = wintypes.HANDLE()
-    if not _kernel32.CreatePipe(ctypes.byref(read), ctypes.byref(write), None, 0):
+    security = _SECURITY_ATTRIBUTES(
+        ctypes.sizeof(_SECURITY_ATTRIBUTES), None, True
+    )
+    if not _kernel32.CreatePipe(
+        ctypes.byref(read), ctypes.byref(write), ctypes.byref(security), 0
+    ):
         _raise_last_error("CreatePipe")
-    if not _kernel32.SetHandleInformation(read, HANDLE_FLAG_INHERIT, 0):
-        _kernel32.CloseHandle(read)
-        _kernel32.CloseHandle(write)
-        _raise_last_error("SetHandleInformation")
     if read.value is None or write.value is None:
         raise OSError("CreatePipe returned invalid handles")
     return int(read.value), int(write.value)
+
+
+def _make_non_inheritable(handle: int) -> None:
+    if not _kernel32.SetHandleInformation(
+        wintypes.HANDLE(handle), HANDLE_FLAG_INHERIT, 0
+    ):
+        _raise_last_error("SetHandleInformation(parent pipe)")
 
 
 def _close_handle(handle: int) -> None:

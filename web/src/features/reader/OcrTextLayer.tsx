@@ -24,7 +24,7 @@ export function OcrTextLayer({
   renderedWidth,
   renderedHeight,
 }: OcrTextLayerProps) {
-  if (parserName !== "mineru") return null;
+  if (parserName !== "mineru" || !coordinateReliable) return null;
   const label = coordinateReliable
     ? "OCR 文本层（坐标可靠）"
     : "OCR 文本层（坐标不可靠）";

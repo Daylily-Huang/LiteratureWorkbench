@@ -10,6 +10,12 @@ from literature_workbench.features.parser.models import ParsedBlock, ParsedPage
 from literature_workbench.features.parser.normalizer import ParseRunRepository
 
 
+class RejectLease:
+    def require_current_lease(self, connection: object) -> None:
+        assert connection.in_transaction  # type: ignore[attr-defined]
+        raise RuntimeError("lost_test_lease")
+
+
 def _block(source: str = "pymupdf") -> ParsedBlock:
     return ParsedBlock(
         block_id="0:0",
@@ -151,6 +157,86 @@ def test_incomplete_attempt_cannot_switch_pointer(
         ).fetchone()
     assert page_count is not None
     assert int(page_count["count"]) == 0
+
+
+def test_lost_lease_inside_completion_transaction_has_zero_page_or_pointer_effect(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    content_id = _prepare_content(parser_library, b"%PDF-lease-fence", 1)
+    repository = ParseRunRepository(parser_library.database)
+    run_id = repository.create_run(content_id, "pymupdf", "pymupdf-1")
+
+    with pytest.raises(RuntimeError, match="lost_test_lease"):
+        repository.complete_run(
+            run_id,
+            [_page(content_id, run_id, 0, "pymupdf", "must roll back")],
+            cancellation=RejectLease(),
+        )
+
+    assert repository.current_run_id(content_id) is None
+    with parser_library.database.connect() as connection:
+        pages = connection.execute(
+            "SELECT COUNT(*) AS count FROM pages WHERE parse_run_id=?", (str(run_id),)
+        ).fetchone()
+        run = connection.execute(
+            "SELECT status FROM parse_runs WHERE id=?", (str(run_id),)
+        ).fetchone()
+    assert pages is not None and int(pages["count"]) == 0
+    assert run is not None and run["status"] == "running"
+
+
+def test_older_concurrent_run_cannot_overwrite_newer_published_run(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    content_id = _prepare_content(parser_library, b"%PDF-concurrent", 1)
+    repository = ParseRunRepository(parser_library.database)
+    older = repository.create_run(content_id, "pymupdf", "pymupdf-1")
+    newer = repository.create_run(content_id, "mineru", "mineru-1")
+    repository.complete_run(
+        newer, [_page(content_id, newer, 0, "mineru", "new publication")]
+    )
+
+    with pytest.raises(ValueError, match="stale_parse_run"):
+        repository.complete_run(
+            older, [_page(content_id, older, 0, "pymupdf", "stale publication")]
+        )
+
+    assert repository.current_run_id(content_id) == newer
+    current = repository.read_current_page(content_id, 1)
+    assert current is not None and current.normalized_text == "new publication"
+
+
+def test_create_run_and_set_output_dir_are_lease_fenced_after_begin_immediate(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    content_id = _prepare_content(parser_library, b"%PDF-write-fences", 1)
+    repository = ParseRunRepository(parser_library.database)
+
+    with pytest.raises(RuntimeError, match="lost_test_lease"):
+        repository.create_run(
+            content_id,
+            "mineru",
+            "mineru-1",
+            cancellation=RejectLease(),
+        )
+    with parser_library.database.connect() as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) AS count FROM parse_runs WHERE content_sha256=?", (content_id,)
+        ).fetchone()
+    assert count is not None and int(count["count"]) == 0
+
+    run_id = repository.create_run(content_id, "mineru", "mineru-1")
+    with pytest.raises(RuntimeError, match="lost_test_lease"):
+        repository.set_output_dir(
+            run_id,
+            f"parse-results/{content_id}/{run_id}",
+            cancellation=RejectLease(),
+        )
+    with parser_library.database.connect() as connection:
+        run = connection.execute(
+            "SELECT output_dir FROM parse_runs WHERE id=?", (str(run_id),)
+        ).fetchone()
+    assert run is not None and run["output_dir"] is None
 
 
 @pytest.mark.parametrize(

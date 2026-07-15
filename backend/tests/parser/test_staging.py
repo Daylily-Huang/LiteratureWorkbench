@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import threading
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -12,6 +14,7 @@ import pytest
 from conftest import ParserLibraryFixture
 from literature_workbench.features.library.models import ContentId, DocumentRecord
 from literature_workbench.features.parser.models import StagedPdf
+from literature_workbench.features.parser.classifier import classify_staged_pdf
 from literature_workbench.features.parser.staging import (
     AllSourcesUnavailable,
     StagedContentMismatch,
@@ -52,6 +55,27 @@ class CheckpointRecorder:
         self.events.append(("staged", (relative_path, sha256)))
 
 
+class RejectCommitLease:
+    def require_current_lease(self, connection: object) -> None:
+        assert connection.in_transaction  # type: ignore[attr-defined]
+        raise RuntimeError("lost_structure_lease")
+
+
+class CancelCopyAfterFirstChunk:
+    checks = 0
+
+    def raise_if_cancelled(self) -> None:
+        self.checks += 1
+        if self.checks > 1:
+            raise RuntimeError("copy_cancelled")
+
+
+class FailRenamedCheckpoint(CheckpointRecorder):
+    def record_staged(self, relative_path: str, sha256: str) -> None:
+        super().record_staged(relative_path, sha256)
+        raise RuntimeError("checkpoint_after_rename_failed")
+
+
 def test_source_is_rehashed_from_zero_and_complete_pdf_is_staged(
     parser_library: ParserLibraryFixture,
 ) -> None:
@@ -90,6 +114,194 @@ def test_source_is_rehashed_from_zero_and_complete_pdf_is_staged(
     assert staged.path.parent.name == registered.content_id
     assert checkpoint.events[0] == ("started", attempt_id)
     assert checkpoint.events[1][0] == "staged"
+
+
+def test_staged_capability_blocks_path_replacement_while_parser_uses_it(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    registered = parser_library.register("held-staging.pdf", _pdf_bytes())
+    source = open_current_source_for_content(
+        parser_library.database,
+        parser_library.inspector,
+        registered.content_id,
+    )
+    staged = stage_verified_pdf(
+        parser_library.data_root,
+        registered.content_id,
+        source,
+        uuid4(),
+        CheckpointRecorder(),
+    )
+    replacement = staged.path.with_suffix(".replacement")
+    replacement.write_bytes(registered.payload)
+    try:
+        with pytest.raises(PermissionError):
+            os.replace(replacement, staged.path)
+    finally:
+        source.close()
+        close = getattr(staged, "close", None)
+        if callable(close):
+            close()
+
+
+def test_real_swap_race_cannot_replace_staged_file_or_held_content_directory(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    registered = parser_library.register("swap-race.pdf", _pdf_bytes())
+    source = open_current_source_for_content(
+        parser_library.database,
+        parser_library.inspector,
+        registered.content_id,
+    )
+    staged = stage_verified_pdf(
+        parser_library.data_root,
+        registered.content_id,
+        source,
+        uuid4(),
+        CheckpointRecorder(),
+    )
+    successes: list[str] = []
+
+    def attack() -> None:
+        for index in range(50):
+            replacement = staged.path.parent / f"replacement-{index}.pdf"
+            replacement.write_bytes(b"%PDF-evil")
+            try:
+                os.replace(replacement, staged.path)
+                successes.append("file")
+            except PermissionError:
+                replacement.unlink()
+            moved = staged.path.parent.with_name(f"moved-{index}")
+            try:
+                os.replace(staged.path.parent, moved)
+                successes.append("directory")
+            except PermissionError:
+                pass
+
+    attacker = threading.Thread(target=attack)
+    attacker.start()
+    try:
+        for _ in range(20):
+            assert classify_staged_pdf(staged) == "pymupdf"
+    finally:
+        attacker.join(timeout=5)
+        source.close()
+
+    assert not attacker.is_alive()
+    assert successes == []
+    assert staged.verify_current_hash()
+    staged.close()
+
+
+def test_lost_lease_inside_structure_transaction_leaves_cloud_eligibility_zero(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    registered = parser_library.register("lease-structure.pdf", _pdf_bytes())
+    source = open_current_source_for_content(
+        parser_library.database,
+        parser_library.inspector,
+        registered.content_id,
+    )
+    staged = stage_verified_pdf(
+        parser_library.data_root,
+        registered.content_id,
+        source,
+        uuid4(),
+        CheckpointRecorder(),
+    )
+    validation = validate_staged_structure(staged)
+    try:
+        with pytest.raises(RuntimeError, match="lost_structure_lease"):
+            persist_structure_validation(
+                parser_library.database,
+                validation,
+                source.identity,
+                cancellation=RejectCommitLease(),
+            )
+    finally:
+        source.close()
+        close = getattr(staged, "close", None)
+        if callable(close):
+            close()
+
+    with parser_library.database.connect() as connection:
+        document = connection.execute(
+            "SELECT auto_cloud_eligible FROM documents WHERE id=?",
+            (str(registered.document_id),),
+        ).fetchone()
+        content = connection.execute(
+            "SELECT status FROM contents WHERE sha256=?", (registered.content_id,)
+        ).fetchone()
+    assert document is not None and int(document["auto_cloud_eligible"]) == 0
+    assert content is not None and content["status"] == "queued"
+
+
+def test_staging_copy_checks_cancellation_between_bounded_chunks(tmp_path: Path) -> None:
+    payload = b"%PDF-" + b"x" * 64
+    content_id = ContentId(hashlib.sha256(payload).hexdigest())
+    identity = FileIdentity(
+        canonical_path=tmp_path / "source.pdf",
+        root_id=uuid4(),
+        volume_id="volume",
+        file_id="file",
+        size=len(payload),
+        modified_ns=1,
+        hard_link_count=1,
+        is_reparse_point=False,
+    )
+    source = VerifiedHandle(identity=identity, stream=BytesIO(payload))
+    cancellation = CancelCopyAfterFirstChunk()
+
+    with pytest.raises(RuntimeError, match="copy_cancelled"):
+        stage_verified_pdf(
+            tmp_path,
+            content_id,
+            source,
+            uuid4(),
+            CheckpointRecorder(),
+            chunk_size=8,
+            cancellation=cancellation,
+        )
+
+    assert cancellation.checks == 2
+
+
+def test_checkpoint_failure_after_rename_leaves_exact_promotion_journal(
+    tmp_path: Path,
+) -> None:
+    payload = b"%PDF-journal"
+    content_id = ContentId(hashlib.sha256(payload).hexdigest())
+    attempt_id = uuid4()
+    identity = FileIdentity(
+        canonical_path=tmp_path / "source.pdf",
+        root_id=uuid4(),
+        volume_id="volume",
+        file_id="file",
+        size=len(payload),
+        modified_ns=1,
+        hard_link_count=1,
+        is_reparse_point=False,
+    )
+    source = VerifiedHandle(identity=identity, stream=BytesIO(payload))
+
+    with pytest.raises(RuntimeError, match="checkpoint_after_rename_failed"):
+        stage_verified_pdf(
+            tmp_path,
+            content_id,
+            source,
+            attempt_id,
+            FailRenamedCheckpoint(),
+        )
+
+    journal = tmp_path / "staging" / content_id / f"{attempt_id}.promotion.json"
+    assert journal.is_file()
+    record = __import__("json").loads(journal.read_text(encoding="utf-8"))
+    assert record == {
+        "attempt_id": str(attempt_id),
+        "content_id": str(content_id),
+        "sha256": str(content_id),
+        "state": "renamed",
+    }
 
 
 def test_changed_source_is_reconciled_and_creates_no_staging_bytes(
@@ -171,7 +383,7 @@ def test_interrupted_copy_leaves_only_exact_checkpointed_part(tmp_path: Path) ->
     assert not part.with_suffix(".pdf").exists()
 
 
-def test_recovery_removes_only_checkpointed_stale_attempt_then_new_attempt_succeeds(
+def test_recovery_retains_unjournaled_partial_then_new_attempt_succeeds(
     tmp_path: Path,
 ) -> None:
     payload = b"%PDF-retry"
@@ -193,7 +405,7 @@ def test_recovery_removes_only_checkpointed_stale_attempt_then_new_attempt_succe
     )
 
     assert recovered is None
-    assert not stale.exists()
+    assert stale.read_bytes() == b"partial"
     assert unrelated.read_bytes() == b"leave me"
     new_attempt = uuid4()
     identity = FileIdentity(
@@ -215,6 +427,7 @@ def test_recovery_removes_only_checkpointed_stale_attempt_then_new_attempt_succe
     )
     assert staged.path == directory / f"{new_attempt}.pdf"
     assert "Unicode 原文" not in str(staged.path)
+    staged.close()
 
 
 def test_recovery_reuses_only_a_hash_valid_checkpointed_pdf(tmp_path: Path) -> None:
@@ -224,6 +437,19 @@ def test_recovery_reuses_only_a_hash_valid_checkpointed_pdf(tmp_path: Path) -> N
     path = tmp_path / "staging" / content_id / f"{attempt_id}.pdf"
     path.parent.mkdir(parents=True)
     path.write_bytes(payload)
+    (path.parent / f"{attempt_id}.promotion.json").write_text(
+        __import__("json").dumps(
+            {
+                "attempt_id": str(attempt_id),
+                "content_id": str(content_id),
+                "sha256": str(content_id),
+                "state": "renamed",
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
 
     recovered = recover_checkpointed_staging(
         tmp_path,
@@ -234,6 +460,8 @@ def test_recovery_reuses_only_a_hash_valid_checkpointed_pdf(tmp_path: Path) -> N
     )
 
     assert recovered == StagedPdf(content_id, attempt_id, path, content_id, None)
+    assert recovered is not None
+    recovered.close()
 
 
 def test_cleanup_rejects_nonmatching_parent_content_or_attempt(tmp_path: Path) -> None:

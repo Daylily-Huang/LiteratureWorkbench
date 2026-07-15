@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
 import subprocess
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import UUID, uuid4
 
 import fitz  # type: ignore[import-untyped]
@@ -18,6 +16,10 @@ from pydantic import ValidationError
 
 from literature_workbench.features.library.models import ContentId
 from literature_workbench.features.parser.models import ParsedBlock, ParsedPage, StagedPdf
+from literature_workbench.features.parser.workspace import (
+    TrustedParserWorkspace,
+    open_trusted_relative_file,
+)
 from literature_workbench.platform.windows.job_object import (
     ProcessIdentity,
     ProcessSpec,
@@ -27,7 +29,7 @@ from literature_workbench.platform.windows.job_object import (
 
 DEFAULT_MINERU_SCRIPT = Path(r"D:\MinerU\run_mineru.ps1")
 MINERU_COMMAND_VERSION = "mineru-pwsh-v1"
-_GLOBAL_MINERU_LEASE = threading.BoundedSemaphore(1)
+MAX_MINERU_JSON_BYTES = 8 * 1024 * 1024
 
 
 class MinerUFailed(RuntimeError):
@@ -55,6 +57,17 @@ LaunchMinerU = Callable[
     [ProcessSpec, UUID, Callable[[ProcessIdentity], None]],
     ProcessOutcome,
 ]
+
+
+class MinerULease(Protocol):
+    def __enter__(self) -> object: ...
+
+    def __exit__(
+        self,
+        exc_type: object,
+        exc_value: object,
+        traceback: object,
+    ) -> object: ...
 
 
 def build_mineru_spec(
@@ -118,7 +131,7 @@ class MinerUAdapter:
         which: Callable[[str], str | None] = shutil.which,
         audit: Callable[[MinerUExecutionSummary], None] | None = None,
         record_identity: Callable[[ProcessIdentity], None] | None = None,
-        lease: threading.BoundedSemaphore = _GLOBAL_MINERU_LEASE,
+        lease: MinerULease,
     ) -> None:
         self._launch = launch or _launch_process
         self._which = which
@@ -176,27 +189,37 @@ def validate_mineru_output(
 ) -> list[ParsedPage]:
     if staged.page_count is None or staged.page_count <= 0:
         raise MinerUFailed("mineru_invalid_staged_page_count")
-    result_directory = Path(attempt_output_dir) / staged.path.stem / "auto"
-    content_list_path = result_directory / f"{staged.path.stem}_content_list.json"
-    if not content_list_path.is_file():
-        raise MinerUFailed("mineru_output_missing")
     try:
-        raw_blocks = json.loads(content_list_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raw_blocks = _read_result_json(
+            attempt_output_dir,
+            staged.path.stem,
+            f"{staged.path.stem}_content_list.json",
+        )
+    except FileNotFoundError as error:
+        raise MinerUFailed("mineru_output_missing") from error
+    except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as error:
         raise MinerUFailed("mineru_invalid_output") from error
     if not isinstance(raw_blocks, list):
         raise MinerUFailed("mineru_invalid_output")
-    metadata_path = result_directory / f"{staged.path.stem}_metadata.json"
-    if metadata_path.exists():
+    try:
+        metadata = _read_result_json(
+            attempt_output_dir,
+            staged.path.stem,
+            f"{staged.path.stem}_metadata.json",
+        )
+    except FileNotFoundError:
+        metadata = None
+    except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as error:
+        raise MinerUFailed("mineru_invalid_output") from error
+    if metadata is not None:
         try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            if (
+                not isinstance(metadata, dict)
+                or metadata.get("page_count") != staged.page_count
+            ):
+                raise MinerUFailed("mineru_page_count_mismatch")
+        except AttributeError as error:
             raise MinerUFailed("mineru_invalid_output") from error
-        if (
-            not isinstance(metadata, dict)
-            or metadata.get("page_count") != staged.page_count
-        ):
-            raise MinerUFailed("mineru_page_count_mismatch")
     per_page: list[list[ParsedBlock]] = [[] for _ in range(staged.page_count)]
     try:
         for ordinal, raw in enumerate(raw_blocks):
@@ -270,25 +293,44 @@ def promote_mineru_result(
     attempt_id: UUID,
     attempt_output_dir: Path,
 ) -> Path:
-    root = Path(data_root) / "parse-results" / str(content_id)
-    root.mkdir(parents=True, exist_ok=True)
-    final = root / str(attempt_id)
-    if final.exists():
-        raise FileExistsError(final)
-    os.rename(attempt_output_dir, final)
-    relative = f"parse-results/{content_id}/{attempt_id}"
-    pointer = {
-        "attempt_id": str(attempt_id),
-        "attempt_path": relative,
-        "path_digest": hashlib.sha256(relative.encode("utf-8")).hexdigest(),
-    }
-    temporary = root / f"current.{attempt_id}.tmp"
-    with temporary.open("x", encoding="utf-8") as stream:
-        json.dump(pointer, stream, ensure_ascii=False, separators=(",", ":"))
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, root / "current.json")
-    return final
+    workspace = TrustedParserWorkspace.create(data_root)
+    work = None
+    result = None
+    try:
+        expected = workspace.mineru_work_directory / str(attempt_id)
+        if Path(os.path.abspath(attempt_output_dir)) != Path(os.path.abspath(expected)):
+            raise ValueError("mineru_work_path_mismatch")
+        work = workspace.open_mineru_work(attempt_id)
+        result = workspace.promote_mineru_work(content_id, attempt_id, work)
+        work = None
+        return result.path
+    finally:
+        if work is not None:
+            work.close()
+        if result is not None:
+            result.close()
+        workspace.close()
+
+
+def publish_mineru_result(
+    data_root: Path,
+    content_id: ContentId,
+    attempt_id: UUID,
+    promoted: Path,
+) -> None:
+    workspace = TrustedParserWorkspace.create(data_root)
+    result = None
+    expected = workspace.parse_results_directory / str(content_id) / str(attempt_id)
+    if Path(os.path.abspath(promoted)) != Path(os.path.abspath(expected)):
+        workspace.close()
+        raise ValueError("mineru_promoted_path_mismatch")
+    try:
+        result = workspace.open_mineru_result(content_id, attempt_id)
+        workspace.publish_result_pointer(content_id, attempt_id, result)
+    finally:
+        if result is not None:
+            result.close()
+        workspace.close()
 
 
 def _fixed_process_error(exit_code: int, stdout: bytes, stderr: bytes) -> str:
@@ -302,6 +344,22 @@ def _fixed_process_error(exit_code: int, stdout: bytes, stderr: bytes) -> str:
         if signature in combined:
             return code
     return "mineru_nonzero_exit" if exit_code != 0 else "mineru_invalid_output"
+
+
+def _read_result_json(
+    attempt_output_dir: Path,
+    pdf_stem: str,
+    file_name: str,
+) -> object:
+    file = open_trusted_relative_file(
+        attempt_output_dir,
+        (pdf_stem, "auto", file_name),
+    )
+    try:
+        payload = file.read_bounded(MAX_MINERU_JSON_BYTES)
+    finally:
+        file.close()
+    return json.loads(payload.decode("utf-8"))
 
 
 def _normalized_block_kind(

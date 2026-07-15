@@ -3,13 +3,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
+import threading
 from pathlib import Path
 
+import pytest
 from conftest import ParserLibraryFixture
 from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.parser.mineru import ProcessOutcome
+from literature_workbench.features.parser.models import ParsedPage
 from literature_workbench.features.parser.normalizer import ParseRunRepository
 from literature_workbench.features.parser.worker import ParseWorkerService
+from literature_workbench.features.parser.workspace import TrustedParserWorkspace
 from literature_workbench.worker import Worker, parser_job_handlers
 
 
@@ -210,3 +215,421 @@ def test_read_only_suppresses_automatic_parse_without_staging(
         registered.content_id
     ) is None
     assert not (parser_library.data_root / "staging").exists()
+
+
+def test_same_content_cloud_eligibility_revalidates_each_authorized_single_link_source(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    payload = _pdf_bytes()
+    first = parser_library.register("a-copy.pdf", payload)
+    second = parser_library.register("b-copy.pdf", payload)
+    assert first.content_id == second.content_id
+    queue = _queue(parser_library)
+    queue.enqueue(
+        "parse_pdf", f"cloud:{first.content_id}", {"content_id": str(first.content_id)}
+    )
+    service = ParseWorkerService(
+        parser_library.database, parser_library.inspector, parser_library.data_root
+    )
+
+    assert asyncio.run(
+        Worker(queue, "cloud-worker", parser_job_handlers(service)).run_once()
+    ) is True
+
+    with parser_library.database.connect() as connection:
+        rows = connection.execute(
+            "SELECT auto_cloud_eligible FROM documents WHERE content_sha256=? ORDER BY path_key",
+            (first.content_id,),
+        ).fetchall()
+    assert [int(row["auto_cloud_eligible"]) for row in rows] == [1, 1]
+
+
+def test_auto_ocr_language_uses_bounded_extracted_body_not_only_metadata(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    import fitz
+
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((36, 72), "这是中文正文用于选择识别语言", fontname="china-s")
+    payload = document.tobytes()
+    document.close()
+    registered = parser_library.register("han-body.pdf", payload)
+    observed_languages: list[str] = []
+
+    class FakeMinerU:
+        def run(self, staged: object, output: Path, language: str) -> ProcessOutcome:
+            observed_languages.append(language)
+            staged_path = staged.path  # type: ignore[attr-defined]
+            result = output / staged_path.stem / "auto"
+            result.mkdir(parents=True)
+            (result / f"{staged_path.stem}_content_list.json").write_text(
+                json.dumps([], ensure_ascii=False), encoding="utf-8"
+            )
+            return ProcessOutcome(0, b"", b"")
+
+    queue = _queue(parser_library)
+    queue.enqueue(
+        "parse_pdf",
+        f"language:{registered.content_id}",
+        {"content_id": str(registered.content_id), "strategy": "auto"},
+    )
+    service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+        mineru_factory=lambda _record: FakeMinerU(),  # type: ignore[arg-type]
+    )
+
+    assert asyncio.run(
+        Worker(queue, "language-worker", parser_job_handlers(service)).run_once()
+    ) is True
+    assert observed_languages == ["ch"]
+
+
+def test_real_mineru_work_directory_swap_is_blocked_during_subprocess(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    registered = parser_library.register("mineru-work-race.pdf", _pdf_bytes(text=False))
+
+    class RaceMinerU:
+        def run(self, staged: object, output: Path, language: str) -> ProcessOutcome:
+            output.mkdir(parents=True, exist_ok=True)
+            moved = output.with_name(f"{output.name}-moved")
+            with pytest.raises(PermissionError):
+                os.replace(output, moved)
+            staged_path = staged.path  # type: ignore[attr-defined]
+            result = output / staged_path.stem / "auto"
+            result.mkdir(parents=True)
+            (result / f"{staged_path.stem}_content_list.json").write_text(
+                "[]", encoding="utf-8"
+            )
+            return ProcessOutcome(0, b"", b"")
+
+    queue = _queue(parser_library)
+    job_id = queue.enqueue(
+        "parse_pdf",
+        f"work-race:{registered.content_id}",
+        {
+            "document_id": str(registered.document_id),
+            "content_id": str(registered.content_id),
+            "strategy": "mineru",
+        },
+    )
+    service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+        mineru_factory=lambda _record: RaceMinerU(),  # type: ignore[arg-type]
+    )
+
+    assert asyncio.run(
+        Worker(queue, "work-race", parser_job_handlers(service)).run_once()
+    ) is True
+    with parser_library.database.connect() as connection:
+        job = connection.execute(
+            "SELECT status,error_code FROM jobs WHERE id=?", (str(job_id),)
+        ).fetchone()
+    assert job is not None and tuple(job) == ("completed", None)
+
+
+def test_retry_rebuilds_pointer_after_crash_between_db_complete_and_publish(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    registered = parser_library.register("publish-crash.pdf", _pdf_bytes(pages=1))
+    with parser_library.database.transaction() as connection:
+        connection.execute(
+            "UPDATE contents SET page_count=1,status='valid_pdf' WHERE sha256=?",
+            (registered.content_id,),
+        )
+    queue = _queue(parser_library)
+    job_id = queue.enqueue(
+        "parse_pdf",
+        f"crash:{registered.content_id}",
+        {
+            "document_id": str(registered.document_id),
+            "content_id": str(registered.content_id),
+            "strategy": "mineru",
+        },
+    )
+    repository = ParseRunRepository(parser_library.database)
+    run_id = repository.create_run(
+        registered.content_id,
+        "mineru",
+        "mineru-test",
+        source_job_id=job_id,
+    )
+    output_relative = f"parse-results/{registered.content_id}/{run_id}"
+    repository.set_output_dir(run_id, output_relative)
+    repository.complete_run(
+        run_id,
+        [
+            ParsedPage(
+                content_id=registered.content_id,
+                page_index=0,
+                physical_page=1,
+                parse_run_id=run_id,
+                parser_name="mineru",
+                parser_version="mineru-test",
+                normalized_text="recovered",
+                raw_text="recovered",
+                width_points=400,
+                height_points=600,
+                coordinate_reliable=True,
+                blocks=[],
+            )
+        ],
+    )
+    workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    work = workspace.create_mineru_work(run_id)
+    (work.path / "validated.marker").write_text("ok", encoding="utf-8")
+    result = workspace.promote_mineru_work(registered.content_id, run_id, work)
+    result.close()
+    workspace.close()
+    pointer = (
+        parser_library.data_root
+        / "parse-results"
+        / registered.content_id
+        / "current.json"
+    )
+    assert not pointer.exists()
+
+    class MustNotRerunMinerU:
+        def run(self, *_args: object) -> ProcessOutcome:
+            raise AssertionError("completed immutable result must be recovered")
+
+    service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+        mineru_factory=lambda _record: MustNotRerunMinerU(),  # type: ignore[arg-type]
+    )
+    assert asyncio.run(
+        Worker(queue, "crash-recovery", parser_job_handlers(service)).run_once()
+    ) is True
+
+    assert json.loads(pointer.read_text(encoding="utf-8"))["attempt_id"] == str(run_id)
+    with parser_library.database.connect() as connection:
+        job = connection.execute(
+            "SELECT status,error_code FROM jobs WHERE id=?", (str(job_id),)
+        ).fetchone()
+    assert job is not None and tuple(job) == ("completed", None)
+
+
+def test_stale_completed_job_cannot_publish_over_newer_current_result(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    registered = parser_library.register("stale-publish.pdf", _pdf_bytes(pages=1))
+    with parser_library.database.transaction() as connection:
+        connection.execute(
+            "UPDATE contents SET page_count=1,status='valid_pdf' WHERE sha256=?",
+            (registered.content_id,),
+        )
+    queue = _queue(parser_library)
+    old_job = queue.enqueue(
+        "parse_pdf",
+        f"old:{registered.content_id}",
+        {"content_id": str(registered.content_id), "strategy": "mineru"},
+    )
+    new_job = queue.enqueue(
+        "parse_pdf",
+        f"new:{registered.content_id}",
+        {"content_id": str(registered.content_id), "strategy": "mineru"},
+    )
+    repository = ParseRunRepository(parser_library.database)
+
+    def complete(job_id: object, text: str) -> tuple[object, object]:
+        run_id = repository.create_run(
+            registered.content_id,
+            "mineru",
+            "mineru-test",
+            source_job_id=job_id,  # type: ignore[arg-type]
+        )
+        repository.set_output_dir(
+            run_id, f"parse-results/{registered.content_id}/{run_id}"
+        )
+        repository.complete_run(
+            run_id,
+            [
+                ParsedPage(
+                    content_id=registered.content_id,
+                    page_index=0,
+                    physical_page=1,
+                    parse_run_id=run_id,
+                    parser_name="mineru",
+                    parser_version="mineru-test",
+                    normalized_text=text,
+                    raw_text=text,
+                    width_points=400,
+                    height_points=600,
+                    coordinate_reliable=True,
+                    blocks=[],
+                )
+            ],
+        )
+        workspace = TrustedParserWorkspace.create(parser_library.data_root)
+        work = workspace.create_mineru_work(run_id)
+        (work.path / "validated.marker").write_text(text, encoding="utf-8")
+        result = workspace.promote_mineru_work(registered.content_id, run_id, work)
+        workspace.close()
+        return run_id, result
+
+    old_run, old_result = complete(old_job, "old")
+    old_result.close()  # type: ignore[attr-defined]
+    new_run, new_result = complete(new_job, "new")
+    new_result.close()  # type: ignore[attr-defined]
+    new_workspace = TrustedParserWorkspace.create(parser_library.data_root)
+    reopened = new_workspace.open_mineru_result(registered.content_id, new_run)  # type: ignore[arg-type]
+    new_workspace.publish_result_pointer(registered.content_id, new_run, reopened)  # type: ignore[arg-type]
+    reopened.close()
+    new_workspace.close()
+    pointer = (
+        parser_library.data_root
+        / "parse-results"
+        / registered.content_id
+        / "current.json"
+    )
+
+    service = ParseWorkerService(
+        parser_library.database, parser_library.inspector, parser_library.data_root
+    )
+    assert asyncio.run(
+        Worker(queue, "stale-publish", parser_job_handlers(service)).run_once()
+    ) is True
+
+    assert json.loads(pointer.read_text(encoding="utf-8"))["attempt_id"] == str(new_run)
+    assert repository.current_run_id(registered.content_id) == new_run
+    with parser_library.database.connect() as connection:
+        job = connection.execute(
+            "SELECT status,error_code FROM jobs WHERE id=?", (str(old_job),)
+        ).fetchone()
+    assert job is not None and tuple(job) == ("failed", "stale_parse_publication")
+    assert old_run != new_run
+
+
+def test_older_normal_mineru_path_cannot_publish_after_newer_run_wins(
+    parser_library: ParserLibraryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered = parser_library.register("publish-race.pdf", _pdf_bytes(text=False))
+    queue = _queue(parser_library)
+
+    class FakeMinerU:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def run(self, staged: object, output: Path, language: str) -> ProcessOutcome:
+            del language
+            staged_path = staged.path  # type: ignore[attr-defined]
+            result = output / staged_path.stem / "auto"
+            result.mkdir(parents=True)
+            (result / f"{staged_path.stem}_content_list.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "page_idx": 0,
+                            "type": "text",
+                            "text": self._text,
+                            "bbox": [0, 0, 100, 100],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            return ProcessOutcome(0, b"", b"")
+
+    old_job = queue.enqueue(
+        "parse_pdf",
+        f"publish-race-old:{registered.content_id}",
+        {
+            "document_id": str(registered.document_id),
+            "content_id": str(registered.content_id),
+            "strategy": "mineru",
+        },
+    )
+    old_completed = threading.Event()
+    let_old_publish = threading.Event()
+    complete_calls = 0
+    complete_lock = threading.Lock()
+    original_complete = ParseRunRepository.complete_run
+
+    def interleaved_complete(self: object, *args: object, **kwargs: object) -> object:
+        nonlocal complete_calls
+        result = original_complete(self, *args, **kwargs)  # type: ignore[arg-type]
+        with complete_lock:
+            complete_calls += 1
+            call_number = complete_calls
+        if call_number == 1:
+            old_completed.set()
+            assert let_old_publish.wait(10)
+        return result
+
+    monkeypatch.setattr(ParseRunRepository, "complete_run", interleaved_complete)
+    old_service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+        mineru_factory=lambda _record: FakeMinerU("old"),  # type: ignore[arg-type]
+    )
+    old_result: list[bool] = []
+    old_thread = threading.Thread(
+        target=lambda: old_result.append(
+            asyncio.run(
+                Worker(queue, "publish-old", parser_job_handlers(old_service)).run_once()
+            )
+        )
+    )
+    old_thread.start()
+    assert old_completed.wait(10)
+
+    new_job = queue.enqueue(
+        "parse_pdf",
+        f"publish-race-new:{registered.content_id}",
+        {
+            "document_id": str(registered.document_id),
+            "content_id": str(registered.content_id),
+            "strategy": "mineru",
+        },
+    )
+    new_service = ParseWorkerService(
+        parser_library.database,
+        parser_library.inspector,
+        parser_library.data_root,
+        mineru_factory=lambda _record: FakeMinerU("new"),  # type: ignore[arg-type]
+    )
+    assert asyncio.run(
+        Worker(queue, "publish-new", parser_job_handlers(new_service)).run_once()
+    ) is True
+    let_old_publish.set()
+    old_thread.join(10)
+    assert not old_thread.is_alive()
+    assert old_result == [True]
+
+    repository = ParseRunRepository(parser_library.database)
+    current = repository.current_run_id(registered.content_id)
+    assert current is not None
+    assert repository.read_current_page(registered.content_id, 1).normalized_text == "new"  # type: ignore[union-attr]
+    pointer = json.loads(
+        (
+            parser_library.data_root
+            / "parse-results"
+            / registered.content_id
+            / "current.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert pointer["attempt_id"] == str(current)
+    with parser_library.database.connect() as connection:
+        old = connection.execute(
+            "SELECT status,error_code FROM jobs WHERE id=?", (old_job,)
+        ).fetchone()
+        new = connection.execute(
+            "SELECT status,error_code FROM jobs WHERE id=?", (new_job,)
+        ).fetchone()
+    assert old is not None and (old["status"], old["error_code"]) == (
+        "failed",
+        "stale_parse_publication",
+    )
+    assert new is not None and (new["status"], new["error_code"]) == (
+        "completed",
+        None,
+    )

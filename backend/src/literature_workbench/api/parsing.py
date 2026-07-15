@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from literature_workbench.features.library.models import ContentId
+from literature_workbench.features.parser.staging import _registered_pdf_from_row
+from literature_workbench.features.reader.pdf_stream import open_verified_pdf
 
 
 router = APIRouter(prefix="/api/documents", tags=["parsing"])
@@ -85,13 +87,32 @@ def request_parse(
 ) -> Response:
     with request.app.state.database.transaction() as connection:
         document = connection.execute(
-            "SELECT content_sha256 FROM documents WHERE id=?",
+            """
+            SELECT d.*,l.root_path,l.root_volume_id,l.root_file_id,l.recursive,
+                   l.discovery_mode,l.authorization_source AS root_authorization_source,
+                   l.status AS root_status
+            FROM documents AS d JOIN libraries AS l ON l.id=d.library_id
+            WHERE d.id=?
+            """,
             (str(document_id),),
         ).fetchone()
         if document is None:
             return JSONResponse({"code": "document_not_found"}, status_code=404)
-        if document["content_sha256"] is None:
+        if (
+            document["content_sha256"] is None
+            or str(document["format"]) != "pdf"
+            or str(document["status"]) == "missing"
+        ):
             return JSONResponse({"code": "document_not_parseable"}, status_code=409)
+        try:
+            current = open_verified_pdf(
+                request.app.state.file_inspector,
+                _registered_pdf_from_row(document),
+            )
+        except (OSError, ValueError):
+            return JSONResponse({"code": "document_not_parseable"}, status_code=409)
+        else:
+            current.close()
         content_id = ContentId(str(document["content_sha256"]))
         connection.execute(
             """

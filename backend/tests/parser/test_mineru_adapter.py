@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import threading
 import time
 from pathlib import Path
@@ -18,9 +19,11 @@ from literature_workbench.features.parser.mineru import (
     build_mineru_spec,
     choose_ocr_language,
     promote_mineru_result,
+    publish_mineru_result,
     validate_mineru_output,
 )
 from literature_workbench.features.parser.models import StagedPdf
+from literature_workbench.features.parser.workspace import TrustedParserWorkspace
 from literature_workbench.platform.windows.job_object import ProcessSpec
 
 
@@ -35,6 +38,20 @@ def _staged_pdf(tmp_path: Path, pages: int = 3) -> StagedPdf:
     finally:
         document.close()
     return StagedPdf(ContentId("a" * 64), uuid4(), path, "a" * 64, pages)
+
+
+def _hold_cross_process_mineru_lease(
+    root: str,
+    results: multiprocessing.Queue[tuple[float, float]],
+) -> None:
+    workspace = TrustedParserWorkspace.create(Path(root))
+    try:
+        with workspace.mineru_lease(timeout_seconds=5):
+            entered = time.monotonic()
+            time.sleep(0.25)
+            results.put((entered, time.monotonic()))
+    finally:
+        workspace.close()
 
 
 def _write_content_list(output: Path, stem: str, blocks: list[dict[str, object]]) -> None:
@@ -216,21 +233,48 @@ def test_adapter_serializes_jobs_and_never_persists_stream_text(tmp_path: Path) 
     assert sentinel not in repr(summaries)
 
 
+def test_mineru_lease_serializes_across_processes_by_workspace_identity(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "cross-process-workspace"
+    root.mkdir()
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_hold_cross_process_mineru_lease,
+            args=(str(root), results),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=10)
+
+    assert [process.exitcode for process in processes] == [0, 0]
+    intervals = sorted([results.get(timeout=1), results.get(timeout=1)])
+    assert intervals[0][1] <= intervals[1][0]
+
+
 def test_result_promotion_keeps_immutable_attempts_and_switches_only_pointer(
     tmp_path: Path,
 ) -> None:
     staged = _staged_pdf(tmp_path, pages=1)
     first = uuid4()
     second = uuid4()
-    first_work = tmp_path / "work-first"
-    second_work = tmp_path / "work-second"
-    first_work.mkdir()
-    second_work.mkdir()
+    first_work = tmp_path / "mineru-work" / str(first)
+    second_work = tmp_path / "mineru-work" / str(second)
+    first_work.mkdir(parents=True)
+    second_work.mkdir(parents=True)
     (first_work / "result.json").write_text("first", encoding="utf-8")
     (second_work / "result.json").write_text("second", encoding="utf-8")
 
     first_final = promote_mineru_result(tmp_path, staged.content_id, first, first_work)
     second_final = promote_mineru_result(tmp_path, staged.content_id, second, second_work)
+
+    publish_mineru_result(tmp_path, staged.content_id, first, first_final)
+    publish_mineru_result(tmp_path, staged.content_id, second, second_final)
 
     pointer = json.loads(
         (tmp_path / "parse-results" / staged.content_id / "current.json").read_text(
@@ -241,3 +285,55 @@ def test_result_promotion_keeps_immutable_attempts_and_switches_only_pointer(
     assert (second_final / "result.json").read_text(encoding="utf-8") == "second"
     assert pointer["attempt_id"] == str(second)
     assert "path_digest" in pointer
+
+
+def test_validated_promotion_does_not_publish_current_pointer_before_db_commit(
+    tmp_path: Path,
+) -> None:
+    staged = _staged_pdf(tmp_path, pages=1)
+    run_id = uuid4()
+    work = tmp_path / "mineru-work" / str(run_id)
+    work.mkdir(parents=True)
+    (work / "validated.json").write_text("{}", encoding="utf-8")
+
+    promoted = promote_mineru_result(tmp_path, staged.content_id, run_id, work)
+
+    assert promoted.is_dir()
+    assert not (tmp_path / "parse-results" / staged.content_id / "current.json").exists()
+
+
+def test_mineru_json_over_size_limit_fails_with_fixed_error_without_full_parse(
+    tmp_path: Path,
+) -> None:
+    staged = _staged_pdf(tmp_path, pages=1)
+    run_id = uuid4()
+    output = tmp_path / "oversized"
+    result = output / staged.path.stem / "auto"
+    result.mkdir(parents=True)
+    content_list = result / f"{staged.path.stem}_content_list.json"
+    with content_list.open("wb") as stream:
+        stream.write(b" " * (8 * 1024 * 1024 + 1))
+        stream.write(b"[]")
+
+    with pytest.raises(MinerUFailed, match="mineru_invalid_output"):
+        validate_mineru_output(staged, run_id, output, "mineru-test")
+
+
+def test_mineru_validation_rejects_reparse_content_list(
+    tmp_path: Path,
+) -> None:
+    staged = _staged_pdf(tmp_path, pages=1)
+    run_id = uuid4()
+    output = tmp_path / "reparse-output"
+    result = output / staged.path.stem / "auto"
+    result.mkdir(parents=True)
+    outside = tmp_path / "outside.json"
+    outside.write_text("[]", encoding="utf-8")
+    content_list = result / f"{staged.path.stem}_content_list.json"
+    try:
+        content_list.symlink_to(outside)
+    except OSError as error:
+        pytest.skip(f"symlink unavailable: {error}")
+
+    with pytest.raises(MinerUFailed, match="mineru_invalid_output"):
+        validate_mineru_output(staged, run_id, output, "mineru-test")

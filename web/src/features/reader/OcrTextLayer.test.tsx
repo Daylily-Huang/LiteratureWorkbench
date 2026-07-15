@@ -53,7 +53,7 @@ describe("OcrTextLayer", () => {
     expect(screen.queryByText("image")).not.toBeInTheDocument();
   });
 
-  it("labels unreliable coordinates and never renders for direct extraction", () => {
+  it("suppresses exact OCR geometry when coordinates are unreliable or direct", () => {
     const { rerender } = render(
       <OcrTextLayer
         blocks={blocks}
@@ -63,9 +63,7 @@ describe("OcrTextLayer", () => {
         renderedWidth={400}
       />,
     );
-    expect(
-      screen.getByRole("group", { name: "OCR 文本层（坐标不可靠）" }),
-    ).toHaveAttribute("data-coordinate-reliable", "false");
+    expect(screen.queryByRole("group", { name: /OCR 文本层/ })).not.toBeInTheDocument();
 
     rerender(
       <OcrTextLayer

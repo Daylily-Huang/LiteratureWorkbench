@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import cast
@@ -24,23 +26,32 @@ class ParseRunRepository:
         parser_version: str,
         *,
         output_dir: str | None = None,
+        cancellation: object | None = None,
+        source_job_id: UUID | str | None = None,
     ) -> UUID:
         if parser_name not in {"pymupdf", "mineru"}:
             raise ValueError("invalid_parser_name")
         run_id = uuid4()
         timestamp = datetime.now(UTC).isoformat()
         with self._database.transaction() as connection:
+            _fence(cancellation, connection)
             content = connection.execute(
-                "SELECT 1 FROM contents WHERE sha256=?", (str(content_id),)
+                "SELECT parse_request_revision FROM contents WHERE sha256=?",
+                (str(content_id),),
             ).fetchone()
             if content is None:
                 raise ValueError("parse_content_not_found")
+            request_revision = int(content["parse_request_revision"]) + 1
+            connection.execute(
+                "UPDATE contents SET parse_request_revision=? WHERE sha256=?",
+                (request_revision, str(content_id)),
+            )
             connection.execute(
                 """
                 INSERT INTO parse_runs(
                   id,content_sha256,parser_name,parser_version,status,output_dir,
-                  created_at,updated_at)
-                VALUES(?,?,?,?, 'running',?,?,?)
+                  request_revision,source_job_id,created_at,updated_at)
+                VALUES(?,?,?,?, 'running',?,?,?,?,?)
                 """,
                 (
                     str(run_id),
@@ -48,15 +59,27 @@ class ParseRunRepository:
                     parser_name,
                     parser_version,
                     output_dir,
+                    request_revision,
+                    None if source_job_id is None else str(source_job_id),
                     timestamp,
                     timestamp,
                 ),
             )
         return run_id
 
-    def complete_run(self, run_id: UUID, pages: list[ParsedPage]) -> None:
+    def complete_run(
+        self,
+        run_id: UUID,
+        pages: list[ParsedPage],
+        *,
+        cancellation: object | None = None,
+        verify_inputs: Callable[[], None] | None = None,
+    ) -> None:
         timestamp = datetime.now(UTC).isoformat()
         with self._database.transaction() as connection:
+            _fence(cancellation, connection)
+            if verify_inputs is not None:
+                verify_inputs()
             run = connection.execute(
                 "SELECT * FROM parse_runs WHERE id=? AND status='running'",
                 (str(run_id),),
@@ -113,12 +136,23 @@ class ParseRunRepository:
             )
             if changed.rowcount != 1:
                 raise ValueError("parse_run_completion_conflict")
+            _fence(cancellation, connection)
+            if verify_inputs is not None:
+                verify_inputs()
             pointer = connection.execute(
-                "UPDATE contents SET current_parse_run_id=?,updated_at=? WHERE sha256=?",
-                (str(run_id), timestamp, content_id),
+                """
+                UPDATE contents SET current_parse_run_id=?,updated_at=?
+                WHERE sha256=? AND parse_request_revision=?
+                """,
+                (
+                    str(run_id),
+                    timestamp,
+                    content_id,
+                    int(run["request_revision"]),
+                ),
             )
             if pointer.rowcount != 1:
-                raise ValueError("parse_pointer_switch_failed")
+                raise ValueError("stale_parse_run")
 
     def fail_run(self, run_id: UUID, error_code: str) -> None:
         timestamp = datetime.now(UTC).isoformat()
@@ -144,11 +178,18 @@ class ParseRunRepository:
                 (error_code, timestamp, str(run_id)),
             )
 
-    def set_output_dir(self, run_id: UUID, relative_output_dir: str) -> None:
+    def set_output_dir(
+        self,
+        run_id: UUID,
+        relative_output_dir: str,
+        *,
+        cancellation: object | None = None,
+    ) -> None:
         path = PurePosixPath(relative_output_dir)
         if path.is_absolute() or ".." in path.parts:
             raise ValueError("parse_output_dir_must_be_relative")
         with self._database.transaction() as connection:
+            _fence(cancellation, connection)
             changed = connection.execute(
                 "UPDATE parse_runs SET output_dir=? WHERE id=? AND status='running'",
                 (path.as_posix(), str(run_id)),
@@ -254,6 +295,12 @@ def extract_pymupdf_pages(staged: StagedPdf, parse_run_id: UUID) -> list[ParsedP
                 )
             )
     return pages
+
+
+def _fence(cancellation: object | None, connection: sqlite3.Connection) -> None:
+    if cancellation is None:
+        return
+    cancellation.require_current_lease(connection)  # type: ignore[attr-defined]
 
 
 def _pages_form_complete_attempt(
