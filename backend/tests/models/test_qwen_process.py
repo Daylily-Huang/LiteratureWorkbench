@@ -235,6 +235,39 @@ def test_unavailable_service_launches_only_fixed_assets_and_records_ownership(
     }
 
 
+def test_prelaunch_connect_timeout_is_treated_as_unavailable_service(
+    tmp_path: Path,
+) -> None:
+    requests = 0
+    launches: list[tuple[str, ...]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            raise httpx.ConnectTimeout("loopback connect timed out", request=request)
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+        return httpx.Response(
+            200,
+            json={"data": [{"id": EXPECTED_ALIAS}]},
+            request=request,
+        )
+
+    manager = QwenProcessManager(
+        tmp_path / "qwen",
+        transport=httpx.MockTransport(handler),
+        launcher=lambda args, log: launches.append(args) or 321,
+        identity_lookup=lambda pid: expected_identity(pid),
+        clock=FakeClock(),
+    )
+
+    lease = manager.ensure_running()
+
+    assert lease.borrowed is False
+    assert launches == [expected_identity().cmdline]
+
+
 def test_start_timeout_is_fixed_and_sanitized(tmp_path: Path) -> None:
     clock = FakeClock()
     stops: list[int] = []

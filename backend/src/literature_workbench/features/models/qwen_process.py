@@ -28,6 +28,7 @@ QWEN_MMPROJ = Path(
 )
 STARTUP_TIMEOUT_SECONDS = 120.0
 PROBE_TIMEOUT_SECONDS = 2.0
+PROBE_CONNECT_TIMEOUT_SECONDS = 0.5
 MAX_PROBE_RESPONSE_BYTES = 64 * 1024
 _OWNERSHIP_FILE = "owned-process.json"
 
@@ -292,7 +293,13 @@ class QwenProcessManager:
                 transport=self._transport,
                 trust_env=False,
                 follow_redirects=False,
-                timeout=httpx.Timeout(2.0),
+                timeout=httpx.Timeout(
+                    self._probe_timeout_seconds,
+                    connect=min(
+                        self._probe_timeout_seconds,
+                        PROBE_CONNECT_TIMEOUT_SECONDS,
+                    ),
+                ),
             ) as client:
                 health_status, health_payload = self._read_probe(client, "/health")
                 if health_status != 200 or health_payload != {"status": "ok"}:
@@ -301,7 +308,7 @@ class QwenProcessManager:
                 if models_status != 200 or not self._has_expected_alias(models_payload):
                     return self._not_ready(prelaunch)
                 return True
-        except httpx.ConnectError:
+        except (httpx.ConnectError, httpx.ConnectTimeout):
             return False
         except QwenProcessError:
             raise
