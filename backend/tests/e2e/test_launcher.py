@@ -335,6 +335,152 @@ def test_worker_ready_requires_exact_generation_token_and_child_identity(
         )
 
 
+def test_worker_ready_accepts_exact_direct_real_python_child_of_venv_shim(
+    tmp_path: Path,
+) -> None:
+    ready_path = tmp_path / "worker-ready.json"
+    shim = ProcessIdentity(
+        50616,
+        20.5,
+        r"D:\LiteratureWorkbench\backend\.venv\Scripts\python.exe",
+    )
+    real_worker = ProcessIdentity(
+        47168,
+        21.5,
+        r"C:\Python312\python.exe",
+    )
+    generation = "generation"
+    token = "t" * 43
+    WorkerReady(generation, token, real_worker).write(ready_path)
+
+    assert wait_for_worker_ready(
+        ready_path,
+        generation=generation,
+        token=token,
+        expected_worker=shim,
+        expected_child_executable=real_worker.executable,
+        child_alive=lambda: True,
+        identity_lookup=lambda pid: real_worker if pid == real_worker.pid else shim,
+        parent_lookup=lambda pid: shim.pid if pid == real_worker.pid else None,
+        cmdline_lookup=lambda pid: (
+            shim.executable,
+            "-m",
+            "literature_workbench.launcher",
+            "_worker",
+            generation,
+            token,
+        ),
+        timeout_seconds=0.1,
+    ) == real_worker
+
+
+@pytest.mark.parametrize("fault", ["indirect_child", "extra_argument"])
+def test_worker_ready_rejects_unproven_venv_child_identity(
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    ready_path = tmp_path / "worker-ready.json"
+    shim = ProcessIdentity(50616, 20.5, r"D:\venv\Scripts\python.exe")
+    real_worker = ProcessIdentity(47168, 21.5, r"C:\Python312\python.exe")
+    generation = "generation"
+    token = "t" * 43
+    WorkerReady(generation, token, real_worker).write(ready_path)
+    command = (
+        shim.executable,
+        "-m",
+        "literature_workbench.launcher",
+        "_worker",
+        generation,
+        token,
+    )
+    if fault == "extra_argument":
+        command += ("unexpected",)
+
+    with pytest.raises(RuntimeError, match="worker_ready_timeout"):
+        wait_for_worker_ready(
+            ready_path,
+            generation=generation,
+            token=token,
+            expected_worker=shim,
+            expected_child_executable=real_worker.executable,
+            child_alive=lambda: True,
+            identity_lookup=lambda pid: real_worker,
+            parent_lookup=lambda pid: 999 if fault == "indirect_child" else shim.pid,
+            cmdline_lookup=lambda pid: command,
+            timeout_seconds=0.01,
+        )
+
+
+def test_supervisor_manifests_real_worker_and_cleans_real_then_shim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = ProcessIdentity(101, 10.5, r"C:\Python312\pythonw.exe")
+    shim = ProcessIdentity(50616, 20.5, r"D:\venv\Scripts\python.exe")
+    real_worker = ProcessIdentity(47168, 21.5, r"C:\Python312\python.exe")
+    manifests: list[RuntimeManifest] = []
+    cleanup: list[tuple[str, ProcessIdentity | None]] = []
+
+    class FakeEvent:
+        def wait(self, timeout: float) -> bool:
+            return False
+
+    class FakeServer:
+        should_exit = False
+
+        def run(self) -> None:
+            return None
+
+    class FakeProcess:
+        pid = shim.pid
+
+        def poll(self) -> int:
+            return 1
+
+    monkeypatch.setattr(launcher_module, "Event", FakeEvent)
+    monkeypatch.setattr(launcher_module, "recover_exact_stale_worker", lambda _: False)
+    monkeypatch.setattr(launcher_module, "_wait_worker_lock_available", lambda _: None)
+    monkeypatch.setattr(launcher_module, "_choose_port", lambda: 58380)
+    monkeypatch.setattr(launcher_module, "create_desktop_app", lambda *args: object())
+    monkeypatch.setattr(launcher_module.uvicorn, "Config", lambda *args, **kwargs: object())
+    monkeypatch.setattr(launcher_module.uvicorn, "Server", lambda _: FakeServer())
+    monkeypatch.setattr(launcher_module, "lookup_process_identity", lambda pid: supervisor)
+    monkeypatch.setattr(launcher_module, "_wait_until_healthy", lambda *args: None)
+    monkeypatch.setattr(launcher_module, "_spawn_worker", lambda *args: FakeProcess())
+    monkeypatch.setattr(launcher_module, "_wait_for_identity", lambda pid: shim)
+    monkeypatch.setattr(
+        launcher_module,
+        "wait_for_worker_ready",
+        lambda *args, **kwargs: real_worker,
+    )
+    monkeypatch.setattr(
+        launcher_module,
+        "_write_manifest",
+        lambda path, manifest: manifests.append(manifest),
+    )
+    monkeypatch.setattr(
+        launcher_module,
+        "_stop_exact_identity",
+        lambda identity: cleanup.append(("real", identity)),
+    )
+    monkeypatch.setattr(
+        launcher_module,
+        "_stop_exact_process",
+        lambda process, identity: cleanup.append(("shim", identity)),
+    )
+    monkeypatch.setattr(launcher_module, "_stop_owned_qwen", lambda _: None)
+
+    with pytest.raises(RuntimeError, match="worker_exited"):
+        launcher_module.run_supervisor(
+            AppSettings(data_root=tmp_path / "isolated-data"),
+            tmp_path / "unused-dist",
+            browser_open=lambda _: None,
+        )
+
+    assert manifests[0].worker == real_worker
+    assert cleanup == [("real", real_worker), ("shim", shim)]
+
+
 def test_stop_waits_for_exact_processes_manifest_and_locks_before_success(
     tmp_path: Path,
 ) -> None:

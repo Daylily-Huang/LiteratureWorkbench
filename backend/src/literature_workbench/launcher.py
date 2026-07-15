@@ -222,6 +222,8 @@ class WorkerReady:
 
 
 IdentityLookup = Callable[[int], ProcessIdentity | None]
+ParentLookup = Callable[[int], int | None]
+CommandLineLookup = Callable[[int], tuple[str, ...] | None]
 HealthProbe = Callable[[str], bool]
 ControlRequest = Callable[[int, str, str], str]
 BrowserOpen = Callable[[str], object]
@@ -245,6 +247,20 @@ def lookup_process_identity(pid: int) -> ProcessIdentity | None:
     try:
         process = psutil.Process(pid)
         return ProcessIdentity(process.pid, process.create_time(), process.exe())
+    except (psutil.Error, OSError):
+        return None
+
+
+def lookup_parent_pid(pid: int) -> int | None:
+    try:
+        return int(psutil.Process(pid).ppid())
+    except (psutil.Error, OSError):
+        return None
+
+
+def lookup_command_line(pid: int) -> tuple[str, ...] | None:
+    try:
+        return tuple(psutil.Process(pid).cmdline())
     except (psutil.Error, OSError):
         return None
 
@@ -563,6 +579,12 @@ def _worker_python() -> str:
     return str(current)
 
 
+def _worker_runtime_python() -> str:
+    worker = Path(_worker_python())
+    base = Path(getattr(sys, "_base_executable", worker))
+    return str(base.with_name(worker.name))
+
+
 def _spawn_worker(
     log_path: Path, generation: str, token: str
 ) -> subprocess.Popen[bytes]:
@@ -603,7 +625,11 @@ def wait_for_worker_ready(
     generation: str,
     token: str,
     expected_worker: ProcessIdentity,
+    expected_child_executable: str | None = None,
     child_alive: Callable[[], bool],
+    identity_lookup: IdentityLookup = lookup_process_identity,
+    parent_lookup: ParentLookup = lookup_parent_pid,
+    cmdline_lookup: CommandLineLookup = lookup_command_line,
     timeout_seconds: float = 15.0,
 ) -> ProcessIdentity:
     deadline = time.monotonic() + timeout_seconds
@@ -616,12 +642,31 @@ def wait_for_worker_ready(
         except (OSError, json.JSONDecodeError, ValueError):
             time.sleep(0.05)
             continue
-        if (
-            hmac.compare_digest(ready.generation, generation)
-            and hmac.compare_digest(ready.token, token)
-            and _same_identity(expected_worker, ready.worker)
+        if hmac.compare_digest(ready.generation, generation) and hmac.compare_digest(
+            ready.token, token
         ):
-            return ready.worker
+            if _same_identity(expected_worker, ready.worker):
+                return ready.worker
+            actual = identity_lookup(ready.worker.pid)
+            command = cmdline_lookup(ready.worker.pid)
+            if (
+                expected_child_executable is not None
+                and _same_identity(ready.worker, actual)
+                and parent_lookup(ready.worker.pid) == expected_worker.pid
+                and _same_executable(ready.worker.executable, expected_child_executable)
+                and command is not None
+                and len(command) == 6
+                and _same_executable(command[0], expected_worker.executable)
+                and command[1:5]
+                == (
+                    "-m",
+                    "literature_workbench.launcher",
+                    "_worker",
+                    generation,
+                )
+                and hmac.compare_digest(command[5], token)
+            ):
+                return ready.worker
         time.sleep(0.05)
     raise RuntimeError("worker_ready_timeout")
 
@@ -671,6 +716,21 @@ def _stop_exact_process(
         process.terminate()
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
+        if _same_identity(expected, lookup_process_identity(expected.pid)):
+            process.kill()
+            process.wait(timeout=5)
+    except (OSError, psutil.Error):
+        return
+
+
+def _stop_exact_identity(expected: ProcessIdentity) -> None:
+    if not _same_identity(expected, lookup_process_identity(expected.pid)):
+        return
+    try:
+        process = psutil.Process(expected.pid)
+        process.terminate()
+        process.wait(timeout=5)
+    except psutil.TimeoutExpired:
         if _same_identity(expected, lookup_process_identity(expected.pid)):
             process.kill()
             process.wait(timeout=5)
@@ -730,6 +790,7 @@ def run_supervisor(
     )
     server_thread = Thread(target=server.run, name="literature-workbench-api", daemon=True)
     worker: subprocess.Popen[bytes] | None = None
+    worker_launcher_identity: ProcessIdentity | None = None
     worker_identity: ProcessIdentity | None = None
     supervisor_identity = lookup_process_identity(os.getpid())
     if supervisor_identity is None:
@@ -739,12 +800,13 @@ def run_supervisor(
         _wait_until_healthy(port, server_thread)
         WorkerBootstrap(generation, worker_token, supervisor_identity).write(bootstrap_path)
         worker = _spawn_worker(runtime_dir / "worker.log", generation, worker_token)
-        worker_identity = _wait_for_identity(worker.pid)
-        wait_for_worker_ready(
+        worker_launcher_identity = _wait_for_identity(worker.pid)
+        worker_identity = wait_for_worker_ready(
             ready_path,
             generation=generation,
             token=worker_token,
-            expected_worker=worker_identity,
+            expected_worker=worker_launcher_identity,
+            expected_child_executable=_worker_runtime_python(),
             child_alive=lambda: worker is not None and worker.poll() is None,
         )
         ready_path.unlink(missing_ok=True)
@@ -766,7 +828,13 @@ def run_supervisor(
         server.should_exit = True
         server_thread.join(timeout=10)
         if worker is not None:
-            _stop_exact_process(worker, worker_identity)
+            if (
+                worker_identity is not None
+                and worker_launcher_identity is not None
+                and not _same_identity(worker_launcher_identity, worker_identity)
+            ):
+                _stop_exact_identity(worker_identity)
+            _stop_exact_process(worker, worker_launcher_identity)
         qwen_cleanup_failed = False
         try:
             _stop_owned_qwen(settings.qwen_runtime_dir)
