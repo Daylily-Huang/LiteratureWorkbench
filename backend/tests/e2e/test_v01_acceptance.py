@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import fitz  # type: ignore[import-untyped]
 import pytest
 
 from literature_workbench.db.database import Database
@@ -14,6 +17,7 @@ from literature_workbench.features.egress.gateway import EgressRejected
 from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.features.library.scanner import LibraryScanner
 from literature_workbench.features.settings.repository import SettingsRepository
+from literature_workbench.features.parser.worker import ParseWorkerService
 from literature_workbench.features.translation.repository import (
     SelectionRejected,
     TranslationRepository,
@@ -23,6 +27,7 @@ from literature_workbench.features.translation.service import (
     TranslationService,
 )
 from literature_workbench.platform.windows.filesystem import SafeWindowsFileInspector
+from literature_workbench.worker import Worker, parser_job_handlers
 
 
 @dataclass(slots=True)
@@ -93,12 +98,17 @@ def test_v01_isolated_library_translation_fallback_cache_and_restart(tmp_path: P
     data_root = tmp_path / "data"
     library_root = tmp_path / "library"
     library_root.mkdir()
-    (library_root / "paper.pdf").write_bytes(b"%PDF-1.7\nacceptance\n%%EOF")
+    pdf_path = library_root / "paper.pdf"
+    generated = fitz.open()
+    page = generated.new_page()
+    page.insert_text((72, 72), "Alpha selected words gamma delta")
+    generated.save(pdf_path)
+    generated.close()
     (library_root / "notes.txt").write_text("must never leave this machine", encoding="utf-8")
     database = Database.open(data_root / "db" / "literature-workbench.sqlite3")
     run_migrations(database)
     queue = TaskQueue(database, _clock)
-    repository = LibraryRepository(database, queue)
+    repository = LibraryRepository(database)
     inspector = SafeWindowsFileInspector()
     library = repository.register(
         inspector.inspect_root_directory(library_root),
@@ -111,8 +121,26 @@ def test_v01_isolated_library_translation_fallback_cache_and_restart(tmp_path: P
 
     assert summary.pdf_paths == 1
     assert summary.unsupported_paths == 1
-    run_id = str(uuid4())
-    now = _clock().isoformat()
+    parser = ParseWorkerService(
+        database,
+        inspector,
+        data_root,
+        reconcile=scanner.reconcile_path,
+    )
+    with database.transaction() as connection:
+        queued_parse = connection.execute(
+            "SELECT id,payload_json FROM jobs WHERE kind='parse_pdf' AND status='queued'"
+        ).fetchone()
+        assert queued_parse is not None
+        payload = json.loads(queued_parse["payload_json"])
+        payload["strategy"] = "pymupdf"
+        connection.execute(
+            "UPDATE jobs SET payload_json=? WHERE id=?",
+            (json.dumps(payload, sort_keys=True), queued_parse["id"]),
+        )
+    assert asyncio.run(
+        Worker(queue, "acceptance-parser", parser_job_handlers(parser)).run_once()
+    )
     with database.transaction() as connection:
         row = connection.execute(
             """
@@ -122,31 +150,19 @@ def test_v01_isolated_library_translation_fallback_cache_and_restart(tmp_path: P
             """
         ).fetchone()
         assert row is not None
-        connection.execute(
+        parsed = connection.execute(
             """
-            INSERT INTO parse_runs(
-              id,content_sha256,parser_name,parser_version,status,created_at,updated_at,
-              completed_at) VALUES(?,?,'pymupdf','acceptance','completed',?,?,?)
+            SELECT p.raw_text,r.status,r.parser_name
+            FROM contents c JOIN parse_runs r ON r.id=c.current_parse_run_id
+            JOIN pages p ON p.parse_run_id=r.id AND p.content_sha256=c.sha256
+            WHERE c.sha256=? AND p.physical_page=1
             """,
-            (run_id, row["content_sha256"], now, now, now),
-        )
-        connection.execute(
-            """
-            INSERT INTO pages(
-              content_sha256,page_index,physical_page,parse_run_id,normalized_text,raw_text,
-              width_points,height_points,blocks_json,coordinate_reliable)
-            VALUES(?,0,1,?,'Alpha selected words gamma delta',
-                   'Alpha selected words gamma delta',612,792,'[]',1)
-            """,
-            (row["content_sha256"], run_id),
-        )
-        connection.execute(
-            "UPDATE contents SET current_parse_run_id=?,status='completed' WHERE sha256=?",
-            (run_id, row["content_sha256"]),
-        )
-        connection.execute(
-            "UPDATE documents SET status='valid_pdf' WHERE id=?", (row["document_id"],)
-        )
+            (row["content_sha256"],),
+        ).fetchone()
+        assert parsed is not None
+        assert parsed["status"] == "completed"
+        assert parsed["parser_name"] == "pymupdf"
+        assert "Alpha selected words gamma delta" in parsed["raw_text"]
         unsupported = connection.execute(
             "SELECT content_sha256,status FROM documents WHERE display_name='notes.txt'"
         ).fetchone()
@@ -174,12 +190,18 @@ def test_v01_isolated_library_translation_fallback_cache_and_restart(tmp_path: P
     assert completed.fallback_reason == "deepseek_total_timeout"
     assert len(transient.calls) == len(qwen.calls) == qwen_process.calls == 1
 
+    database_path = database.path
+    del service, fallback, database, queue, repository, scanner, parser
+    reopened_database = Database.open(database_path)
+    run_migrations(reopened_database)
     restarted_deepseek = FakeDeepSeek(result="must not be called")
-    restarted = _service(database, restarted_deepseek, FakeQwen(), FakeQwenProcess())
+    restarted = _service(
+        reopened_database, restarted_deepseek, FakeQwen(), FakeQwenProcess()
+    )
     after_restart = restarted.submit("session-b", _request(row, "selected words"))
     assert restarted.process_task(after_restart.id).translated_text == "DeepSeek 译文"
     assert restarted_deepseek.calls == []
-    with database.connect() as connection:
+    with reopened_database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 2
 
     with pytest.raises(SelectionRejected, match="selection_not_current"):

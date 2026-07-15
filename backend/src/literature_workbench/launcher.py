@@ -11,13 +11,12 @@ import subprocess
 import sys
 import time
 import webbrowser
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
 from typing import cast
-from uuid import uuid4
 
 import httpx
 import psutil  # type: ignore[import-untyped]
@@ -61,6 +60,9 @@ _CONTROL_BOOTSTRAP = "/__literature_workbench/bootstrap"
 _CONTROL_STOP = "/__literature_workbench/stop"
 _MANIFEST_NAME = "launcher.json"
 _LOCK_NAME = "launcher.lock"
+_WORKER_LOCK_NAME = "worker.lock"
+_WORKER_BOOTSTRAP_NAME = "worker-bootstrap.json"
+_WORKER_READY_NAME = "worker-ready.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,15 +105,17 @@ class RuntimeManifest:
     supervisor: ProcessIdentity
     worker: ProcessIdentity
     control_token: str
+    generation: str
 
     def to_json(self) -> dict[str, object]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "host": "127.0.0.1",
             "port": self.port,
             "supervisor": self.supervisor.to_json(),
             "worker": self.worker.to_json(),
             "control_token": self.control_token,
+            "generation": self.generation,
         }
 
     @classmethod
@@ -121,8 +125,12 @@ class RuntimeManifest:
         raw = cast(dict[str, object], value)
         port = raw.get("port")
         token = raw.get("control_token")
+        schema_version = raw.get("schema_version")
+        generation = raw.get("generation")
+        if schema_version == 1 and generation is None:
+            generation = "legacy-worker-generation"
         if (
-            raw.get("schema_version") != 1
+            schema_version not in {1, 2}
             or raw.get("host") != "127.0.0.1"
             or not isinstance(port, int)
             or isinstance(port, bool)
@@ -130,6 +138,8 @@ class RuntimeManifest:
             or port > 65535
             or not isinstance(token, str)
             or len(token) < 32
+            or not isinstance(generation, str)
+            or not generation
         ):
             raise ValueError("launcher_manifest_invalid")
         return cls(
@@ -137,13 +147,85 @@ class RuntimeManifest:
             supervisor=ProcessIdentity.from_json(raw.get("supervisor")),
             worker=ProcessIdentity.from_json(raw.get("worker")),
             control_token=token,
+            generation=generation,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerBootstrap:
+    generation: str
+    token: str
+    parent: ProcessIdentity
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "generation": self.generation,
+            "token": self.token,
+            "parent": self.parent.to_json(),
+        }
+
+    def write(self, path: Path) -> None:
+        _write_json_atomic(path, self.to_json())
+
+    @classmethod
+    def from_json(cls, value: object) -> WorkerBootstrap:
+        if not isinstance(value, dict):
+            raise ValueError("worker_bootstrap_invalid")
+        raw = cast(dict[str, object], value)
+        generation = raw.get("generation")
+        token = raw.get("token")
+        if (
+            raw.get("schema_version") != 1
+            or not isinstance(generation, str)
+            or not generation
+            or not isinstance(token, str)
+            or len(token) < 32
+        ):
+            raise ValueError("worker_bootstrap_invalid")
+        return cls(generation, token, ProcessIdentity.from_json(raw.get("parent")))
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerReady:
+    generation: str
+    token: str
+    worker: ProcessIdentity
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "generation": self.generation,
+            "token": self.token,
+            "worker": self.worker.to_json(),
+        }
+
+    def write(self, path: Path) -> None:
+        _write_json_atomic(path, self.to_json())
+
+    @classmethod
+    def from_json(cls, value: object) -> WorkerReady:
+        if not isinstance(value, dict):
+            raise ValueError("worker_ready_invalid")
+        raw = cast(dict[str, object], value)
+        generation = raw.get("generation")
+        token = raw.get("token")
+        if (
+            raw.get("schema_version") != 1
+            or not isinstance(generation, str)
+            or not generation
+            or not isinstance(token, str)
+            or len(token) < 32
+        ):
+            raise ValueError("worker_ready_invalid")
+        return cls(generation, token, ProcessIdentity.from_json(raw.get("worker")))
 
 
 IdentityLookup = Callable[[int], ProcessIdentity | None]
 HealthProbe = Callable[[str], bool]
 ControlRequest = Callable[[int, str, str], str]
 BrowserOpen = Callable[[str], object]
+WaitForExit = Callable[[ProcessIdentity, float], bool]
 
 
 def _same_executable(left: str, right: str) -> bool:
@@ -176,10 +258,48 @@ def _read_manifest(path: Path) -> RuntimeManifest:
 
 
 def _write_manifest(path: Path, manifest: RuntimeManifest) -> None:
+    _write_json_atomic(path, manifest.to_json())
+
+
+def _write_json_atomic(path: Path, value: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(manifest.to_json(), sort_keys=True), encoding="utf-8")
+    temporary.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
     temporary.replace(path)
+
+
+def _read_json(path: Path, missing_code: str, invalid_code: str) -> object:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise RuntimeError(missing_code) from None
+    except (OSError, json.JSONDecodeError):
+        raise RuntimeError(invalid_code) from None
+
+
+def consume_worker_bootstrap(
+    path: Path,
+    *,
+    generation: str,
+    token: str,
+    identity_lookup: IdentityLookup = lookup_process_identity,
+) -> WorkerBootstrap:
+    loaded = _read_json(path, "worker_bootstrap_missing", "worker_bootstrap_invalid")
+    try:
+        bootstrap = WorkerBootstrap.from_json(loaded)
+    except ValueError:
+        raise RuntimeError("worker_bootstrap_invalid") from None
+    if not hmac.compare_digest(bootstrap.generation, generation) or not hmac.compare_digest(
+        bootstrap.token, token
+    ):
+        raise RuntimeError("worker_bootstrap_capability_invalid")
+    if not _same_identity(bootstrap.parent, identity_lookup(bootstrap.parent.pid)):
+        raise RuntimeError("worker_parent_invalid")
+    try:
+        path.unlink()
+    except OSError:
+        raise RuntimeError("worker_bootstrap_consume_failed") from None
+    return bootstrap
 
 
 def _health_probe(url: str) -> bool:
@@ -249,6 +369,8 @@ def stop_running_instance(
     identity_lookup: IdentityLookup = lookup_process_identity,
     health_probe: HealthProbe = _health_probe,
     control_request: ControlRequest = _control_request,
+    locks_released: Callable[[Path], bool] | None = None,
+    timeout_seconds: float = 15.0,
 ) -> bool:
     try:
         manifest = _read_manifest(manifest_path)
@@ -259,9 +381,81 @@ def stop_running_instance(
         if not health_probe(f"http://127.0.0.1:{manifest.port}/api/health"):
             return False
         control_request(manifest.port, manifest.control_token, "stop")
-        return True
+        lock_probe = locks_released or _runtime_locks_released
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            supervisor_gone = not _same_identity(
+                manifest.supervisor, identity_lookup(manifest.supervisor.pid)
+            )
+            worker_gone = not _same_identity(
+                manifest.worker, identity_lookup(manifest.worker.pid)
+            )
+            if (
+                supervisor_gone
+                and worker_gone
+                and not manifest_path.exists()
+                and lock_probe(manifest_path.parent)
+            ):
+                return True
+            time.sleep(0.05)
+        return False
     except (OSError, ValueError, httpx.HTTPError):
         return False
+
+
+def _runtime_locks_released(runtime_dir: Path) -> bool:
+    acquired: list[FileLock] = []
+    try:
+        for name in (_LOCK_NAME, _WORKER_LOCK_NAME):
+            lock = FileLock(runtime_dir / name)
+            lock.acquire(timeout=0)
+            acquired.append(lock)
+        return True
+    except Timeout:
+        return False
+    finally:
+        for lock in reversed(acquired):
+            lock.release()
+
+
+def _wait_for_process_exit(identity: ProcessIdentity, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if not _same_identity(identity, lookup_process_identity(identity.pid)):
+            return True
+        time.sleep(0.05)
+    return not _same_identity(identity, lookup_process_identity(identity.pid))
+
+
+def _terminate_pid(pid: int) -> None:
+    psutil.Process(pid).terminate()
+
+
+def recover_exact_stale_worker(
+    manifest_path: Path,
+    *,
+    identity_lookup: IdentityLookup = lookup_process_identity,
+    stopper: Callable[[int], None] = _terminate_pid,
+    wait_for_exit: WaitForExit = _wait_for_process_exit,
+) -> bool:
+    try:
+        manifest = _read_manifest(manifest_path)
+    except ValueError:
+        return False
+    if _same_identity(manifest.supervisor, identity_lookup(manifest.supervisor.pid)):
+        return False
+    actual_worker = identity_lookup(manifest.worker.pid)
+    if not _same_identity(manifest.worker, actual_worker):
+        manifest_path.unlink(missing_ok=True)
+        return False
+    try:
+        stopper(manifest.worker.pid)
+    except (OSError, psutil.Error):
+        return False
+    if not wait_for_exit(manifest.worker, 10.0):
+        return False
+    manifest_path.unlink(missing_ok=True)
+    return True
 
 
 def merge_worker_handlers(
@@ -311,6 +505,8 @@ def create_desktop_app(
     @app.post(_CONTROL_BOOTSTRAP, include_in_schema=False)
     def launcher_bootstrap(x_lw_control: str | None = Header(default=None)) -> dict[str, str]:
         require_control(x_lw_control)
+        if stop_event.is_set():
+            raise HTTPException(status_code=409, detail="launcher_stopping")
         return {"token": session.issue_bootstrap_token()}
 
     @app.post(_CONTROL_STOP, status_code=204, include_in_schema=False)
@@ -363,7 +559,9 @@ def _worker_python() -> str:
     return str(current)
 
 
-def _spawn_worker(settings: AppSettings, log_path: Path) -> subprocess.Popen[bytes]:
+def _spawn_worker(
+    log_path: Path, generation: str, token: str
+) -> subprocess.Popen[bytes]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log = log_path.open("ab")
     try:
@@ -372,9 +570,9 @@ def _spawn_worker(settings: AppSettings, log_path: Path) -> subprocess.Popen[byt
                 _worker_python(),
                 "-m",
                 "literature_workbench.launcher",
-                "worker",
-                "--data-root",
-                str(settings.data_root),
+                "_worker",
+                generation,
+                token,
             ],
             stdin=subprocess.DEVNULL,
             stdout=log,
@@ -393,6 +591,71 @@ def _wait_for_identity(pid: int, timeout_seconds: float = 5.0) -> ProcessIdentit
             return identity
         time.sleep(0.05)
     raise RuntimeError("worker_identity_unavailable")
+
+
+def wait_for_worker_ready(
+    path: Path,
+    *,
+    generation: str,
+    token: str,
+    expected_worker: ProcessIdentity,
+    child_alive: Callable[[], bool],
+    timeout_seconds: float = 15.0,
+) -> ProcessIdentity:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if not child_alive():
+            raise RuntimeError("worker_initialization_failed")
+        try:
+            loaded: object = json.loads(path.read_text(encoding="utf-8"))
+            ready = WorkerReady.from_json(loaded)
+        except (OSError, json.JSONDecodeError, ValueError):
+            time.sleep(0.05)
+            continue
+        if (
+            hmac.compare_digest(ready.generation, generation)
+            and hmac.compare_digest(ready.token, token)
+            and _same_identity(expected_worker, ready.worker)
+        ):
+            return ready.worker
+        time.sleep(0.05)
+    raise RuntimeError("worker_ready_timeout")
+
+
+async def run_worker_until_parent_exit(
+    worker: Worker,
+    parent: ProcessIdentity,
+    *,
+    identity_lookup: IdentityLookup = lookup_process_identity,
+    signal_ready: Callable[[], None],
+    poll_interval: float = 0.25,
+) -> None:
+    task = asyncio.create_task(worker.run_forever())
+    await asyncio.sleep(0)
+    if task.done():
+        await task
+        raise RuntimeError("worker_run_loop_failed")
+    signal_ready()
+    try:
+        while _same_identity(parent, identity_lookup(parent.pid)):
+            if task.done():
+                await task
+                raise RuntimeError("worker_run_loop_failed")
+            await asyncio.sleep(poll_interval)
+    finally:
+        worker.stop()
+        await task
+
+
+def _wait_worker_lock_available(path: Path, timeout_seconds: float = 15.0) -> None:
+    lock = FileLock(path)
+    try:
+        lock.acquire(timeout=timeout_seconds)
+    except Timeout:
+        raise RuntimeError("worker_lock_held") from None
+    finally:
+        if lock.is_locked:
+            lock.release()
 
 
 def _stop_exact_process(
@@ -432,8 +695,15 @@ def run_supervisor(
     runtime_dir = settings.data_root / "runtime" / "launcher"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = runtime_dir / _MANIFEST_NAME
+    worker_lock_path = runtime_dir / _WORKER_LOCK_NAME
+    bootstrap_path = runtime_dir / _WORKER_BOOTSTRAP_NAME
+    ready_path = runtime_dir / _WORKER_READY_NAME
+    recover_exact_stale_worker(manifest_path)
+    _wait_worker_lock_available(worker_lock_path)
     stop_event = Event()
     control_token = secrets.token_urlsafe(32)
+    worker_token = secrets.token_urlsafe(32)
+    generation = secrets.token_urlsafe(24)
     session = LocalSession()
     port = _choose_port()
     app = create_desktop_app(settings, session, control_token, stop_event, web_dist)
@@ -450,19 +720,29 @@ def run_supervisor(
     server_thread = Thread(target=server.run, name="literature-workbench-api", daemon=True)
     worker: subprocess.Popen[bytes] | None = None
     worker_identity: ProcessIdentity | None = None
+    supervisor_identity = lookup_process_identity(os.getpid())
+    if supervisor_identity is None:
+        raise RuntimeError("supervisor_identity_unavailable")
     server_thread.start()
     try:
         _wait_until_healthy(port, server_thread)
-        worker = _spawn_worker(settings, runtime_dir / "worker.log")
+        WorkerBootstrap(generation, worker_token, supervisor_identity).write(bootstrap_path)
+        worker = _spawn_worker(runtime_dir / "worker.log", generation, worker_token)
         worker_identity = _wait_for_identity(worker.pid)
-        supervisor_identity = lookup_process_identity(os.getpid())
-        if supervisor_identity is None:
-            raise RuntimeError("supervisor_identity_unavailable")
+        wait_for_worker_ready(
+            ready_path,
+            generation=generation,
+            token=worker_token,
+            expected_worker=worker_identity,
+            child_alive=lambda: worker is not None and worker.poll() is None,
+        )
+        ready_path.unlink(missing_ok=True)
         manifest = RuntimeManifest(
             port=port,
             supervisor=supervisor_identity,
             worker=worker_identity,
             control_token=control_token,
+            generation=generation,
         )
         _write_manifest(manifest_path, manifest)
         browser_open(
@@ -480,19 +760,44 @@ def run_supervisor(
             QwenProcessManager(settings.qwen_runtime_dir).stop_owned()
         except QwenProcessError:
             pass
+        bootstrap_path.unlink(missing_ok=True)
+        ready_path.unlink(missing_ok=True)
         manifest_path.unlink(missing_ok=True)
 
 
-def run_worker(settings: AppSettings) -> None:
-    database = Database.open(settings.database_path)
-    run_migrations(database)
-    def queue_clock() -> datetime:
-        return datetime.now(UTC)
-    queue = TaskQueue(database, queue_clock)
-    inspector = SafeWindowsFileInspector()
-    trusted_root = TrustedImportRoot.create(settings.data_root)
-    qwen_process = QwenProcessManager(settings.qwen_runtime_dir)
+def run_bound_worker(
+    settings: AppSettings,
+    generation: str,
+    token: str,
+    *,
+    identity_lookup: IdentityLookup = lookup_process_identity,
+) -> None:
+    runtime_dir = settings.data_root / "runtime" / "launcher"
+    bootstrap = consume_worker_bootstrap(
+        runtime_dir / _WORKER_BOOTSTRAP_NAME,
+        generation=generation,
+        token=token,
+        identity_lookup=identity_lookup,
+    )
+    worker_lock = FileLock(runtime_dir / _WORKER_LOCK_NAME)
     try:
+        worker_lock.acquire(timeout=0)
+    except Timeout:
+        raise RuntimeError("worker_already_running") from None
+    trusted_root: TrustedImportRoot | None = None
+    qwen_process: QwenProcessManager | None = None
+    ready_path = runtime_dir / _WORKER_READY_NAME
+    try:
+        database = Database.open(settings.database_path)
+        run_migrations(database)
+
+        def queue_clock() -> datetime:
+            return datetime.now(UTC)
+
+        queue = TaskQueue(database, queue_clock)
+        inspector = SafeWindowsFileInspector()
+        trusted_root = TrustedImportRoot.create(settings.data_root)
+        qwen_process = QwenProcessManager(settings.qwen_runtime_dir)
         library_repository = LibraryRepository(database, queue)
         scanner = LibraryScanner(
             database,
@@ -518,23 +823,41 @@ def run_worker(settings: AppSettings) -> None:
             DeepSeekGateway(
                 database,
                 secret_store,
-                process_generation=str(uuid4()),
+                process_generation=generation,
             ),
             QwenLocalClient(),
             qwen_process,
         )
         worker = Worker(
             queue,
-            f"desktop-worker-{uuid4()}",
+            f"desktop-worker-{generation}",
             merge_worker_handlers(scanner, import_validator, parser, translation),
         )
-        asyncio.run(worker.run_forever())
+        worker_identity = identity_lookup(os.getpid())
+        if worker_identity is None:
+            raise RuntimeError("worker_identity_unavailable")
+
+        def signal_ready() -> None:
+            WorkerReady(generation, token, worker_identity).write(ready_path)
+
+        asyncio.run(
+            run_worker_until_parent_exit(
+                worker,
+                bootstrap.parent,
+                identity_lookup=identity_lookup,
+                signal_ready=signal_ready,
+            )
+        )
     finally:
-        try:
-            qwen_process.stop_owned()
-        except QwenProcessError:
-            pass
-        trusted_root.close()
+        ready_path.unlink(missing_ok=True)
+        if qwen_process is not None:
+            try:
+                qwen_process.stop_owned()
+            except QwenProcessError:
+                pass
+        if trusted_root is not None:
+            trusted_root.close()
+        worker_lock.release()
 
 
 def _runtime_paths(settings: AppSettings) -> tuple[Path, Path]:
@@ -546,15 +869,17 @@ def start(settings: AppSettings, web_dist: Path) -> None:
     lock_path, manifest_path = _runtime_paths(settings)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock = FileLock(lock_path)
-    try:
-        lock.acquire(timeout=0)
-    except Timeout:
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
+    deadline = time.monotonic() + 15
+    while True:
+        try:
+            lock.acquire(timeout=0)
+            break
+        except Timeout:
             if reuse_running_instance(manifest_path):
                 return
+            if time.monotonic() >= deadline:
+                raise RuntimeError("existing_instance_unhealthy") from None
             time.sleep(0.1)
-        raise RuntimeError("existing_instance_unhealthy") from None
     try:
         run_supervisor(settings, web_dist)
     finally:
@@ -565,27 +890,31 @@ def _project_web_dist() -> Path:
     return Path(__file__).resolve().parents[3] / "web" / "dist"
 
 
-def main() -> None:
-    if sys.platform != "win32":
-        raise SystemExit("Literature Workbench launcher supports Windows only")
+def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="literature-workbench")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    start_parser = subparsers.add_parser("start")
-    start_parser.add_argument("--data-root", type=Path, default=AppSettings().data_root)
-    stop_parser = subparsers.add_parser("stop")
-    stop_parser.add_argument("--data-root", type=Path, default=AppSettings().data_root)
-    worker_parser = subparsers.add_parser("worker")
-    worker_parser.add_argument("--data-root", type=Path, required=True)
-    args = parser.parse_args()
-    settings = AppSettings(data_root=args.data_root)
+    subparsers.add_parser("start")
+    subparsers.add_parser("stop")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    if sys.platform != "win32":
+        raise SystemExit("Literature Workbench launcher supports Windows only")
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["_worker"]:
+        if len(arguments) != 3 or len(arguments[1]) < 16 or len(arguments[2]) < 32:
+            raise SystemExit("invalid internal worker capability")
+        run_bound_worker(AppSettings(), arguments[1], arguments[2])
+        return
+    args = build_argument_parser().parse_args(arguments)
+    settings = AppSettings()
     if args.command == "start":
         start(settings, _project_web_dist())
-    elif args.command == "stop":
+    else:
         _, manifest_path = _runtime_paths(settings)
         if not stop_running_instance(manifest_path):
             raise SystemExit("No validated Literature Workbench instance is running")
-    else:
-        run_worker(settings)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
@@ -15,10 +16,17 @@ from literature_workbench.config import AppSettings
 from literature_workbench.launcher import (
     ProcessIdentity,
     RuntimeManifest,
+    WorkerReady,
+    build_argument_parser,
+    consume_worker_bootstrap,
     create_desktop_app,
     merge_worker_handlers,
+    recover_exact_stale_worker,
     reuse_running_instance,
+    run_worker_until_parent_exit,
     start,
+    stop_running_instance,
+    wait_for_worker_ready,
 )
 from literature_workbench.features.library.import_service import ImportValidator
 from literature_workbench.features.library.scanner import LibraryScanner
@@ -51,6 +59,7 @@ def test_second_launch_validates_exact_instance_and_opens_fresh_fragment_token(
         supervisor=ProcessIdentity(101, 10.5, r"C:\Python\pythonw.exe"),
         worker=ProcessIdentity(202, 11.5, r"C:\Python\python.exe"),
         control_token="local-control-token-32-bytes-minimum",
+        generation="test-generation",
     )
     manifest_path.write_text(json.dumps(manifest.to_json()), encoding="utf-8")
     looked_up: list[int] = []
@@ -92,6 +101,7 @@ def test_second_launch_refuses_stale_manifest_without_control_or_browser(
         supervisor=ProcessIdentity(101, 10.5, r"C:\Python\pythonw.exe"),
         worker=ProcessIdentity(202, 11.5, r"C:\Python\python.exe"),
         control_token="local-control-token-32-bytes-minimum",
+        generation="test-generation",
     )
     manifest_path.write_text(json.dumps(manifest.to_json()), encoding="utf-8")
     control_calls: list[object] = []
@@ -157,6 +167,10 @@ def test_launcher_app_serves_spa_and_protects_fresh_bootstrap_control(
             headers={"Origin": "http://testserver", "X-LW-Control": "c" * 43},
         ).status_code == 204
         assert stopped.is_set()
+        assert client.post(
+            _control_path("bootstrap"),
+            headers={"Origin": "http://testserver", "X-LW-Control": "c" * 43},
+        ).status_code == 409
 
 
 def _control_path(action: str) -> str:
@@ -199,3 +213,189 @@ def test_production_worker_handler_inventory_includes_translation() -> None:
         "parse_pdf",
         "translate_selection",
     }
+
+
+def test_public_cli_exposes_only_start_and_stop_and_rejects_data_root() -> None:
+    help_text = build_argument_parser().format_help()
+
+    assert "{start,stop}" in help_text
+    assert "worker" not in help_text
+    with pytest.raises(SystemExit):
+        build_argument_parser().parse_args(["start", "--data-root", "D:\\other"])
+    with pytest.raises(SystemExit):
+        build_argument_parser().parse_args(["stop", "--data-root", "D:\\other"])
+
+
+def test_internal_worker_without_runtime_capability_fails_before_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        launcher_module.Database,
+        "open",
+        lambda *_: pytest.fail("database must not open without a runtime capability"),
+    )
+    with pytest.raises(SystemExit, match="invalid internal worker capability"):
+        launcher_module.main(["_worker"])
+    with pytest.raises(RuntimeError, match="worker_bootstrap_missing"):
+        consume_worker_bootstrap(
+            tmp_path / "missing-bootstrap.json",
+            generation="generation",
+            token="untrusted-token",
+            identity_lookup=lambda _: pytest.fail("parent lookup must follow capability read"),
+        )
+
+
+def test_worker_monitors_exact_parent_identity_and_exits_when_parent_dies() -> None:
+    parent = ProcessIdentity(101, 10.5, r"C:\Python\pythonw.exe")
+
+    class FakeWorker:
+        stopped = False
+
+        async def run_forever(self) -> None:
+            while not self.stopped:
+                await asyncio.sleep(0)
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    worker = FakeWorker()
+    lookups = iter((parent, None))
+    ready: list[bool] = []
+
+    asyncio.run(
+        run_worker_until_parent_exit(
+            cast(object, worker),
+            parent,
+            identity_lookup=lambda _: next(lookups),
+            signal_ready=lambda: ready.append(True),
+            poll_interval=0,
+        )
+    )
+
+    assert ready == [True]
+    assert worker.stopped
+
+
+def test_dead_supervisor_recovers_only_exact_manifest_worker(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "launcher.json"
+    manifest = RuntimeManifest(
+        port=58380,
+        supervisor=ProcessIdentity(101, 10.5, r"C:\Python\pythonw.exe"),
+        worker=ProcessIdentity(202, 11.5, r"C:\Python\python.exe"),
+        control_token="c" * 43,
+        generation="old-generation",
+    )
+    manifest_path.write_text(json.dumps(manifest.to_json()), encoding="utf-8")
+    stopped: list[int] = []
+
+    assert recover_exact_stale_worker(
+        manifest_path,
+        identity_lookup=lambda pid: None if pid == 101 else manifest.worker,
+        stopper=stopped.append,
+        wait_for_exit=lambda identity, _: identity.pid == 202,
+    )
+    assert stopped == [202]
+
+    manifest_path.write_text(json.dumps(manifest.to_json()), encoding="utf-8")
+    unknown = ProcessIdentity(202, 999.0, manifest.worker.executable)
+    assert not recover_exact_stale_worker(
+        manifest_path,
+        identity_lookup=lambda pid: None if pid == 101 else unknown,
+        stopper=stopped.append,
+        wait_for_exit=lambda *_: True,
+    )
+    assert stopped == [202]
+
+
+def test_worker_ready_requires_exact_generation_token_and_child_identity(
+    tmp_path: Path,
+) -> None:
+    ready_path = tmp_path / "worker-ready.json"
+    worker = ProcessIdentity(202, 11.5, r"C:\Python\python.exe")
+    WorkerReady("generation", "t" * 43, worker).write(ready_path)
+
+    assert wait_for_worker_ready(
+        ready_path,
+        generation="generation",
+        token="t" * 43,
+        expected_worker=worker,
+        child_alive=lambda: True,
+        timeout_seconds=0.1,
+    ) == worker
+
+    WorkerReady("wrong-generation", "t" * 43, worker).write(ready_path)
+    with pytest.raises(RuntimeError, match="worker_ready_timeout"):
+        wait_for_worker_ready(
+            ready_path,
+            generation="generation",
+            token="t" * 43,
+            expected_worker=worker,
+            child_alive=lambda: True,
+            timeout_seconds=0.01,
+        )
+
+
+def test_stop_waits_for_exact_processes_manifest_and_locks_before_success(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / "runtime" / "launcher.json"
+    manifest_path.parent.mkdir()
+    manifest = RuntimeManifest(
+        port=58380,
+        supervisor=ProcessIdentity(101, 10.5, r"C:\Python\pythonw.exe"),
+        worker=ProcessIdentity(202, 11.5, r"C:\Python\python.exe"),
+        control_token="c" * 43,
+        generation="generation",
+    )
+    manifest_path.write_text(json.dumps(manifest.to_json()), encoding="utf-8")
+    stopped = False
+
+    def control(*_: object) -> str:
+        nonlocal stopped
+        stopped = True
+        manifest_path.unlink()
+        return "stopping"
+
+    def lookup(pid: int) -> ProcessIdentity | None:
+        if stopped:
+            return None
+        return manifest.supervisor if pid == 101 else manifest.worker
+
+    assert stop_running_instance(
+        manifest_path,
+        identity_lookup=lookup,
+        health_probe=lambda _: True,
+        control_request=control,
+        locks_released=lambda _: stopped,
+        timeout_seconds=0.1,
+    )
+
+
+def test_dying_instance_releases_lock_and_immediate_start_becomes_supervisor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class DyingLock:
+        attempts = 0
+
+        def acquire(self, timeout: int) -> None:
+            assert timeout == 0
+            self.attempts += 1
+            if self.attempts == 1:
+                raise Timeout("dying")
+
+        def release(self) -> None:
+            return None
+
+    lock = DyingLock()
+    launched: list[bool] = []
+    monkeypatch.setattr(launcher_module, "FileLock", lambda _: lock)
+    monkeypatch.setattr(launcher_module, "reuse_running_instance", lambda _: False)
+    monkeypatch.setattr(
+        launcher_module, "run_supervisor", lambda *_: launched.append(True)
+    )
+    monkeypatch.setattr(launcher_module.time, "sleep", lambda _: None)
+
+    start(AppSettings(data_root=tmp_path / "isolated-data"), tmp_path / "dist")
+
+    assert lock.attempts == 2
+    assert launched == [True]
