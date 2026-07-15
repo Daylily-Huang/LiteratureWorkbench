@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from literature_workbench.api.health import router as health_router
+from literature_workbench.api.imports import router as imports_router
 from literature_workbench.api.libraries import NativeFolderDialog
 from literature_workbench.api.libraries import router as libraries_router
 from literature_workbench.api.documents import router as documents_router
@@ -21,6 +22,8 @@ from literature_workbench.features.library.coordinator import LibraryScanCoordin
 from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.features.library.roots import LibraryRootService
 from literature_workbench.features.library.scanner import LibraryScanner
+from literature_workbench.features.library.import_intents import ImportIntentRepository
+from literature_workbench.features.library.import_service import ImportService, ImportValidator
 from literature_workbench.platform.windows.folder_dialog import FolderDialog
 from literature_workbench.platform.windows.filesystem import (
     SafeFileInspector,
@@ -69,6 +72,18 @@ def create_app(
         task_queue = TaskQueue(database, queue_clock)
         app.state.queue_clock = queue_clock
         app.state.task_queue = task_queue
+        import_repository = ImportIntentRepository(database, queue_clock)
+        import_repository.expire_pending()
+        app.state.import_intent_repository = import_repository
+        app.state.import_service = ImportService(
+            database,
+            import_repository,
+            resolved.data_root,
+            resolved_session.session_generation,
+            queue=task_queue,
+            now=queue_clock,
+        )
+        app.state.import_service.reconcile_stale_receiving()
         app.state.settings_service = SettingsService(
             SettingsRepository(database), resolved_secret_store
         )
@@ -85,6 +100,12 @@ def create_app(
             resolved_inspector,
             task_queue,
             coordinator=library_scan_coordinator,
+        )
+        app.state.import_validator = ImportValidator(
+            database,
+            task_queue,
+            resolved.data_root,
+            inspector=resolved_inspector,
         )
         if register_initial_library and library_repository.count() == 0:
             app.state.library_root_service.register_initial_approved_library()
@@ -113,4 +134,5 @@ def create_app(
     app.include_router(settings_router)
     app.include_router(libraries_router)
     app.include_router(documents_router)
+    app.include_router(imports_router)
     return app

@@ -6,6 +6,7 @@ from threading import Event, Lock, Thread
 
 from literature_workbench.db.task_queue import Job, LostLease, TaskQueue
 from literature_workbench.features.library.scanner import LibraryScanner
+from literature_workbench.features.library.import_service import ImportValidator
 
 
 class JobCancellation:
@@ -35,7 +36,9 @@ class JobCancellation:
 JobHandler = Callable[[Job, JobCancellation], Awaitable[None]]
 
 
-def library_job_handlers(scanner: LibraryScanner) -> Mapping[str, JobHandler]:
+def library_job_handlers(
+    scanner: LibraryScanner, import_validator: ImportValidator | None = None
+) -> Mapping[str, JobHandler]:
     async def scan_library(job: Job, cancellation: JobCancellation) -> None:
         raw_library_id = job.payload.get("library_id")
         if not isinstance(raw_library_id, str):
@@ -47,7 +50,20 @@ def library_job_handlers(scanner: LibraryScanner) -> Mapping[str, JobHandler]:
         await asyncio.to_thread(scanner.scan_library, library_id)
         cancellation.raise_if_cancelled()
 
-    return {"scan_library": scan_library}
+    async def validate_import(job: Job, cancellation: JobCancellation) -> None:
+        raw_intent_id = job.payload.get("intent_id")
+        if not isinstance(raw_intent_id, str) or import_validator is None:
+            raise ValueError("invalid_import_intent_id")
+        from uuid import UUID
+
+        cancellation.raise_if_cancelled()
+        await asyncio.to_thread(import_validator.validate_and_promote, UUID(raw_intent_id))
+        cancellation.raise_if_cancelled()
+
+    handlers: dict[str, JobHandler] = {"scan_library": scan_library}
+    if import_validator is not None:
+        handlers["validate_import"] = validate_import
+    return handlers
 
 
 class Worker:
