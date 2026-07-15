@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -7,15 +8,18 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from literature_workbench.api.health import router as health_router
 from literature_workbench.api.libraries import NativeFolderDialog
 from literature_workbench.api.libraries import router as libraries_router
+from literature_workbench.api.documents import router as documents_router
 from literature_workbench.api.session import router as session_router
 from literature_workbench.api.settings import router as settings_router
 from literature_workbench.config import AppSettings
 from literature_workbench.db.database import Database
 from literature_workbench.db.migrations import run_migrations
+from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.features.settings.service import SettingsService
 from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.features.library.roots import LibraryRootService
+from literature_workbench.features.library.scanner import LibraryScanner
 from literature_workbench.platform.windows.folder_dialog import FolderDialog
 from literature_workbench.platform.windows.filesystem import (
     SafeFileInspector,
@@ -32,6 +36,10 @@ from literature_workbench.security.selection_tokens import (
     RootSelectionTokens,
 )
 from literature_workbench.security.validation_errors import install_validation_error_handler
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 def create_app(
@@ -56,12 +64,20 @@ def create_app(
         database = Database.open(resolved.database_path)
         run_migrations(database)
         app.state.database = database
+        queue_clock = _utc_now
+        task_queue = TaskQueue(database, queue_clock)
+        app.state.queue_clock = queue_clock
+        app.state.task_queue = task_queue
         app.state.settings_service = SettingsService(
             SettingsRepository(database), resolved_secret_store
         )
-        library_repository = LibraryRepository(database)
+        library_repository = LibraryRepository(database, task_queue)
+        app.state.library_repository = library_repository
         app.state.library_root_service = LibraryRootService(
             library_repository, resolved_inspector
+        )
+        app.state.library_scanner = LibraryScanner(
+            database, library_repository, resolved_inspector, task_queue
         )
         if register_initial_library and library_repository.count() == 0:
             app.state.library_root_service.register_initial_approved_library()
@@ -89,4 +105,5 @@ def create_app(
     app.include_router(session_router)
     app.include_router(settings_router)
     app.include_router(libraries_router)
+    app.include_router(documents_router)
     return app

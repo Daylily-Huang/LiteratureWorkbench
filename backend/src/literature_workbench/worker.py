@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from threading import Event, Lock, Thread
 
 from literature_workbench.db.task_queue import Job, LostLease, TaskQueue
+from literature_workbench.features.library.scanner import LibraryScanner
 
 
 class JobCancellation:
@@ -32,6 +33,21 @@ class JobCancellation:
 
 
 JobHandler = Callable[[Job, JobCancellation], Awaitable[None]]
+
+
+def library_job_handlers(scanner: LibraryScanner) -> Mapping[str, JobHandler]:
+    async def scan_library(job: Job, cancellation: JobCancellation) -> None:
+        raw_library_id = job.payload.get("library_id")
+        if not isinstance(raw_library_id, str):
+            raise ValueError("invalid_library_id")
+        from uuid import UUID
+
+        library_id = UUID(raw_library_id)
+        cancellation.raise_if_cancelled()
+        await asyncio.to_thread(scanner.scan_library, library_id)
+        cancellation.raise_if_cancelled()
+
+    return {"scan_library": scan_library}
 
 
 class Worker:

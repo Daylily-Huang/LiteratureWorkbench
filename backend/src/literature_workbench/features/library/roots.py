@@ -32,7 +32,7 @@ class LibraryRootService:
         return self._repository.register(
             current,
             recursive=recursive,
-            authorization_source="native_picker",
+            authorization_source="native_picker_confirmed",
         )
 
     def register_initial_approved_library(self) -> LibraryRoot:

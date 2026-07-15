@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from literature_workbench.db.database import Database
+from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.library.models import LibraryRoot
 from literature_workbench.platform.windows.filesystem import RootIdentity
 
 
 class LibraryRepository:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, queue: TaskQueue | None = None) -> None:
         self._database = database
+        self._queue = queue
 
     def count(self) -> int:
         with self._database.connect() as connection:
@@ -21,6 +24,22 @@ class LibraryRepository:
         if row is None:
             raise RuntimeError("library_count_failed")
         return int(row["count"])
+
+    def get(self, library_id: UUID) -> LibraryRoot:
+        with self._database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM libraries WHERE id = ?", (str(library_id),)
+            ).fetchone()
+        if row is None:
+            raise KeyError("library_not_found")
+        return self._from_row(row)
+
+    def list_active(self) -> tuple[LibraryRoot, ...]:
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM libraries WHERE status = 'active' ORDER BY created_at, id"
+            ).fetchall()
+        return tuple(self._from_row(row) for row in rows)
 
     def register(
         self,
@@ -87,6 +106,28 @@ class LibraryRepository:
                 if exact is None:
                     raise
                 return self._from_row(exact)
+            if self._queue is not None:
+                self._queue.enqueue_in_transaction(
+                    connection,
+                    "scan_library",
+                    f"scan_library:{library_id}",
+                    {"library_id": library_id},
+                )
+                revision_row = connection.execute(
+                    "SELECT revision FROM app_settings WHERE key = 'active_library_revision'"
+                ).fetchone()
+                revision = 1 if revision_row is None else int(revision_row["revision"]) + 1
+                connection.execute(
+                    """
+                    INSERT INTO app_settings (key, value_json, revision, updated_at)
+                    VALUES ('active_library_revision', ?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                      value_json = excluded.value_json,
+                      revision = excluded.revision,
+                      updated_at = excluded.updated_at
+                    """,
+                    (json.dumps(revision), revision, now),
+                )
             row = connection.execute(
                 "SELECT * FROM libraries WHERE id = ?",
                 (library_id,),
