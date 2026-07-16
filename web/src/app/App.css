@@ -16,6 +16,34 @@ body { margin: 0; }
 
 .workbench > * { background: #fff; padding: 16px; }
 
+.document-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 16px;
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+}
+
+.document-list__item {
+  background: #fff;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #243247;
+  cursor: pointer;
+  padding: 7px 8px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  width: 100%;
+}
+
+.document-list__item:hover { background: #f1f5f9; }
+
+.document-list__item[aria-current="page"] {
+  background: #e8f1fb;
+  border-color: #7ca6d8;
+}
+
 .pdf-toolbar {
   align-items: center;
   display: flex;

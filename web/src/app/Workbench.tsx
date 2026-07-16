@@ -15,15 +15,26 @@ type DocumentResponse = {
 };
 
 
-function CurrentReader() {
+type ReaderLocation = { documentId: string | null; initialPage: number };
+
+function readerLocation(): ReaderLocation {
   const params = new URLSearchParams(window.location.search);
-  const documentId = params.get("document");
-  const initialPage = Number(params.get("page") ?? "1");
+  const page = Number(params.get("page") ?? "1");
+  return {
+    documentId: params.get("document"),
+    initialPage: Number.isInteger(page) && page > 0 ? page : 1,
+  };
+}
+
+function CurrentReader({ documentId, initialPage }: ReaderLocation) {
   const [document, setDocument] = useState<ReaderDocument | null>(null);
   const [error, setError] = useState(false);
   const [translationSelection, setTranslationSelection] = useState<SelectedText | null>(null);
 
   useEffect(() => {
+    setDocument(null);
+    setError(false);
+    setTranslationSelection(null);
     if (documentId === null) return;
     const controller = new AbortController();
     void fetch(`/api/documents/${documentId}`, {
@@ -50,14 +61,14 @@ function CurrentReader() {
     return () => controller.abort();
   }, [documentId]);
 
-  if (documentId === null) return <h2>PDF 阅读器</h2>;
+  if (documentId === null) return <><h2>PDF 阅读器</h2><p>请从左侧选择一篇文献</p></>;
   if (error) return <p role="alert">文献信息暂时无法读取</p>;
   if (document === null) return <p>正在读取文献信息</p>;
   return (
     <>
       <PdfReader
         {...document}
-        initialPage={Number.isInteger(initialPage) ? initialPage : 1}
+        initialPage={initialPage}
         onTranslateSelection={setTranslationSelection}
       />
       {translationSelection !== null && (
@@ -72,13 +83,39 @@ function CurrentReader() {
 
 export function Workbench() {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [location, setLocation] = useState<ReaderLocation>(readerLocation);
+
+  useEffect(() => {
+    const updateLocation = () => setLocation(readerLocation());
+    window.addEventListener("popstate", updateLocation);
+    return () => window.removeEventListener("popstate", updateLocation);
+  }, []);
+
+  function openDocument(documentId: string) {
+    const url = new URL(window.location.href);
+    url.pathname = "/";
+    url.search = "";
+    url.searchParams.set("document", documentId);
+    url.searchParams.set("page", "1");
+    url.hash = "";
+    window.history.pushState({}, "", url);
+    setLocation({ documentId, initialPage: 1 });
+  }
+
   return (
     <div className="workbench">
       <aside aria-label="文献库" className="workbench__library">
-        <LibraryPanel />
+        <LibraryPanel
+          activeDocumentId={location.documentId}
+          onOpenDocument={openDocument}
+        />
       </aside>
       <main aria-label="PDF 阅读器" className="workbench__reader">
-        <CurrentReader />
+        <CurrentReader
+          documentId={location.documentId}
+          initialPage={location.initialPage}
+          key={`${location.documentId ?? "none"}:${location.initialPage}`}
+        />
       </main>
       <aside aria-label="研究助手" className="workbench__assistant">
         <h2>研究助手</h2>

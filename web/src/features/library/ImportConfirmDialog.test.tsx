@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { LibraryPanel } from "./LibraryPanel";
+import type { DocumentApi } from "./documents";
 import type { ImportApi } from "./dropFiles";
 
 afterEach(cleanup);
@@ -39,6 +40,86 @@ function api(): ImportApi {
     listActiveImports: vi.fn().mockResolvedValue([]),
   };
 }
+
+function documentApi(items: Awaited<ReturnType<DocumentApi["listDocuments"]>> = []): DocumentApi {
+  return { listDocuments: vi.fn().mockResolvedValue(items) };
+}
+
+test("document inventory is clickable and marks the active PDF", async () => {
+  const user = userEvent.setup();
+  const onOpenDocument = vi.fn();
+  render(
+    <LibraryPanel
+      activeDocumentId="document-active"
+      documentApi={documentApi([
+        { document_id: "document-active", filename: "active.pdf" },
+        { document_id: "document-next", filename: "next.pdf" },
+      ])}
+      importApi={api()}
+      onOpenDocument={onOpenDocument}
+    />,
+  );
+
+  expect(await screen.findByRole("button", { name: "active.pdf" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await user.click(screen.getByRole("button", { name: "next.pdf" }));
+  expect(onOpenDocument).toHaveBeenCalledWith("document-next");
+});
+
+test("a newly completed import opens once, while restored history does not", async () => {
+  const user = userEvent.setup();
+  const importApi = api();
+  vi.mocked(importApi.uploadImport).mockResolvedValue({
+    intent_id: "intent-1",
+    file_name: "new.pdf",
+    status: "completed",
+    document_id: "document-new",
+    error_code: null,
+    poll_after_ms: null,
+  });
+  vi.mocked(importApi.listActiveImports).mockResolvedValue([
+    {
+      intent_id: "history",
+      file_name: "history.pdf",
+      status: "completed",
+      document_id: "document-history",
+      error_code: null,
+      poll_after_ms: null,
+    },
+  ]);
+  const onOpenDocument = vi.fn();
+  render(
+    <LibraryPanel
+      documentApi={documentApi()}
+      importApi={importApi}
+      onOpenDocument={onOpenDocument}
+    />,
+  );
+
+  await screen.findByText("history.pdf");
+  expect(onOpenDocument).not.toHaveBeenCalled();
+  await user.upload(
+    screen.getByLabelText("导入文献"),
+    new File(["%PDF-1.7"], "new.pdf", { type: "application/pdf" }),
+  );
+  await user.click(screen.getByRole("button", { name: "确认导入" }));
+
+  await waitFor(() => expect(onOpenDocument).toHaveBeenCalledTimes(1));
+  expect(onOpenDocument).toHaveBeenCalledWith("document-new");
+});
+
+test("document inventory failure is sanitized without hiding import controls", async () => {
+  const failedDocuments: DocumentApi = {
+    listDocuments: vi.fn().mockRejectedValue(new Error("private server detail")),
+  };
+  render(<LibraryPanel documentApi={failedDocuments} importApi={api()} />);
+
+  expect(await screen.findByText("文献列表暂时无法读取")).toBeVisible();
+  expect(screen.queryByText(/private server detail/)).not.toBeInTheDocument();
+  expect(screen.getByLabelText("导入文献")).toBeVisible();
+});
 
 test("PDF bytes do not upload until explicit confirmation", async () => {
   const user = userEvent.setup();
