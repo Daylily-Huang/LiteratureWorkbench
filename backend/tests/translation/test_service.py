@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -300,6 +300,11 @@ def test_session_scoped_lookup_hides_another_sessions_task(translation_db) -> No
 def test_same_content_older_document_version_is_not_current(translation_db) -> None:
     database, ids = translation_db
     old_request = request(ids)
+    with database.connect() as connection:
+        observed = str(connection.execute(
+            "SELECT observed_at FROM document_versions WHERE id = ?", (ids["version"],)
+        ).fetchone()["observed_at"])
+    later = (datetime.fromisoformat(observed) + timedelta(seconds=1)).isoformat()
     with database.transaction() as connection:
         connection.execute(
             """INSERT INTO document_versions(
@@ -309,7 +314,7 @@ def test_same_content_older_document_version_is_not_current(translation_db) -> N
                 str(uuid4()),
                 ids["document"],
                 ids["content"],
-                "2026-07-16T01:00:00+00:00",
+                later,
             ),
         )
 
