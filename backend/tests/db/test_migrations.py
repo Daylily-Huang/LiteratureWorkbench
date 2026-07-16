@@ -25,6 +25,8 @@ EXPECTED_TABLES = {
     "model_validation_tasks",
     "model_validations",
     "one_time_egress_grants",
+    "pdf_annotation_baselines",
+    "pdf_annotation_mutations",
     "pages",
     "parse_runs",
     "schema_migrations",
@@ -77,6 +79,7 @@ def test_migration_creates_current_tables_and_is_idempotent(tmp_path: Path) -> N
         "0001_v01",
         "0002_import_ownership",
         "0003_parser_fencing",
+        "0004_pdf_annotations",
     ]
     with db.connect() as connection:
         columns = {
@@ -185,6 +188,7 @@ def test_existing_v01_database_upgrades_fail_closed_and_remains_idempotent(
         "0001_v01",
         "0002_import_ownership",
         "0003_parser_fencing",
+        "0004_pdf_annotations",
     ]
     assert tuple(legacy) == (0, "source_claim", None, None)
 

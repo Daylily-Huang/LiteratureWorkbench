@@ -13,6 +13,8 @@ SCHEMA_V02_PATH = Path(__file__).with_name("schema_v02_import_ownership.sql")
 SCHEMA_V02_VERSION = "0002_import_ownership"
 SCHEMA_V03_PATH = Path(__file__).with_name("schema_v03_parser_fencing.sql")
 SCHEMA_V03_VERSION = "0003_parser_fencing"
+SCHEMA_V04_PATH = Path(__file__).with_name("schema_v04_pdf_annotations.sql")
+SCHEMA_V04_VERSION = "0004_pdf_annotations"
 
 
 def _split_sql_script(script: str) -> list[str]:
@@ -36,6 +38,7 @@ def run_migrations(db: Database) -> None:
             (SCHEMA_V01_VERSION, SCHEMA_V01_PATH),
             (SCHEMA_V02_VERSION, SCHEMA_V02_PATH),
             (SCHEMA_V03_VERSION, SCHEMA_V03_PATH),
+            (SCHEMA_V04_VERSION, SCHEMA_V04_PATH),
         ):
             migrations_table_exists = connection.execute(
                 """
