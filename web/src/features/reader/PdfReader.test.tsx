@@ -682,8 +682,11 @@ describe("PdfReader", () => {
     await waitFor(() => expect(onSelectionClear).toHaveBeenCalledTimes(1));
   });
 
-  it("clears frozen selection when refreshed metadata changes identity", async () => {
-    const { rerender } = render(<PdfReader {...readerProps()} />);
+  it("keeps the frozen selection on a same-document annotation version", async () => {
+    const onTranslateSelection = vi.fn();
+    const { rerender } = render(
+      <PdfReader {...readerProps()} onTranslateSelection={onTranslateSelection} />,
+    );
     const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
     const textNode = await renderedTextNode(pageElement);
     setSelection(textNode, textNode, "selected", [
@@ -697,9 +700,49 @@ describe("PdfReader", () => {
         {...readerProps()}
         contentId="content-b"
         documentVersionId="version-b"
+        onTranslateSelection={onTranslateSelection}
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "翻译所选文字" })).not.toBeInTheDocument();
+    const translate = await screen.findByRole("button", { name: "翻译所选文字" });
+    expect(translate).toBeVisible();
+    fireEvent.click(translate);
+    expect(onTranslateSelection).toHaveBeenCalledWith(expect.objectContaining({
+      documentVersionId: "version-b",
+      contentId: "content-b",
+      text: "selected",
+    }));
+  });
+
+  it("restores page, zoom, and reader scroll after an annotation version reload", async () => {
+    const { rerender } = render(<PdfReader {...readerProps()} />);
+    const toolbar = await screen.findByRole("toolbar", { name: "PDF 工具栏" });
+    fireEvent.click(within(toolbar).getByRole("button", { name: "下一页" }));
+    fireEvent.click(within(toolbar).getByRole("button", { name: "放大" }));
+    await waitFor(() => expect(within(toolbar).getByText("2 / 5")).toBeVisible());
+    expect(within(toolbar).getByRole("status", { name: "缩放比例" })).toHaveTextContent("125%");
+    const pages = document.querySelector(".pdf-reader__pages");
+    if (!(pages instanceof HTMLElement)) throw new Error("reader pages missing");
+    pages.scrollTop = 420;
+    pages.scrollLeft = 35;
+    fireEvent.scroll(pages);
+
+    rerender(
+      <PdfReader
+        {...readerProps()}
+        contentId="content-b"
+        documentVersionId="version-b"
+      />,
+    );
+
+    const reloadedToolbar = await screen.findByRole("toolbar", { name: "PDF 工具栏" });
+    await waitFor(() => expect(within(reloadedToolbar).getByText("2 / 5")).toBeVisible());
+    expect(within(reloadedToolbar).getByRole("status", { name: "缩放比例" })).toHaveTextContent("125%");
+    await waitFor(() => {
+      const reloadedPages = document.querySelector(".pdf-reader__pages");
+      expect(reloadedPages).toBeInstanceOf(HTMLElement);
+      expect((reloadedPages as HTMLElement).scrollTop).toBe(420);
+      expect((reloadedPages as HTMLElement).scrollLeft).toBe(35);
+    });
   });
 });

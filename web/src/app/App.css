@@ -277,6 +277,14 @@ body { margin: 0; }
   justify-content: space-between;
 }
 
+.translation-popover__header {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.translation-popover__header button { cursor: pointer; }
+
 .translation-popover__source { color: #64748b; }
 .translation-popover__result { white-space: pre-wrap; }
 .translation-popover__badge { color: #365f8d; font-size: 0.85rem; }

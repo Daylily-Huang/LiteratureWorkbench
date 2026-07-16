@@ -6,6 +6,7 @@ import {
   deleteAnnotation,
   listAnnotations,
   mergeDocumentIdentity,
+  mergeSelectionIdentity,
   restoreAnnotationBaseline,
   undoAnnotation,
   updateAnnotation,
@@ -133,7 +134,11 @@ export function Workbench() {
       const next = mergeDocumentIdentity(document, identity);
       setDocument(next);
       setAnnotations(await listAnnotations(next.documentId));
-      setTranslationSelection(null);
+      setTranslationSelection((current) => (
+        current?.documentId === identity.document_id
+          ? mergeSelectionIdentity(current, identity)
+          : null
+      ));
     } catch (reason: unknown) {
       setAnnotationError(annotationErrorMessage(reason));
     } finally {

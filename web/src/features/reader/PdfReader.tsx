@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -88,6 +89,7 @@ function PdfPage({
   onAnnotateSelection,
   onCancelSelection,
   onOpenAnnotation,
+  onRendered,
   onTranslateSelection,
 }: {
   document: PDFDocumentProxy;
@@ -108,6 +110,7 @@ function PdfPage({
   ): void;
   onCancelSelection?(): void;
   onOpenAnnotation?(annotationId: string): void;
+  onRendered?(): void;
   onTranslateSelection?(selected: SelectedText): void;
 }) {
   const pageRef = useRef<HTMLElement>(null);
@@ -184,6 +187,7 @@ function PdfPage({
         viewport,
       });
       await Promise.all([renderTask.promise, textLayer.render()]);
+      if (!disposed) onRendered?.();
     }).catch((error: unknown) => {
       if (!disposed && !(error instanceof Error && error.name === "RenderingCancelledException")) {
         setError(true);
@@ -194,7 +198,7 @@ function PdfPage({
       renderTask?.cancel();
       textLayer?.cancel();
     };
-  }, [document, pageIndex, scale]);
+  }, [document, onRendered, pageIndex, scale]);
 
   return (
     <section
@@ -254,6 +258,10 @@ export function PdfReader({
   onTranslateSelection,
 }: PdfReaderProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const previousDocumentIdRef = useRef(documentId);
+  const readerPositionRef = useRef({ top: 0, left: 0 });
+  const pendingPositionRef = useRef<{ top: number; left: number } | null>(null);
+  const restoreFrameRef = useRef<number | null>(null);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pageIndex, setPageIndex] = useState(Math.max(0, initialPage - 1));
   const [scale, setScale] = useState(1);
@@ -269,8 +277,40 @@ export function PdfReader({
     lastValid: { captured: SelectionCapture; range: Range } | null;
   } | null>(null);
 
+  const restoreReaderPosition = useCallback(() => {
+    const pending = pendingPositionRef.current;
+    if (pending === null || rootRef.current === null) return;
+    if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
+    restoreFrameRef.current = requestAnimationFrame(() => {
+      restoreFrameRef.current = null;
+      const root = rootRef.current;
+      const next = pendingPositionRef.current;
+      if (root === null || next === null) return;
+      root.scrollTop = next.top;
+      root.scrollLeft = next.left;
+      const reached = Math.abs(root.scrollTop - next.top) < 1
+        && Math.abs(root.scrollLeft - next.left) < 1;
+      if (reached) {
+        readerPositionRef.current = next;
+        pendingPositionRef.current = null;
+      }
+    });
+  }, []);
+
   useEffect(() => {
     let disposed = false;
+    const root = rootRef.current;
+    if (previousDocumentIdRef.current === documentId) {
+      const position = root === null
+        ? readerPositionRef.current
+        : { top: root.scrollTop, left: root.scrollLeft };
+      readerPositionRef.current = position;
+      pendingPositionRef.current = position;
+    } else {
+      readerPositionRef.current = { top: 0, left: 0 };
+      pendingPositionRef.current = null;
+    }
+    previousDocumentIdRef.current = documentId;
     setPdf(null);
     setError(false);
     const loadingTask: PDFDocumentLoadingTask = getDocument({
@@ -299,13 +339,24 @@ export function PdfReader({
   }, [documentId, documentVersionId, contentId]);
 
   useEffect(() => {
+    setSelected((current) => {
+      if (current === null || current.documentId !== documentId) return null;
+      return { ...current, documentVersionId, contentId };
+    });
+  }, [contentId, documentId, documentVersionId]);
+
+  useEffect(() => {
     setSelected(null);
     setSelectionHint(null);
     setSelectionDragging(false);
     visualGestureRef.current = null;
     selectionGestureRef.current = null;
     onSelectionClear?.();
-  }, [documentId, documentVersionId, contentId, onSelectionClear, pageIndex]);
+  }, [documentId, onSelectionClear, pageIndex]);
+
+  useEffect(() => () => {
+    if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
+  }, []);
 
   useEffect(() => {
     if (requestedPage !== undefined && pdf !== null) {
@@ -488,6 +539,13 @@ export function PdfReader({
         onPointerDown={startSelection}
         onPointerMove={rememberValidSelection}
         onPointerUp={captureSelection}
+        onScroll={(event) => {
+          if (pendingPositionRef.current !== null) return;
+          readerPositionRef.current = {
+            top: event.currentTarget.scrollTop,
+            left: event.currentTarget.scrollLeft,
+          };
+        }}
         ref={rootRef}
       >
         {pageIndexes.map((index) => (
@@ -506,6 +564,7 @@ export function PdfReader({
               onSelectionClear?.();
             }}
             onOpenAnnotation={onOpenAnnotation}
+            onRendered={restoreReaderPosition}
             onTranslateSelection={onTranslateSelection}
             pageIndex={index}
             scale={scale}

@@ -114,4 +114,60 @@ describe("TranslationPopover", () => {
     fireEvent.click(screen.getByRole("button", { name: "重试翻译" }));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(4));
   });
+
+  it("retries an expired selection with the latest annotation identity", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf-a" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: "selection_not_current",
+      }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf-b" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "task-b", status: "completed", translated_text: "新译文",
+        provider: "deepseek", model: "deepseek-chat",
+      }), { status: 200 }));
+    const { rerender } = render(<TranslationPopover fetcher={fetcher} selected={selected} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("选区已过期");
+
+    rerender(<TranslationPopover
+      fetcher={fetcher}
+      selected={{ ...selected, documentVersionId: "version-b", contentId: "content-b" }}
+    />);
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "重试翻译" }));
+    await waitFor(() => expect(screen.getByText("新译文")).toBeVisible());
+    const retryBody = JSON.parse(String((fetcher.mock.calls[3]?.[1] as RequestInit).body));
+    expect(retryBody).toMatchObject({
+      document_version_id: "version-b",
+      content_id: "content-b",
+    });
+  });
+
+  it("drags by the header and clamps the card inside the viewport", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 110, y: 76, left: 110, top: 76, right: 470, bottom: 276,
+      width: 360, height: 200, toJSON: () => ({}),
+    });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "task-a", status: "completed", translated_text: "译文",
+        provider: "deepseek", model: "deepseek-chat",
+      }), { status: 200 }));
+    render(<TranslationPopover fetcher={fetcher} selected={selected} />);
+    const card = screen.getByRole("region", { name: "选区翻译" });
+    const handle = screen.getByText("选区翻译").parentElement;
+    if (!(handle instanceof HTMLElement)) throw new Error("drag handle missing");
+    await waitFor(() => expect(card).toHaveStyle({ left: "110px", top: "76px" }));
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 140, clientY: 100 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 1000, clientY: 1000 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 1000, clientY: 1000 });
+
+    expect(card).toHaveStyle({ left: "428px", top: "388px" });
+  });
 });

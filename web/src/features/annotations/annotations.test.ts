@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createAnnotation, mergeDocumentIdentity } from "./annotations";
+import {
+  createAnnotation,
+  mergeDocumentIdentity,
+  mergeSelectionIdentity,
+} from "./annotations";
 import type { SelectedText } from "../reader/selection";
 
 
@@ -70,6 +74,33 @@ describe("annotation API", () => {
       documentVersionId: "version-b",
       contentId: "b".repeat(64),
       filename: "paper.pdf",
+    });
+  });
+
+  it("moves a same-document selection to the annotation write identity", () => {
+    const selected: SelectedText = {
+      documentId: "document-a",
+      documentVersionId: "version-a",
+      contentId: "a".repeat(64),
+      pdfPage: 3,
+      text: "selected",
+      contextBefore: "before",
+      contextAfter: "after",
+      rects: [{ x: 1, y: 2, width: 3, height: 4 }],
+      pdfQuads: [[10, 20, 30, 20, 10, 40, 30, 40]],
+      buttonAnchor: { x: 5, y: 6 },
+      viewportAnchor: { x: 7, y: 8 },
+      translationEligible: true,
+    };
+
+    expect(mergeSelectionIdentity(selected, {
+      document_id: "document-a",
+      current_document_version_id: "version-b",
+      content_id: "b".repeat(64),
+    })).toEqual({
+      ...selected,
+      documentVersionId: "version-b",
+      contentId: "b".repeat(64),
     });
   });
 });

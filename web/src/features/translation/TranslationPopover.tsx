@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import type { SelectedText } from "../reader/selection";
 
@@ -59,6 +65,22 @@ export function calculatePopoverPosition(
 }
 
 
+function clampPopoverPosition(position: Point, measured: Size, viewport: Size): Point {
+  const width = Math.min(
+    measured.width > 0 ? measured.width : DEFAULT_CARD_WIDTH,
+    Math.max(0, viewport.width - VIEWPORT_MARGIN * 2),
+  );
+  const height = Math.min(
+    measured.height > 0 ? measured.height : DEFAULT_CARD_HEIGHT,
+    Math.max(0, viewport.height - VIEWPORT_MARGIN * 2),
+  );
+  return {
+    x: clamp(position.x, VIEWPORT_MARGIN, viewport.width - VIEWPORT_MARGIN - width),
+    y: clamp(position.y, VIEWPORT_MARGIN, viewport.height - VIEWPORT_MARGIN - height),
+  };
+}
+
+
 function clientTaskId(): string {
   return globalThis.crypto.randomUUID();
 }
@@ -103,6 +125,21 @@ export function TranslationPopover({
   const [requestFailed, setRequestFailed] = useState(false);
   const [copied, setCopied] = useState(false);
   const cardRef = useRef<HTMLElement>(null);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const selectionKey = JSON.stringify([
+    selected.documentId,
+    selected.pdfPage,
+    selected.text,
+    selected.pdfQuads,
+  ]);
+  const positionedSelectionRef = useRef(selectionKey);
+  const userPositionedRef = useRef(false);
+  const dragRef = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
   const [position, setPosition] = useState(() => calculatePopoverPosition(
     selected.viewportAnchor,
     { width: DEFAULT_CARD_WIDTH, height: DEFAULT_CARD_HEIGHT },
@@ -135,17 +172,18 @@ export function TranslationPopover({
       setRequestFailed(false);
       setCopied(false);
       const token = await csrf(fetcher);
+      const current = selectedRef.current;
       const response = await fetcher("/api/translations", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", "X-LW-CSRF": token },
         body: JSON.stringify({
           client_task_id: clientTaskId(),
-          document_id: selected.documentId,
-          document_version_id: selected.documentVersionId,
-          content_id: selected.contentId,
-          physical_page: selected.pdfPage,
-          selected_text: selected.text,
+          document_id: current.documentId,
+          document_version_id: current.documentVersionId,
+          content_id: current.contentId,
+          physical_page: current.pdfPage,
+          selected_text: current.text,
           target_language: "zh-CN",
         }),
       });
@@ -166,24 +204,71 @@ export function TranslationPopover({
       active = false;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [attempt, fetcher, pollInterval, selected]);
+  }, [attempt, fetcher, pollInterval, selectionKey]);
 
   useLayoutEffect(() => {
+    if (positionedSelectionRef.current !== selectionKey) {
+      positionedSelectionRef.current = selectionKey;
+      userPositionedRef.current = false;
+    }
     function reposition() {
       const bounds = cardRef.current?.getBoundingClientRect();
-      setPosition(calculatePopoverPosition(
-        selected.viewportAnchor,
-        {
-          width: bounds?.width ?? DEFAULT_CARD_WIDTH,
-          height: bounds?.height ?? DEFAULT_CARD_HEIGHT,
-        },
-        { width: window.innerWidth, height: window.innerHeight },
-      ));
+      const measured = {
+        width: bounds?.width ?? DEFAULT_CARD_WIDTH,
+        height: bounds?.height ?? DEFAULT_CARD_HEIGHT,
+      };
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      setPosition((current) => {
+        if (!userPositionedRef.current) {
+          return calculatePopoverPosition(selected.viewportAnchor, measured, viewport);
+        }
+        const clamped = clampPopoverPosition(
+          { x: current.left, y: current.top },
+          measured,
+          viewport,
+        );
+        return { left: clamped.x, top: clamped.y };
+      });
     }
     reposition();
     window.addEventListener("resize", reposition);
     return () => window.removeEventListener("resize", reposition);
-  }, [copied, requestFailed, selected.viewportAnchor, task]);
+  }, [copied, requestFailed, selected.viewportAnchor, selectionKey, task]);
+
+  function startDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.target instanceof Element && event.target.closest("button") !== null) return;
+    const bounds = cardRef.current?.getBoundingClientRect();
+    if (bounds === undefined) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - bounds.left,
+      offsetY: event.clientY - bounds.top,
+    };
+    userPositionedRef.current = true;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  }
+
+  function moveDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    const bounds = cardRef.current?.getBoundingClientRect();
+    if (drag === null || drag.pointerId !== event.pointerId || bounds === undefined) return;
+    const clamped = clampPopoverPosition(
+      { x: event.clientX - drag.offsetX, y: event.clientY - drag.offsetY },
+      { width: bounds.width, height: bounds.height },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    setPosition({ left: clamped.x, top: clamped.y });
+    event.preventDefault();
+  }
+
+  function finishDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
 
   const failed = requestFailed || task?.status === "failed";
   const badge = task === null ? null : sourceBadge(task);
@@ -195,7 +280,14 @@ export function TranslationPopover({
       ref={cardRef}
       style={{ left: `${position.left}px`, top: `${position.top}px` }}
     >
-      <div className="translation-popover__header">
+      <div
+        className="translation-popover__header"
+        onPointerCancel={finishDrag}
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={finishDrag}
+        title="拖动翻译框"
+      >
         <strong>选区翻译</strong>
         {onClose && <button aria-label="关闭翻译" onClick={onClose} type="button">×</button>}
       </div>

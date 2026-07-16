@@ -136,3 +136,16 @@ export function mergeDocumentIdentity(
     contentId: identity.content_id,
   };
 }
+
+
+export function mergeSelectionIdentity(
+  selected: SelectedText,
+  identity: IdentityResponse,
+): SelectedText {
+  if (selected.documentId !== identity.document_id) return selected;
+  return {
+    ...selected,
+    documentVersionId: identity.current_document_version_id,
+    contentId: identity.content_id,
+  };
+}
