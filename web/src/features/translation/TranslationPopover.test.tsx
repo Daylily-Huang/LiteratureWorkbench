@@ -16,6 +16,7 @@ const selected: SelectedText = {
   rects: [],
   buttonAnchor: { x: 0, y: 0 },
   viewportAnchor: { x: 100, y: 100 },
+  translationEligible: true,
 };
 
 

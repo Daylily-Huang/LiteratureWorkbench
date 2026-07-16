@@ -21,6 +21,7 @@ import { SelectionOverlay } from "./SelectionOverlay";
 import {
   captureSamePageSelection,
   type SelectedText,
+  type SelectionCapture,
 } from "./selection";
 
 
@@ -199,6 +200,9 @@ export function PdfReader({
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState<SelectedText | null>(null);
   const [selectionHint, setSelectionHint] = useState<string | null>(null);
+  const selectionGestureRef = useRef<{
+    lastValid: { captured: SelectionCapture; range: Range } | null;
+  } | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -260,6 +264,36 @@ export function PdfReader({
     }
   }
 
+  function captureBrowserSelection(allowCrossColumn: boolean): SelectionCapture {
+    const root = rootRef.current;
+    if (root === null) return { selected: null, hint: null };
+    return captureSamePageSelection(
+      window.getSelection(),
+      root,
+      { documentId, documentVersionId, contentId },
+      scale,
+      { allowCrossColumn },
+    );
+  }
+
+  function rememberValidSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    const gesture = selectionGestureRef.current;
+    const browserSelection = window.getSelection();
+    if (gesture === null || browserSelection === null || browserSelection.rangeCount !== 1) return;
+    const captured = captureBrowserSelection(event.altKey);
+    if (captured.selected !== null) {
+      gesture.lastValid = {
+        captured,
+        range: browserSelection.getRangeAt(0).cloneRange(),
+      };
+      return;
+    }
+    if (captured.hint !== null && gesture.lastValid !== null) {
+      browserSelection.removeAllRanges();
+      browserSelection.addRange(gesture.lastValid.range);
+    }
+  }
+
   function captureSelection(event: ReactPointerEvent<HTMLDivElement>) {
     if (
       event.target instanceof Element
@@ -267,16 +301,13 @@ export function PdfReader({
     ) {
       return;
     }
-    const root = rootRef.current;
-    if (root === null) return;
     const browserSelection = window.getSelection();
-    const captured = captureSamePageSelection(
-      browserSelection,
-      root,
-      { documentId, documentVersionId, contentId },
-      scale,
-    );
+    let captured = captureBrowserSelection(event.altKey);
+    if (captured.selected === null && selectionGestureRef.current?.lastValid !== null) {
+      captured = selectionGestureRef.current?.lastValid.captured ?? captured;
+    }
     browserSelection?.removeAllRanges();
+    selectionGestureRef.current = null;
     setSelected(captured.selected);
     setSelectionHint(captured.hint);
     if (captured.selected !== null) onSelectionChange?.(captured.selected);
@@ -295,7 +326,13 @@ export function PdfReader({
         scale={scale}
         totalPages={pdf.numPages}
       />
-      <div className="pdf-reader__pages" onPointerUp={captureSelection} ref={rootRef}>
+      <div
+        className="pdf-reader__pages"
+        onPointerDown={() => { selectionGestureRef.current = { lastValid: null }; }}
+        onPointerMove={rememberValidSelection}
+        onPointerUp={captureSelection}
+        ref={rootRef}
+      >
         {pageIndexes.map((index) => (
           <PdfPage
             contentId={contentId}

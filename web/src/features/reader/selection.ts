@@ -9,6 +9,7 @@ export type SelectedText = {
   rects: Array<{ x: number; y: number; width: number; height: number }>;
   buttonAnchor: { x: number; y: number };
   viewportAnchor: { x: number; y: number };
+  translationEligible: boolean;
 };
 
 export type SelectionMetadata = Pick<
@@ -22,8 +23,8 @@ export type SelectionCapture = {
 };
 
 
-const MAX_SELECTED_CODE_POINTS = 1500;
-const MAX_VISIBLE_RECTS = 24;
+export const MAX_TRANSLATION_CODE_POINTS = 8000;
+const MAX_VISIBLE_RECTS = 200;
 const MAX_CONTEXT_CODE_POINTS = 500;
 const SELECTION_HINT = "请在同一栏选择一句或一段";
 
@@ -91,6 +92,7 @@ export function captureSamePageSelection(
   visibleRoot: HTMLElement,
   metadata: SelectionMetadata,
   scale: number,
+  options: { allowCrossColumn?: boolean } = {},
 ): SelectionCapture {
   if (
     selection === null
@@ -126,9 +128,8 @@ export function captureSamePageSelection(
   const clientRects = Array.from(range.getClientRects())
     .filter((rect) => rect.width > 0 && rect.height > 0);
   if (
-    Array.from(normalized).length > MAX_SELECTED_CODE_POINTS
-    || clientRects.length > MAX_VISIBLE_RECTS
-    || spansColumns(clientRects)
+    clientRects.length > MAX_VISIBLE_RECTS
+    || (!options.allowCrossColumn && spansColumns(clientRects))
   ) {
     return { selected: null, hint: SELECTION_HINT };
   }
@@ -158,6 +159,7 @@ export function captureSamePageSelection(
       rects,
       buttonAnchor: { x: last.x + last.width, y: last.y + last.height },
       viewportAnchor: { x: lastClientRect.right, y: lastClientRect.bottom },
+      translationEligible: Array.from(normalized).length <= MAX_TRANSLATION_CODE_POINTS,
     },
     hint: null,
   };

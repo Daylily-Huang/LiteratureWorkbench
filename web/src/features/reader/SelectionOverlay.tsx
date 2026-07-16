@@ -27,6 +27,7 @@ export function SelectionOverlay({ selected, scale, onTranslate }: SelectionOver
       <button
         aria-label="翻译所选文字"
         className="selection-overlay__button"
+        disabled={!selected.translationEligible}
         onClick={onTranslate}
         style={{
           left: selected.buttonAnchor.x * scale,
@@ -34,7 +35,7 @@ export function SelectionOverlay({ selected, scale, onTranslate }: SelectionOver
         }}
         type="button"
       >
-        翻译
+        {selected.translationEligible ? "翻译" : "超过 8,000 字"}
       </button>
     </div>
   );

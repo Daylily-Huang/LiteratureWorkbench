@@ -378,24 +378,29 @@ describe("PdfReader", () => {
     expect(screen.queryByRole("button", { name: "翻译所选文字" })).not.toBeInTheDocument();
   });
 
-  it("rejects text longer than 1500 Unicode code points", async () => {
+  it("keeps long text selected but disables translation above 8000 Unicode code points", async () => {
     const onSelection = vi.fn();
     render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
     const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
     const textNode = await renderedTextNode(pageElement);
-    const oversized = "😀".repeat(1501);
+    const oversized = "😀".repeat(8001);
     const removeAllRanges = setSelection(textNode, textNode, oversized, [
       { left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 },
     ]);
 
     fireEvent.pointerUp(pageElement);
 
-    expect(onSelection).not.toHaveBeenCalled();
-    expect(screen.getByText("请在同一栏选择一句或一段")).toBeVisible();
+    expect(onSelection).toHaveBeenCalledTimes(1);
+    expect(onSelection.mock.calls[0]?.[0]).toMatchObject({
+      text: oversized,
+      translationEligible: false,
+    });
+    expect(screen.getByRole("button", { name: "翻译所选文字" })).toBeDisabled();
+    expect(screen.getByText("超过 8,000 字")).toBeVisible();
     expect(removeAllRanges).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects selections that span columns or more than 24 visible lines", async () => {
+  it("rejects cross-column selection but keeps a long same-column selection", async () => {
     const onSelection = vi.fn();
     render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
     const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
@@ -411,7 +416,7 @@ describe("PdfReader", () => {
     expect(screen.getByText("请在同一栏选择一句或一段")).toBeVisible();
     expect(crossColumnClear).toHaveBeenCalledTimes(1);
 
-    const tooManyClear = setSelection(
+    const longSelectionClear = setSelection(
       textNode,
       textNode,
       "many lines",
@@ -426,8 +431,79 @@ describe("PdfReader", () => {
     );
     fireEvent.pointerUp(pageElement);
 
-    expect(onSelection).not.toHaveBeenCalled();
-    expect(tooManyClear).toHaveBeenCalledTimes(1);
+    expect(onSelection).toHaveBeenCalledTimes(1);
+    expect(onSelection.mock.calls[0]?.[0]).toMatchObject({
+      text: "many lines",
+      translationEligible: true,
+    });
+    expect(longSelectionClear).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows an intentional cross-column selection while Alt is held", async () => {
+    const onSelection = vi.fn();
+    render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
+    const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+    const textNode = await renderedTextNode(pageElement);
+    setSelection(textNode, textNode, "left and right", [
+      { left: 20, top: 40, right: 170, bottom: 60, width: 150, height: 20 },
+      { left: 300, top: 40, right: 450, bottom: 60, width: 150, height: 20 },
+    ]);
+
+    fireEvent.pointerUp(pageElement, { altKey: true });
+
+    expect(onSelection).toHaveBeenCalledTimes(1);
+    expect(onSelection.mock.calls[0]?.[0]).toMatchObject({ text: "left and right" });
+  });
+
+  it("restores the last valid same-column range when dragging briefly crosses columns", async () => {
+    const onSelection = vi.fn();
+    render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
+    const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+    const textNode = await renderedTextNode(pageElement);
+    const validRange = {
+      collapsed: false,
+      startContainer: textNode,
+      endContainer: textNode,
+      startOffset: 0,
+      endOffset: 1,
+      getClientRects: () => [
+        { left: 20, top: 40, right: 170, bottom: 60, width: 150, height: 20 },
+      ],
+      cloneRange: () => validRange,
+    } as unknown as Range;
+    const crossColumnRange = {
+      ...validRange,
+      getClientRects: () => [
+        { left: 20, top: 40, right: 170, bottom: 60, width: 150, height: 20 },
+        { left: 300, top: 40, right: 450, bottom: 60, width: 150, height: 20 },
+      ],
+      cloneRange: () => crossColumnRange,
+    } as unknown as Range;
+    let activeRange = validRange;
+    let rangeCount = 1;
+    const addRange = vi.fn((range: Range) => {
+      activeRange = range;
+      rangeCount = 1;
+    });
+    const removeAllRanges = vi.fn(() => { rangeCount = 0; });
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      get isCollapsed() { return rangeCount === 0; },
+      get rangeCount() { return rangeCount; },
+      getRangeAt: () => activeRange,
+      addRange,
+      removeAllRanges,
+      toString: () => activeRange === validRange ? "selected" : "selected across columns",
+    } as unknown as Selection);
+
+    fireEvent.pointerDown(pageElement);
+    fireEvent.pointerMove(pageElement);
+    activeRange = crossColumnRange;
+    fireEvent.pointerMove(pageElement);
+    fireEvent.pointerUp(pageElement);
+
+    expect(addRange).toHaveBeenCalledWith(validRange);
+    expect(onSelection).toHaveBeenCalledTimes(1);
+    expect(onSelection.mock.calls[0]?.[0]).toMatchObject({ text: "selected" });
   });
 
   it("keeps the nearest 500 Unicode code points before a selection", async () => {
