@@ -102,6 +102,30 @@ def current_page_text_candidates(row: sqlite3.Row) -> list[str]:
     return list(dict.fromkeys(candidate for candidate in candidates if candidate))
 
 
+def align_selection_to_candidate(candidate: str, selection: str) -> tuple[str, int] | None:
+    position = candidate.find(selection)
+    if position >= 0:
+        return selection, position
+    compact_selection = "".join(character for character in selection if not character.isspace())
+    if not compact_selection:
+        return None
+    compact_candidate_characters: list[str] = []
+    candidate_positions: list[int] = []
+    for index, character in enumerate(candidate):
+        if character.isspace():
+            continue
+        compact_candidate_characters.append(character)
+        candidate_positions.append(index)
+    compact_candidate = "".join(compact_candidate_characters)
+    compact_position = compact_candidate.find(compact_selection)
+    if compact_position < 0:
+        return None
+    last_compact_position = compact_position + len(compact_selection) - 1
+    start = candidate_positions[compact_position]
+    end = candidate_positions[last_compact_position] + 1
+    return candidate[start:end], start
+
+
 class TranslationRepository:
     def __init__(self, database: Database, now: Callable[[], datetime]) -> None:
         self._database = database
@@ -155,25 +179,18 @@ class TranslationRepository:
             ).fetchone()
         if row is None:
             raise SelectionRejected("selection_not_current")
-        selection_variants = [normalized_selection]
-        styled_boundary_repair = re.sub(
-            r"([a-z])(?=[A-Z][a-z])", r"\1 ", normalized_selection
-        )
-        if styled_boundary_repair != normalized_selection:
-            selection_variants.append(styled_boundary_repair)
         match = next(
             (
-                (candidate, variant)
+                (candidate, aligned)
                 for candidate in current_page_text_candidates(row)
-                for variant in selection_variants
-                if variant in candidate
+                if (aligned := align_selection_to_candidate(candidate, normalized_selection))
+                is not None
             ),
             None,
         )
         if match is None:
             raise SelectionRejected("selection_not_current")
-        matching_text, normalized_selection = match
-        position = matching_text.find(normalized_selection)
+        matching_text, (normalized_selection, position) = match
         before = matching_text[:position].rstrip()
         after = matching_text[position + len(normalized_selection) :].lstrip()
         return VerifiedSelection(

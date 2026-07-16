@@ -238,6 +238,38 @@ def test_accepts_missing_space_before_styled_scientific_name(translation_db) -> 
     assert task.selected_text == block_text
 
 
+def test_recovers_multiple_missing_pdf_whitespace_boundaries(translation_db) -> None:
+    database, ids = translation_db
+    block_text = (
+        "Human pressures are perversely intense, widespread and rapidly intensifying."
+    )
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET blocks_json=? WHERE parse_run_id=?",
+            (
+                '[{"block_id":"0:1","kind":"text","text":'
+                '"Human pressures are perversely intense, widespread and rapidly intensifying.",'
+                '"bbox_1000":[0,0,1000,100],"source":"pymupdf",'
+                '"confidence":null}]',
+                ids["run"],
+            ),
+        )
+
+    task = service(translation_db).submit(
+        "session",
+        request(
+            ids,
+            text=(
+                "Human pressures are perversely "
+                "intense,widespreadandrapidly intensifying."
+            ),
+        ),
+    )
+
+    assert task.status == "queued"
+    assert task.selected_text == block_text
+
+
 def test_online_completion_is_cached_by_provider_model_and_selection(translation_db) -> None:
     _, ids = translation_db
     deepseek = FakeDeepSeek()

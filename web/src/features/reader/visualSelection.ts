@@ -134,7 +134,15 @@ function sameVisualLine(
   // font metrics are approximate. Only join that kind of overlap when the text
   // nodes are adjacent in the PDF content stream; otherwise two physical
   // columns whose wide bounds overlap would collapse into one visual line.
-  return Math.abs(a.left - b.left) <= Math.max(48, minimumHeight * 10);
+  const edgeTolerance = Math.max(2, minimumHeight * 0.15);
+  const nested = (
+    b.left >= a.left - edgeTolerance
+    && b.right <= a.right + edgeTolerance
+  ) || (
+    a.left >= b.left - edgeTolerance
+    && a.right <= b.right + edgeTolerance
+  );
+  return nested || Math.abs(a.left - b.left) <= Math.max(48, minimumHeight * 10);
 }
 
 
@@ -241,6 +249,7 @@ function separator(first: VisualFragment, second: VisualFragment): string {
   const secondText = second.node.data;
   if (/\s$/u.test(firstText) || /^\s/u.test(secondText)) return "";
   if (/^[,.;:!?%\)\]\}，。；：！？％、]/u.test(secondText)) return "";
+  if (hasSourceWhitespaceBetween(first.node, second.node)) return " ";
   if (/[a-z]$/u.test(firstText) && /^[A-Z][a-z]/u.test(secondText)) return " ";
   if (first.line !== second.line) return " ";
   const verticalOverlap = overlap(
@@ -252,6 +261,22 @@ function separator(first: VisualFragment, second: VisualFragment): string {
   const sameLine = verticalOverlap >= Math.min(first.bounds.height, second.bounds.height) * 0.5;
   const gap = second.bounds.left - first.bounds.right;
   return sameLine && gap <= 1 ? "" : " ";
+}
+
+
+function hasSourceWhitespaceBetween(first: Text, second: Text): boolean {
+  if (first.ownerDocument !== second.ownerDocument) return false;
+  const following = first.ownerDocument.defaultView?.Node.DOCUMENT_POSITION_FOLLOWING ?? 4;
+  if ((first.compareDocumentPosition(second) & following) === 0) return false;
+  try {
+    const range = first.ownerDocument.createRange();
+    range.setStartAfter(first);
+    range.setEndBefore(second);
+    const between = range.toString();
+    return between !== "" && /^\s+$/u.test(between);
+  } catch {
+    return false;
+  }
 }
 
 

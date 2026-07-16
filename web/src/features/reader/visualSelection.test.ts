@@ -203,6 +203,92 @@ describe("visual PDF text selection", () => {
     );
   });
 
+  it("restores PDF.js whitespace spans hidden from the visual index", () => {
+    const intense = seed("intense,", rect(100, 100, 90));
+    const widespread = seed("widespread", rect(150, 100, 110));
+    const conjunction = seed("and", rect(220, 100, 35));
+    const rapidly = seed("rapidly", rect(245, 100, 70));
+    const layer = document.createElement("div");
+    for (const fragment of [intense, widespread, conjunction, rapidly]) {
+      if (layer.childNodes.length > 0) {
+        const whitespace = document.createElement("span");
+        whitespace.textContent = " ";
+        layer.append(whitespace);
+      }
+      const span = document.createElement("span");
+      span.append(fragment.node);
+      layer.append(span);
+    }
+    const index = createVisualTextIndex([intense, widespread, conjunction, rapidly]);
+
+    const captured = resolveVisualSelection(index, {
+      node: intense.node,
+      offset: 0,
+      clientX: 100,
+      clientY: 110,
+    }, {
+      node: rapidly.node,
+      offset: rapidly.node.data.length,
+      clientX: 315,
+      clientY: 110,
+    }, {
+      metadata,
+      page: 1,
+      pageBounds: rect(0, 0, 700, 600),
+      transform: [1, 0, 0, -1, 0, 600],
+      scale: 1,
+    });
+
+    expect(captured.selected?.text).toBe("intense, widespread and rapidly");
+  });
+
+  it("keeps overlapping styled spans inside a full-width PDF line selection", () => {
+    const prefix = seed(
+      "human pressures. Moreover, pressures are perversely",
+      rect(559, 100, 382),
+    );
+    const intense = seed("intense,", rect(790, 100, 52));
+    const widespread = seed("widespread", rect(827, 100, 76));
+    const conjunction = seed("and", rect(877, 100, 25));
+    const rapidly = seed("rapidly", rect(897, 100, 45));
+    const suffix = seed("intensifying in places with high biodiversity.", rect(559, 124, 617));
+    const fragments = [prefix, intense, widespread, conjunction, rapidly, suffix];
+    const layer = document.createElement("div");
+    for (const fragment of fragments) {
+      if (layer.childNodes.length > 0) {
+        const whitespace = document.createElement("span");
+        whitespace.textContent = " ";
+        layer.append(whitespace);
+      }
+      const span = document.createElement("span");
+      span.append(fragment.node);
+      layer.append(span);
+    }
+    const index = createVisualTextIndex(fragments);
+
+    const captured = resolveVisualSelection(index, {
+      node: prefix.node,
+      offset: 0,
+      clientX: 559,
+      clientY: 110,
+    }, {
+      node: suffix.node,
+      offset: suffix.node.data.length,
+      clientX: 1176,
+      clientY: 134,
+    }, {
+      metadata,
+      page: 1,
+      pageBounds: rect(0, 0, 1300, 800),
+      transform: [1, 0, 0, -1, 0, 800],
+      scale: 1,
+    });
+
+    expect(captured.selected?.text).toBe(
+      "human pressures. Moreover, pressures are perversely intense, widespread and rapidly intensifying in places with high biodiversity.",
+    );
+  });
+
   it("isolates the overlapping two-column geometry observed in the PNAS fixture", () => {
     const left = [
       seed("The population extinction pulse we describe here shows, from a", rect(334.69, 253.73, 531.96, 16)),
