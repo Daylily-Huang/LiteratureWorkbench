@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -182,6 +183,55 @@ def test_accepts_selection_from_current_parse_block_when_page_text_is_reordered(
 
     assert task.status == "queued"
     assert task.selected_text == block_text
+
+
+def test_accepts_prose_selection_across_short_figure_labels(translation_db) -> None:
+    database, ids = translation_db
+    first = (
+        "Dealing with errors requires enough typed loci to distinguish individuals "
+        "and estimate the probability of identity."
+    )
+    continuation = (
+        "More generally, parentage analysis should allow one or several genetic "
+        "mismatches when the evidence supports it."
+    )
+    blocks = [
+        {"block_id": "0:10", "kind": "text", "text": first},
+        {"block_id": "0:11", "kind": "text", "text": "Father Mother"},
+        {"block_id": "0:12", "kind": "text", "text": "149 153"},
+        {"block_id": "0:13", "kind": "text", "text": "Offspring"},
+        {"block_id": "0:16", "kind": "text", "text": continuation},
+    ]
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET blocks_json=? WHERE parse_run_id=?",
+            (json.dumps(blocks), ids["run"]),
+        )
+
+    task = service(translation_db).submit("session", request(ids, text=f"{first} {continuation}"))
+
+    assert task.status == "queued"
+    assert task.selected_text == f"{first} {continuation}"
+
+
+def test_rejects_selection_that_skips_an_intervening_prose_block(translation_db) -> None:
+    database, ids = translation_db
+    first = "The first paragraph contains enough words to count as normal running prose."
+    intervening = "This intervening sentence is also normal running prose and cannot be skipped."
+    continuation = "The final paragraph also contains enough words to remain protected by validation."
+    blocks = [
+        {"block_id": "0:1", "kind": "text", "text": first},
+        {"block_id": "0:2", "kind": "text", "text": intervening},
+        {"block_id": "0:3", "kind": "text", "text": continuation},
+    ]
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET blocks_json=? WHERE parse_run_id=?",
+            (json.dumps(blocks), ids["run"]),
+        )
+
+    with pytest.raises(SelectionRejected, match="selection_not_current"):
+        service(translation_db).submit("session", request(ids, text=f"{first} {continuation}"))
 
 
 def test_accepts_pdf_style_span_gap_before_punctuation(translation_db) -> None:

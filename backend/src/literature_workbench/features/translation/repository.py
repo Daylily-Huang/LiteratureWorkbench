@@ -16,6 +16,7 @@ from literature_workbench.db.task_queue import TaskQueue
 
 PROMPT_VERSION = "selection-translation-v1"
 MAX_CONTEXT_CODE_POINTS = 500
+MIN_PROSE_BLOCK_WORDS = 8
 TranslationStatus = Literal["queued", "running", "completed", "failed"]
 
 
@@ -81,6 +82,18 @@ def normalize_selection(value: str) -> str:
     return re.sub(r"([\(\[\{（【])\s+", r"\1", normalized)
 
 
+def is_prose_block(value: str) -> bool:
+    """Return whether a parsed block is substantial enough to be running prose.
+
+    PDF parser reading order contains figure labels as independent blocks.  The
+    browser text selection naturally omits those small labels when a user
+    drags through a paragraph around a figure, so verification also keeps a
+    prose-only flow.  Short normal prose is deliberately not skipped: it stays
+    out of this fallback and therefore cannot be silently bypassed.
+    """
+    return len(re.findall(r"\w+", value, flags=re.UNICODE)) >= MIN_PROSE_BLOCK_WORDS
+
+
 def current_page_text_candidates(row: sqlite3.Row) -> list[str]:
     candidates = [
         normalize_selection(str(row["normalized_text"] or row["raw_text"])),
@@ -99,6 +112,11 @@ def current_page_text_candidates(row: sqlite3.Row) -> list[str]:
     joined_blocks = normalize_selection(" ".join(block_texts))
     if joined_blocks:
         candidates.append(joined_blocks)
+    joined_prose_blocks = normalize_selection(
+        " ".join(text for text in block_texts if is_prose_block(text)),
+    )
+    if joined_prose_blocks:
+        candidates.append(joined_prose_blocks)
     return list(dict.fromkeys(candidate for candidate in candidates if candidate))
 
 

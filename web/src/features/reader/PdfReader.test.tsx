@@ -22,6 +22,12 @@ async function renderedTextNode(page: HTMLElement): Promise<ChildNode> {
   return node;
 }
 
+function renderedPageNumbers(selector = "[data-page-number]"): string[] {
+  return Array.from(document.querySelectorAll(selector), (node) =>
+    node.getAttribute("data-page-number"),
+  ).filter((value): value is string => value !== null);
+}
+
 vi.mock("pdfjs-dist/build/pdf.worker.min.mjs?url", () => ({
   default: "/assets/pdf.worker.min.test.mjs",
 }));
@@ -190,7 +196,7 @@ describe("PdfReader", () => {
     );
   });
 
-  it("loads only same-origin PDF.js resources and renders current plus adjacent pages", async () => {
+  it("keeps a continuous page sequence while rendering only the current neighborhood", async () => {
     render(<App />);
 
     const toolbar = await screen.findByRole("toolbar", { name: "PDF 工具栏" });
@@ -209,22 +215,15 @@ describe("PdfReader", () => {
     expect(JSON.stringify(pdf.getDocument.mock.calls[0])).not.toMatch(/https?:\/\//);
     expect(within(toolbar).getByText("1 / 5")).toBeVisible();
     await waitFor(() => {
-      expect(document.querySelectorAll("[data-page-number]")).toHaveLength(2);
+      expect(document.querySelectorAll("[data-page-number]")).toHaveLength(5);
     });
-    expect(
-      Array.from(document.querySelectorAll("[data-page-number]"), (node) =>
-        node.getAttribute("data-page-number"),
-      ),
-    ).toEqual(["1", "2"]);
+    expect(renderedPageNumbers()).toEqual(["1", "2", "3", "4", "5"]);
+    expect(renderedPageNumbers('[data-rendered-page="true"]')).toEqual(["1", "2"]);
 
     fireEvent.click(within(toolbar).getByRole("button", { name: "下一页" }));
 
     await waitFor(() => {
-      expect(
-        Array.from(document.querySelectorAll("[data-page-number]"), (node) =>
-          node.getAttribute("data-page-number"),
-        ),
-      ).toEqual(["1", "2", "3"]);
+      expect(renderedPageNumbers('[data-rendered-page="true"]')).toEqual(["1", "2", "3"]);
     });
   });
 
@@ -272,12 +271,54 @@ describe("PdfReader", () => {
     fireEvent.click(within(toolbar).getByRole("button", { name: "放大" }));
     expect(within(toolbar).getByRole("button", { name: "重置缩放" })).toBeEnabled();
     await waitFor(() => {
-      expect(
-        Array.from(document.querySelectorAll("[data-page-number]"), (node) =>
-          node.getAttribute("data-page-number"),
-        ),
-      ).toEqual(["4", "5"]);
+      expect(renderedPageNumbers('[data-rendered-page="true"]')).toEqual(["4", "5"]);
     });
+  });
+
+  it("updates the toolbar page as the reader is scrolled through a continuous document", async () => {
+    render(<PdfReader {...readerProps()} />);
+    const toolbar = await screen.findByRole("toolbar", { name: "PDF 工具栏" });
+    const pages = document.querySelector(".pdf-reader__pages");
+    if (!(pages instanceof HTMLDivElement)) throw new Error("reader pages missing");
+    Object.defineProperty(pages, "clientHeight", { configurable: true, value: 800 });
+    vi.spyOn(pages, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 900,
+      bottom: 800,
+      width: 900,
+      height: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    const regions = await screen.findAllByRole("region", { name: /PDF 第 \d+ 页/ });
+    regions.forEach((page, index) => {
+      vi.spyOn(page, "getBoundingClientRect").mockImplementation(() => {
+        const top = index * 816 - pages.scrollTop;
+        return {
+          left: 0,
+          top,
+          right: 600,
+          bottom: top + 800,
+          width: 600,
+          height: 800,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        };
+      });
+    });
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(performance.now());
+      return 1;
+    });
+
+    pages.scrollTop = 1632;
+    fireEvent.scroll(pages);
+
+    await waitFor(() => expect(within(toolbar).getByText("3 / 5")).toBeVisible());
+    expect(renderedPageNumbers('[data-rendered-page="true"]')).toEqual(["2", "3", "4"]);
   });
 
   it("fits width using the current physical page in a mixed-width document", async () => {
@@ -650,7 +691,7 @@ describe("PdfReader", () => {
     expect(screen.getByText("请在同一栏选择一句或一段")).toBeVisible();
   });
 
-  it("recalculates overlay coordinates on zoom and clears selection on page change", async () => {
+  it("recalculates overlay coordinates on zoom and keeps a frozen selection while pages change", async () => {
     const onSelectionClear = vi.fn();
     render(<PdfReader {...readerProps()} onSelectionClear={onSelectionClear} />);
     const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
@@ -678,8 +719,8 @@ describe("PdfReader", () => {
 
     expect(highlight).toHaveStyle({ left: "25px", width: "25px" });
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
-    expect(screen.queryByRole("button", { name: "翻译所选文字" })).not.toBeInTheDocument();
-    await waitFor(() => expect(onSelectionClear).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "翻译所选文字" })).toBeVisible();
+    expect(onSelectionClear).not.toHaveBeenCalled();
   });
 
   it("keeps the frozen selection on a same-document annotation version", async () => {
