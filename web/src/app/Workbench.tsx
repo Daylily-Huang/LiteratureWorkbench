@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { LibraryPanel } from "../features/library/LibraryPanel";
 import { PdfReader, type ReaderDocument } from "../features/reader/PdfReader";
@@ -30,6 +30,7 @@ function CurrentReader({ documentId, initialPage }: ReaderLocation) {
   const [document, setDocument] = useState<ReaderDocument | null>(null);
   const [error, setError] = useState(false);
   const [translationSelection, setTranslationSelection] = useState<SelectedText | null>(null);
+  const clearTranslationSelection = useCallback(() => setTranslationSelection(null), []);
 
   useEffect(() => {
     setDocument(null);
@@ -69,6 +70,7 @@ function CurrentReader({ documentId, initialPage }: ReaderLocation) {
       <PdfReader
         {...document}
         initialPage={initialPage}
+        onSelectionClear={clearTranslationSelection}
         onTranslateSelection={setTranslationSelection}
       />
       {translationSelection !== null && (

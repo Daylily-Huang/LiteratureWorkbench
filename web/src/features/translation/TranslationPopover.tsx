@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { SelectedText } from "../reader/selection";
 
@@ -24,6 +24,39 @@ type TranslationPopoverProps = {
   fetcher?: Fetcher;
   pollInterval?: number;
 };
+
+type Point = { x: number; y: number };
+type Size = { width: number; height: number };
+
+const VIEWPORT_MARGIN = 12;
+const ANCHOR_GAP = 10;
+const DEFAULT_CARD_WIDTH = 360;
+const DEFAULT_CARD_HEIGHT = 200;
+
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
+}
+
+
+export function calculatePopoverPosition(
+  anchor: Point,
+  measured: Size,
+  viewport: Size,
+): { left: number; top: number } {
+  const availableWidth = Math.max(0, viewport.width - VIEWPORT_MARGIN * 2);
+  const availableHeight = Math.max(0, viewport.height - VIEWPORT_MARGIN * 2);
+  const width = Math.min(measured.width > 0 ? measured.width : DEFAULT_CARD_WIDTH, availableWidth);
+  const height = Math.min(measured.height > 0 ? measured.height : DEFAULT_CARD_HEIGHT, availableHeight);
+  const rightSide = anchor.x + ANCHOR_GAP;
+  const preferredLeft = rightSide + width <= viewport.width - VIEWPORT_MARGIN
+    ? rightSide
+    : anchor.x - ANCHOR_GAP - width;
+  return {
+    left: clamp(preferredLeft, VIEWPORT_MARGIN, viewport.width - VIEWPORT_MARGIN - width),
+    top: clamp(anchor.y - 24, VIEWPORT_MARGIN, viewport.height - VIEWPORT_MARGIN - height),
+  };
+}
 
 
 function clientTaskId(): string {
@@ -69,6 +102,12 @@ export function TranslationPopover({
   const [task, setTask] = useState<TranslationTask | null>(null);
   const [requestFailed, setRequestFailed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const cardRef = useRef<HTMLElement>(null);
+  const [position, setPosition] = useState(() => calculatePopoverPosition(
+    selected.viewportAnchor,
+    { width: DEFAULT_CARD_WIDTH, height: DEFAULT_CARD_HEIGHT },
+    { width: window.innerWidth, height: window.innerHeight },
+  ));
 
   useEffect(() => {
     let active = true;
@@ -129,11 +168,33 @@ export function TranslationPopover({
     };
   }, [attempt, fetcher, pollInterval, selected]);
 
+  useLayoutEffect(() => {
+    function reposition() {
+      const bounds = cardRef.current?.getBoundingClientRect();
+      setPosition(calculatePopoverPosition(
+        selected.viewportAnchor,
+        {
+          width: bounds?.width ?? DEFAULT_CARD_WIDTH,
+          height: bounds?.height ?? DEFAULT_CARD_HEIGHT,
+        },
+        { width: window.innerWidth, height: window.innerHeight },
+      ));
+    }
+    reposition();
+    window.addEventListener("resize", reposition);
+    return () => window.removeEventListener("resize", reposition);
+  }, [copied, requestFailed, selected.viewportAnchor, task]);
+
   const failed = requestFailed || task?.status === "failed";
   const badge = task === null ? null : sourceBadge(task);
 
   return (
-    <section aria-label="选区翻译" className="translation-popover">
+    <section
+      aria-label="选区翻译"
+      className="translation-popover"
+      ref={cardRef}
+      style={{ left: `${position.left}px`, top: `${position.top}px` }}
+    >
       <div className="translation-popover__header">
         <strong>选区翻译</strong>
         {onClose && <button aria-label="关闭翻译" onClick={onClose} type="button">×</button>}

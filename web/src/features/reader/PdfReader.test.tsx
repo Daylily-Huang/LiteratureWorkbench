@@ -468,8 +468,10 @@ describe("PdfReader", () => {
   });
 
   it("recalculates overlay coordinates on zoom and clears selection on page change", async () => {
-    render(<PdfReader {...readerProps()} />);
+    const onSelectionClear = vi.fn();
+    render(<PdfReader {...readerProps()} onSelectionClear={onSelectionClear} />);
     const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+    onSelectionClear.mockClear();
     const textNode = await renderedTextNode(pageElement);
     vi.spyOn(pageElement, "getBoundingClientRect").mockReturnValue({
       left: 10,
@@ -494,6 +496,7 @@ describe("PdfReader", () => {
     expect(highlight).toHaveStyle({ left: "25px", width: "25px" });
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     expect(screen.queryByRole("button", { name: "翻译所选文字" })).not.toBeInTheDocument();
+    await waitFor(() => expect(onSelectionClear).toHaveBeenCalledTimes(1));
   });
 
   it("clears frozen selection when refreshed metadata changes identity", async () => {

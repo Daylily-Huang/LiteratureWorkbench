@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SelectedText } from "../reader/selection";
-import { TranslationPopover } from "./TranslationPopover";
+import { calculatePopoverPosition, TranslationPopover } from "./TranslationPopover";
 
 
 const selected: SelectedText = {
@@ -21,8 +21,52 @@ const selected: SelectedText = {
 
 describe("TranslationPopover", () => {
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("prefers the right side, falls back left, and clamps inside the viewport", () => {
+    expect(calculatePopoverPosition(
+      { x: 100, y: 100 },
+      { width: 360, height: 200 },
+      { width: 1000, height: 800 },
+    )).toEqual({ left: 110, top: 76 });
+    expect(calculatePopoverPosition(
+      { x: 950, y: 790 },
+      { width: 360, height: 200 },
+      { width: 1000, height: 800 },
+    )).toEqual({ left: 580, top: 588 });
+    expect(calculatePopoverPosition(
+      { x: 100, y: 5 },
+      { width: 360, height: 200 },
+      { width: 1000, height: 800 },
+    )).toEqual({ left: 110, top: 12 });
+  });
+
+  it("repositions the measured card when the viewport changes", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 360, bottom: 200,
+      width: 360, height: 200, toJSON: () => ({}),
+    });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "task-a", status: "completed", translated_text: "译文",
+        provider: "deepseek", model: "deepseek-chat",
+      }), { status: 200 }));
+    const anchored = { ...selected, viewportAnchor: { x: 500, y: 300 } };
+
+    render(<TranslationPopover fetcher={fetcher} selected={anchored} />);
+    const card = screen.getByRole("region", { name: "选区翻译" });
+    await waitFor(() => expect(card).toHaveStyle({ left: "130px", top: "276px" }));
+
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1000 });
+    fireEvent(window, new Event("resize"));
+
+    await waitFor(() => expect(card).toHaveStyle({ left: "510px", top: "276px" }));
   });
 
   it("creates a bounded task, polls, and shows provider source", async () => {

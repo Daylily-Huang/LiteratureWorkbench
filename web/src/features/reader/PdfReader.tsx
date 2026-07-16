@@ -36,6 +36,7 @@ export type ReaderDocument = {
 
 type PdfReaderProps = ReaderDocument & {
   initialPage?: number;
+  onSelectionClear?(): void;
   onSelectionChange?(selected: SelectedText): void;
   onTranslateSelection?(selected: SelectedText): void;
 };
@@ -181,6 +182,7 @@ export function PdfReader({
   contentId,
   filename,
   initialPage = 1,
+  onSelectionClear,
   onSelectionChange,
   onTranslateSelection,
 }: PdfReaderProps) {
@@ -224,7 +226,8 @@ export function PdfReader({
   useEffect(() => {
     setSelected(null);
     setSelectionHint(null);
-  }, [documentId, documentVersionId, contentId, pageIndex]);
+    onSelectionClear?.();
+  }, [documentId, documentVersionId, contentId, onSelectionClear, pageIndex]);
 
   const pageIndexes = useMemo(
     () => visiblePageIndexes(pageIndex, pdf?.numPages ?? 0),

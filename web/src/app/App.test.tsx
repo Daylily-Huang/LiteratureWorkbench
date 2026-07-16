@@ -14,7 +14,37 @@ vi.mock("../features/library/LibraryPanel", () => ({
 }));
 
 vi.mock("../features/reader/PdfReader", () => ({
-  PdfReader: ({ documentId }: { documentId: string }) => <p>阅读 {documentId}</p>,
+  PdfReader: ({ documentId, onTranslateSelection }: {
+    documentId: string;
+    onTranslateSelection?: (selected: unknown) => void;
+  }) => (
+    <>
+      <p>阅读 {documentId}</p>
+      <button
+        onClick={() => onTranslateSelection?.({
+          documentId,
+          documentVersionId: `version-${documentId}`,
+          contentId: "a".repeat(64),
+          pdfPage: 1,
+          text: `selection-${documentId}`,
+          contextBefore: "",
+          contextAfter: "",
+          rects: [],
+          buttonAnchor: { x: 0, y: 0 },
+          viewportAnchor: { x: 100, y: 100 },
+        })}
+        type="button"
+      >
+        选择测试文字
+      </button>
+    </>
+  ),
+}));
+
+vi.mock("../features/translation/TranslationPopover", () => ({
+  TranslationPopover: ({ selected }: { selected: { text: string } }) => (
+    <section aria-label="选区翻译">{selected.text}</section>
+  ),
 }));
 
 import { App } from "./App";
@@ -57,5 +87,21 @@ describe("App", () => {
     window.history.pushState({}, "", "/?document=document-history&page=3");
     window.dispatchEvent(new PopStateEvent("popstate"));
     await waitFor(() => expect(screen.getByText("阅读 document-history")).toBeVisible());
+  });
+
+  it("clears a translation selection when another document opens", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, "", "/?document=document-current&page=1");
+    render(<App />);
+
+    await screen.findByText("阅读 document-current");
+    await user.click(screen.getByRole("button", { name: "选择测试文字" }));
+    expect(screen.getByRole("region", { name: "选区翻译" })).toHaveTextContent(
+      "selection-document-current",
+    );
+
+    await user.click(screen.getByRole("button", { name: /打开测试文献 document-current/ }));
+    await screen.findByText("阅读 document-next");
+    expect(screen.queryByRole("region", { name: "选区翻译" })).not.toBeInTheDocument();
   });
 });
