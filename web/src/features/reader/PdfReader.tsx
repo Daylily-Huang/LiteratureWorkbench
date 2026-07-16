@@ -25,6 +25,11 @@ import {
   type SelectedText,
   type SelectionCapture,
 } from "./selection";
+import {
+  beginVisualSelection,
+  captureVisualSelection,
+  type VisualSelectionGesture,
+} from "./visualSelection";
 
 
 const PDF_RANGE_CHUNK_BYTES = 1024 * 1024;
@@ -79,6 +84,7 @@ function PdfPage({
   annotations,
   activeAnnotationId,
   annotationBusy,
+  selectionDragging,
   onAnnotateSelection,
   onCancelSelection,
   onOpenAnnotation,
@@ -93,6 +99,7 @@ function PdfPage({
   annotations: PdfAnnotation[];
   activeAnnotationId?: string | null;
   annotationBusy?: boolean;
+  selectionDragging?: boolean;
   onAnnotateSelection?(
     selected: SelectedText,
     type: "highlight" | "underline" | "comment",
@@ -215,6 +222,7 @@ function PdfPage({
           onTranslate={() => onTranslateSelection?.(selected)}
           scale={scale}
           selected={selected}
+          showTools={!selectionDragging}
         />
       )}
       <AnnotationOverlay
@@ -252,6 +260,11 @@ export function PdfReader({
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState<SelectedText | null>(null);
   const [selectionHint, setSelectionHint] = useState<string | null>(null);
+  const [selectionDragging, setSelectionDragging] = useState(false);
+  const visualGestureRef = useRef<{
+    gesture: VisualSelectionGesture;
+    moved: boolean;
+  } | null>(null);
   const selectionGestureRef = useRef<{
     lastValid: { captured: SelectionCapture; range: Range } | null;
   } | null>(null);
@@ -288,6 +301,9 @@ export function PdfReader({
   useEffect(() => {
     setSelected(null);
     setSelectionHint(null);
+    setSelectionDragging(false);
+    visualGestureRef.current = null;
+    selectionGestureRef.current = null;
     onSelectionClear?.();
   }, [documentId, documentVersionId, contentId, onSelectionClear, pageIndex]);
 
@@ -335,6 +351,24 @@ export function PdfReader({
   }
 
   function rememberValidSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    const visual = visualGestureRef.current;
+    if (visual !== null) {
+      visual.moved = true;
+      if (!event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      }
+      const captured = captureVisualSelection(
+        visual.gesture,
+        event.clientX,
+        event.clientY,
+        event.altKey,
+      );
+      window.getSelection()?.removeAllRanges();
+      setSelected(captured.selected);
+      setSelectionHint(captured.hint);
+      event.preventDefault();
+      return;
+    }
     const gesture = selectionGestureRef.current;
     const browserSelection = window.getSelection();
     if (gesture === null || browserSelection === null || browserSelection.rangeCount !== 1) return;
@@ -359,6 +393,29 @@ export function PdfReader({
     ) {
       return;
     }
+    const visual = visualGestureRef.current;
+    if (visual !== null) {
+      const captured = visual.moved
+        ? captureVisualSelection(
+            visual.gesture,
+            event.clientX,
+            event.clientY,
+            event.altKey,
+          )
+        : { selected: null, hint: null };
+      window.getSelection()?.removeAllRanges();
+      visualGestureRef.current = null;
+      selectionGestureRef.current = null;
+      setSelectionDragging(false);
+      setSelected(captured.selected);
+      setSelectionHint(captured.hint);
+      if (captured.selected !== null) onSelectionChange?.(captured.selected);
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      event.preventDefault();
+      return;
+    }
     const browserSelection = window.getSelection();
     let captured = captureBrowserSelection(event.altKey);
     if (captured.selected === null && selectionGestureRef.current?.lastValid !== null) {
@@ -369,6 +426,47 @@ export function PdfReader({
     setSelected(captured.selected);
     setSelectionHint(captured.hint);
     if (captured.selected !== null) onSelectionChange?.(captured.selected);
+  }
+
+  function startSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    if (
+      event.target instanceof Element
+      && event.target.closest(".selection-overlay__tools") !== null
+    ) {
+      return;
+    }
+    const gesture = beginVisualSelection(
+      event.target,
+      event.clientX,
+      event.clientY,
+      { documentId, documentVersionId, contentId },
+      scale,
+    );
+    if (gesture === null) {
+      visualGestureRef.current = null;
+      selectionGestureRef.current = { lastValid: null };
+      return;
+    }
+    visualGestureRef.current = { gesture, moved: false };
+    selectionGestureRef.current = null;
+    setSelected(null);
+    setSelectionHint(null);
+    setSelectionDragging(true);
+    onSelectionClear?.();
+    window.getSelection()?.removeAllRanges();
+  }
+
+  function cancelSelectionGesture(event: ReactPointerEvent<HTMLDivElement>) {
+    if (visualGestureRef.current === null) return;
+    visualGestureRef.current = null;
+    selectionGestureRef.current = null;
+    setSelectionDragging(false);
+    setSelected(null);
+    setSelectionHint(null);
+    window.getSelection()?.removeAllRanges();
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   }
 
   if (error) return <p role="alert">PDF 暂时无法打开</p>;
@@ -386,7 +484,8 @@ export function PdfReader({
       />
       <div
         className="pdf-reader__pages"
-        onPointerDown={() => { selectionGestureRef.current = { lastValid: null }; }}
+        onPointerCancel={cancelSelectionGesture}
+        onPointerDown={startSelection}
         onPointerMove={rememberValidSelection}
         onPointerUp={captureSelection}
         ref={rootRef}
@@ -411,6 +510,7 @@ export function PdfReader({
             pageIndex={index}
             scale={scale}
             selected={selected}
+            selectionDragging={selectionDragging}
           />
         ))}
       </div>

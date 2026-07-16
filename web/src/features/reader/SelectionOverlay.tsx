@@ -7,6 +7,7 @@ type SelectionOverlayProps = {
   selected: SelectedText;
   scale: number;
   busy?: boolean;
+  showTools?: boolean;
   onAnnotate?(type: "highlight" | "underline" | "comment", color: string, comment?: string): void;
   onCancel?(): void;
   onTranslate?(): void;
@@ -25,6 +26,7 @@ export function SelectionOverlay({
   selected,
   scale,
   busy = false,
+  showTools = true,
   onAnnotate,
   onCancel,
   onTranslate,
@@ -53,7 +55,7 @@ export function SelectionOverlay({
           }}
         />
       ))}
-      <div
+      {showTools && <div
         className="selection-overlay__tools"
         onPointerDown={(event) => event.preventDefault()}
         style={{
@@ -129,7 +131,7 @@ export function SelectionOverlay({
             >保存评论</button>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

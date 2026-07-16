@@ -351,6 +351,80 @@ describe("PdfReader", () => {
     expect(screen.getByRole("button", { name: "翻译所选文字" })).toBeVisible();
   });
 
+  it("uses visual pointer hits instead of interleaved DOM order for a drag", async () => {
+    const onSelection = vi.fn();
+    render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
+    const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+    const textLayer = pageElement.querySelector(".textLayer") as HTMLElement;
+    textLayer.replaceChildren();
+    const sidebarSpan = document.createElement("span");
+    const firstSpan = document.createElement("span");
+    const footerSpan = document.createElement("span");
+    const secondSpan = document.createElement("span");
+    sidebarSpan.textContent = "Published: October 25, 2021";
+    firstSpan.textContent = "Microsatellites are neutral,";
+    footerSpan.textContent = "PLOS ONE October 25, 2021";
+    secondSpan.textContent = "codominant markers.";
+    textLayer.append(sidebarSpan, firstSpan, footerSpan, secondSpan);
+    const nodes = [
+      sidebarSpan.firstChild as Text,
+      firstSpan.firstChild as Text,
+      footerSpan.firstChild as Text,
+      secondSpan.firstChild as Text,
+    ];
+    const bounds = new Map<Node, DOMRect>([
+      [nodes[0] as Node, new DOMRect(20, 100, 250, 20)],
+      [nodes[1] as Node, new DOMRect(330, 100, 290, 20)],
+      [nodes[2] as Node, new DOMRect(20, 500, 280, 20)],
+      [nodes[3] as Node, new DOMRect(330, 124, 200, 20)],
+    ]);
+    vi.spyOn(pageElement, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 700, 600),
+    );
+    const nativeSelection = { removeAllRanges: vi.fn() } as unknown as Selection;
+    vi.spyOn(window, "getSelection").mockReturnValue(nativeSelection);
+    const rangeState: { node: Text | null; start: number; end: number } = {
+      node: null,
+      start: 0,
+      end: 0,
+    };
+    vi.spyOn(document, "createRange").mockImplementation(() => ({
+      setStart(node: Text, offset: number) { rangeState.node = node; rangeState.start = offset; },
+      setEnd(node: Text, offset: number) { rangeState.node = node; rangeState.end = offset; },
+      getClientRects() {
+        const base = rangeState.node === null ? undefined : bounds.get(rangeState.node);
+        if (base === undefined || rangeState.node === null) return [];
+        const width = base.width / Math.max(1, rangeState.node.data.length);
+        return [new DOMRect(
+          base.left + rangeState.start * width,
+          base.top,
+          (rangeState.end - rangeState.start) * width,
+          base.height,
+        )];
+      },
+    }) as unknown as Range);
+    Object.defineProperty(document, "caretPositionFromPoint", {
+      configurable: true,
+      value: vi.fn((x: number, y: number) => y < 122
+        ? { offsetNode: nodes[0], offset: nodes[0]?.data.length ?? 0 }
+        : { offsetNode: nodes[3], offset: nodes[3]?.data.length ?? 0 }),
+    });
+
+    fireEvent.pointerDown(firstSpan, { clientX: 330, clientY: 110, pointerId: 1 });
+    fireEvent.pointerMove(pageElement, { clientX: 530, clientY: 134, pointerId: 1 });
+    expect(screen.queryByRole("button", { name: "翻译所选文字" })).not.toBeInTheDocument();
+    fireEvent.pointerUp(pageElement, { clientX: 530, clientY: 134, pointerId: 1 });
+
+    expect(onSelection).toHaveBeenCalledTimes(1);
+    expect(onSelection.mock.calls[0]?.[0]).toMatchObject({
+      text: "Microsatellites are neutral, codominant markers.",
+    });
+    expect(onSelection.mock.calls[0]?.[0].text).not.toContain("Published");
+    expect(onSelection.mock.calls[0]?.[0].text).not.toContain("PLOS ONE");
+    expect(screen.getByRole("button", { name: "翻译所选文字" })).toBeVisible();
+    expect(nativeSelection.removeAllRanges).toHaveBeenCalled();
+  });
+
   it("does not clear the frozen selection before the translate button click", async () => {
     const onTranslateSelection = vi.fn();
     render(<PdfReader {...readerProps()} onTranslateSelection={onTranslateSelection} />);
