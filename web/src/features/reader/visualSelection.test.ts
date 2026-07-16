@@ -146,6 +146,63 @@ describe("visual PDF text selection", () => {
     expect(captured.selected?.text).not.toContain("right");
   });
 
+  it("does not insert a space before punctuation split from an italic PDF span", () => {
+    const italicName = seed("Tragulus versicolor", rect(100, 100, 170));
+    const comma = seed(",", rect(274, 100, 5));
+    const suffix = seed(" a", rect(280, 100, 15));
+    const index = createVisualTextIndex([italicName, comma, suffix]);
+
+    const captured = resolveVisualSelection(index, {
+      node: italicName.node,
+      offset: 0,
+      clientX: 100,
+      clientY: 110,
+    }, {
+      node: suffix.node,
+      offset: suffix.node.data.length,
+      clientX: 295,
+      clientY: 110,
+    }, {
+      metadata,
+      page: 1,
+      pageBounds: rect(0, 0, 700, 600),
+      transform: [1, 0, 0, -1, 0, 600],
+      scale: 1,
+    });
+
+    expect(captured.selected?.text).toBe("Tragulus versicolor, a");
+  });
+
+  it("preserves a word boundary before an adjacent italic scientific name", () => {
+    const prefix = seed("The silver-backed chevrotain", rect(100, 100, 210));
+    const italicName = seed("Tragulus versicolor", rect(309, 100, 170));
+    const comma = seed(",", rect(483, 100, 5));
+    const suffix = seed(" a", rect(489, 100, 15));
+    const index = createVisualTextIndex([prefix, italicName, comma, suffix]);
+
+    const captured = resolveVisualSelection(index, {
+      node: prefix.node,
+      offset: 0,
+      clientX: 100,
+      clientY: 110,
+    }, {
+      node: suffix.node,
+      offset: suffix.node.data.length,
+      clientX: 504,
+      clientY: 110,
+    }, {
+      metadata,
+      page: 1,
+      pageBounds: rect(0, 0, 700, 600),
+      transform: [1, 0, 0, -1, 0, 600],
+      scale: 1,
+    });
+
+    expect(captured.selected?.text).toBe(
+      "The silver-backed chevrotain Tragulus versicolor, a",
+    );
+  });
+
   it("isolates the overlapping two-column geometry observed in the PNAS fixture", () => {
     const left = [
       seed("The population extinction pulse we describe here shows, from a", rect(334.69, 253.73, 531.96, 16)),

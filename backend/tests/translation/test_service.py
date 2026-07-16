@@ -184,6 +184,60 @@ def test_accepts_selection_from_current_parse_block_when_page_text_is_reordered(
     assert task.selected_text == block_text
 
 
+def test_accepts_pdf_style_span_gap_before_punctuation(translation_db) -> None:
+    database, ids = translation_db
+    block_text = "The silver-backed chevrotain Tragulus versicolor, a rare species."
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET blocks_json=? WHERE parse_run_id=?",
+            (
+                '[{"block_id":"0:1","kind":"text","text":'
+                '"The silver-backed chevrotain Tragulus versicolor, a rare species.",'
+                '"bbox_1000":[0,0,1000,100],"source":"pymupdf",'
+                '"confidence":null}]',
+                ids["run"],
+            ),
+        )
+
+    task = service(translation_db).submit(
+        "session",
+        request(
+            ids,
+            text="The silver-backed chevrotain Tragulus versicolor , a rare species.",
+        ),
+    )
+
+    assert task.status == "queued"
+    assert task.selected_text == block_text
+
+
+def test_accepts_missing_space_before_styled_scientific_name(translation_db) -> None:
+    database, ids = translation_db
+    block_text = "The silver-backed chevrotain Tragulus versicolor, a rare species."
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET blocks_json=? WHERE parse_run_id=?",
+            (
+                '[{"block_id":"0:1","kind":"text","text":'
+                '"The silver-backed chevrotain Tragulus versicolor, a rare species.",'
+                '"bbox_1000":[0,0,1000,100],"source":"pymupdf",'
+                '"confidence":null}]',
+                ids["run"],
+            ),
+        )
+
+    task = service(translation_db).submit(
+        "session",
+        request(
+            ids,
+            text="The silver-backed chevrotainTragulus versicolor, a rare species.",
+        ),
+    )
+
+    assert task.status == "queued"
+    assert task.selected_text == block_text
+
+
 def test_online_completion_is_cached_by_provider_model_and_selection(translation_db) -> None:
     _, ids = translation_db
     deepseek = FakeDeepSeek()

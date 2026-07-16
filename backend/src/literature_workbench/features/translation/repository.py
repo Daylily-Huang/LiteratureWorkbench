@@ -76,7 +76,9 @@ class CachedTranslation:
 
 
 def normalize_selection(value: str) -> str:
-    return re.sub(r"\s+", " ", value, flags=re.UNICODE).strip()
+    normalized = re.sub(r"\s+", " ", value, flags=re.UNICODE).strip()
+    normalized = re.sub(r"\s+([,.;:!?%\)\]\}，。；：！？％、])", r"\1", normalized)
+    return re.sub(r"([\(\[\{（【])\s+", r"\1", normalized)
 
 
 def current_page_text_candidates(row: sqlite3.Row) -> list[str]:
@@ -153,16 +155,24 @@ class TranslationRepository:
             ).fetchone()
         if row is None:
             raise SelectionRejected("selection_not_current")
-        matching_text = next(
+        selection_variants = [normalized_selection]
+        styled_boundary_repair = re.sub(
+            r"([a-z])(?=[A-Z][a-z])", r"\1 ", normalized_selection
+        )
+        if styled_boundary_repair != normalized_selection:
+            selection_variants.append(styled_boundary_repair)
+        match = next(
             (
-                candidate
+                (candidate, variant)
                 for candidate in current_page_text_candidates(row)
-                if normalized_selection in candidate
+                for variant in selection_variants
+                if variant in candidate
             ),
             None,
         )
-        if matching_text is None:
+        if match is None:
             raise SelectionRejected("selection_not_current")
+        matching_text, normalized_selection = match
         position = matching_text.find(normalized_selection)
         before = matching_text[:position].rstrip()
         after = matching_text[position + len(normalized_selection) :].lstrip()

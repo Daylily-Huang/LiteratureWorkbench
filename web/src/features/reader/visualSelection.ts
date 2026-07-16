@@ -240,6 +240,8 @@ function separator(first: VisualFragment, second: VisualFragment): string {
   const firstText = first.node.data;
   const secondText = second.node.data;
   if (/\s$/u.test(firstText) || /^\s/u.test(secondText)) return "";
+  if (/^[,.;:!?%\)\]\}，。；：！？％、]/u.test(secondText)) return "";
+  if (/[a-z]$/u.test(firstText) && /^[A-Z][a-z]/u.test(secondText)) return " ";
   if (first.line !== second.line) return " ";
   const verticalOverlap = overlap(
     first.bounds.top,
