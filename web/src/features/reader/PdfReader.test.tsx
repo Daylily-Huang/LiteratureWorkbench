@@ -10,6 +10,7 @@ const pdf = vi.hoisted(() => ({
   getDocument: vi.fn(),
   loadingDestroy: vi.fn(async () => undefined),
   renderCancels: [] as Array<ReturnType<typeof vi.fn>>,
+  renderParameters: [] as Array<Record<string, unknown>>,
 }));
 
 async function renderedTextNode(page: HTMLElement): Promise<ChildNode> {
@@ -56,9 +57,10 @@ function page(number: number) {
       width: 600 * scale,
       height: 800 * scale,
     }),
-    render: () => {
+    render: (parameters: Record<string, unknown>) => {
       const cancel = vi.fn();
       pdf.renderCancels.push(cancel);
+      pdf.renderParameters.push(parameters);
       return { promise: Promise.resolve(), cancel };
     },
     streamTextContent: () => new ReadableStream(),
@@ -100,6 +102,7 @@ function setSelection(
     ? endContainer.data.length
     : endContainer.childNodes.length,
 ) {
+  const removeAllRanges = vi.fn();
   const range = {
     collapsed,
     startContainer,
@@ -112,8 +115,10 @@ function setSelection(
     isCollapsed: collapsed,
     rangeCount: 1,
     getRangeAt: () => range,
+    removeAllRanges,
     toString: () => text,
   } as unknown as Selection);
+  return removeAllRanges;
 }
 
 
@@ -127,6 +132,8 @@ describe("PdfReader", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/?document=document-a");
     pdf.renderCancels.length = 0;
+    pdf.renderParameters.length = 0;
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 1 });
     pdf.getDocument.mockReset();
     pdf.getDocument.mockReturnValue({
       promise: Promise.resolve({
@@ -207,6 +214,34 @@ describe("PdfReader", () => {
     });
   });
 
+  it.each([
+    { devicePixelRatio: 1, expectedScale: 1 },
+    { devicePixelRatio: 2, expectedScale: 2 },
+    { devicePixelRatio: 3, expectedScale: 2 },
+  ])(
+    "renders a sharp backing canvas at DPR $devicePixelRatio without changing CSS coordinates",
+    async ({ devicePixelRatio, expectedScale }) => {
+      Object.defineProperty(window, "devicePixelRatio", {
+        configurable: true,
+        value: devicePixelRatio,
+      });
+      render(<PdfReader {...readerProps()} />);
+      const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+      const canvas = pageElement.querySelector("canvas");
+      if (!(canvas instanceof HTMLCanvasElement)) throw new Error("mock canvas missing");
+
+      await waitFor(() => {
+        expect(canvas.width).toBe(600 * expectedScale);
+        expect(canvas.height).toBe(800 * expectedScale);
+      });
+      expect(canvas.style.width).toBe("600px");
+      expect(canvas.style.height).toBe("800px");
+      expect(pdf.renderParameters[0]).toMatchObject({
+        transform: [expectedScale, 0, 0, expectedScale, 0, 0],
+      });
+    },
+  );
+
   it("supports typed physical page navigation and the complete v0.1 toolbar", async () => {
     render(<App />);
     const toolbar = await screen.findByRole("toolbar", { name: "PDF 工具栏" });
@@ -276,7 +311,7 @@ describe("PdfReader", () => {
       y: 20,
       toJSON: () => ({}),
     });
-    setSelection(first, second, "first line\n second line", [
+    const removeAllRanges = setSelection(first, second, "first line\n second line", [
       { left: 30, top: 40, right: 130, bottom: 60, width: 100, height: 20 },
       { left: 30, top: 65, right: 150, bottom: 85, width: 120, height: 20 },
     ]);
@@ -296,7 +331,9 @@ describe("PdfReader", () => {
         { x: 20, y: 20, width: 100, height: 20 },
         { x: 20, y: 45, width: 120, height: 20 },
       ],
+      viewportAnchor: { x: 150, y: 85 },
     });
+    expect(removeAllRanges).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "翻译所选文字" })).toBeVisible();
   });
 
@@ -310,30 +347,67 @@ describe("PdfReader", () => {
     fireEvent.pointerUp(pages[0] as HTMLElement);
     expect(onSelection).not.toHaveBeenCalled();
 
-    setSelection(firstText, secondText, "cross page", [
+    const removeAllRanges = setSelection(firstText, secondText, "cross page", [
       { left: 1, top: 1, right: 2, bottom: 2, width: 1, height: 1 },
     ]);
     fireEvent.pointerUp(pages[0] as HTMLElement);
 
     expect(onSelection).not.toHaveBeenCalled();
-    expect(screen.getByText("请选择同一页文字")).toBeVisible();
+    expect(screen.getByText("请在同一栏选择一句或一段")).toBeVisible();
+    expect(removeAllRanges).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "翻译所选文字" })).not.toBeInTheDocument();
   });
 
-  it("caps selected text at 8000 Unicode code points", async () => {
+  it("rejects text longer than 1500 Unicode code points", async () => {
     const onSelection = vi.fn();
     render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
     const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
     const textNode = await renderedTextNode(pageElement);
-    const oversized = "😀".repeat(8001);
-    setSelection(textNode, textNode, oversized, [
+    const oversized = "😀".repeat(1501);
+    const removeAllRanges = setSelection(textNode, textNode, oversized, [
       { left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 },
     ]);
 
     fireEvent.pointerUp(pageElement);
 
-    const value = onSelection.mock.calls[0]?.[0] as SelectedText;
-    expect(Array.from(value.text)).toHaveLength(8000);
+    expect(onSelection).not.toHaveBeenCalled();
+    expect(screen.getByText("请在同一栏选择一句或一段")).toBeVisible();
+    expect(removeAllRanges).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects selections that span columns or more than 24 visible lines", async () => {
+    const onSelection = vi.fn();
+    render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
+    const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+    const textNode = await renderedTextNode(pageElement);
+
+    const crossColumnClear = setSelection(textNode, textNode, "left and right", [
+      { left: 20, top: 40, right: 170, bottom: 60, width: 150, height: 20 },
+      { left: 300, top: 40, right: 450, bottom: 60, width: 150, height: 20 },
+    ]);
+    fireEvent.pointerUp(pageElement);
+
+    expect(onSelection).not.toHaveBeenCalled();
+    expect(screen.getByText("请在同一栏选择一句或一段")).toBeVisible();
+    expect(crossColumnClear).toHaveBeenCalledTimes(1);
+
+    const tooManyClear = setSelection(
+      textNode,
+      textNode,
+      "many lines",
+      Array.from({ length: 25 }, (_, index) => ({
+        left: 20,
+        top: 40 + index * 22,
+        right: 170,
+        bottom: 60 + index * 22,
+        width: 150,
+        height: 20,
+      })),
+    );
+    fireEvent.pointerUp(pageElement);
+
+    expect(onSelection).not.toHaveBeenCalled();
+    expect(tooManyClear).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the nearest 500 Unicode code points before a selection", async () => {
@@ -390,7 +464,7 @@ describe("PdfReader", () => {
     fireEvent.pointerUp(pageElement);
 
     expect(onSelection).not.toHaveBeenCalled();
-    expect(screen.getByText("请选择同一页文字")).toBeVisible();
+    expect(screen.getByText("请在同一栏选择一句或一段")).toBeVisible();
   });
 
   it("recalculates overlay coordinates on zoom and clears selection on page change", async () => {

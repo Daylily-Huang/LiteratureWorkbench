@@ -8,6 +8,7 @@ export type SelectedText = {
   contextAfter: string;
   rects: Array<{ x: number; y: number; width: number; height: number }>;
   buttonAnchor: { x: number; y: number };
+  viewportAnchor: { x: number; y: number };
 };
 
 export type SelectionMetadata = Pick<
@@ -21,8 +22,10 @@ export type SelectionCapture = {
 };
 
 
-const MAX_SELECTED_CODE_POINTS = 8000;
+const MAX_SELECTED_CODE_POINTS = 1500;
+const MAX_VISIBLE_RECTS = 24;
 const MAX_CONTEXT_CODE_POINTS = 500;
+const SELECTION_HINT = "请在同一栏选择一句或一段";
 
 
 function normalizeWhitespace(value: string): string {
@@ -37,6 +40,25 @@ function capCodePoints(value: string, maximum: number): string {
 
 function containingElement(node: Node): Element | null {
   return node instanceof Element ? node : node.parentElement;
+}
+
+
+function spansColumns(rects: DOMRect[]): boolean {
+  for (let leftIndex = 0; leftIndex < rects.length; leftIndex += 1) {
+    const left = rects[leftIndex];
+    if (left === undefined) continue;
+    for (let rightIndex = leftIndex + 1; rightIndex < rects.length; rightIndex += 1) {
+      const right = rects[rightIndex];
+      if (right === undefined) continue;
+      const verticalOverlap = Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top);
+      const requiredOverlap = Math.min(left.height, right.height) * 0.5;
+      if (verticalOverlap < requiredOverlap) continue;
+      const horizontalGap = Math.max(left.left, right.left) - Math.min(left.right, right.right);
+      const meaningfulGap = Math.max(48, Math.min(left.height, right.height) * 2);
+      if (horizontalGap > meaningfulGap) return true;
+    }
+  }
+  return false;
 }
 
 
@@ -97,12 +119,20 @@ export function captureSamePageSelection(
     || startPage !== endPage
     || !visibleRoot.contains(startPage)
   ) {
-    return { selected: null, hint: "请选择同一页文字" };
+    return { selected: null, hint: SELECTION_HINT };
   }
   const pdfPage = Number(startPage.dataset.pageNumber);
   const pageBounds = startPage.getBoundingClientRect();
-  const rects = Array.from(range.getClientRects())
-    .filter((rect) => rect.width > 0 && rect.height > 0)
+  const clientRects = Array.from(range.getClientRects())
+    .filter((rect) => rect.width > 0 && rect.height > 0);
+  if (
+    Array.from(normalized).length > MAX_SELECTED_CODE_POINTS
+    || clientRects.length > MAX_VISIBLE_RECTS
+    || spansColumns(clientRects)
+  ) {
+    return { selected: null, hint: SELECTION_HINT };
+  }
+  const rects = clientRects
     .map((rect) => ({
       x: (rect.left - pageBounds.left) / scale,
       y: (rect.top - pageBounds.top) / scale,
@@ -110,22 +140,24 @@ export function captureSamePageSelection(
       height: rect.height / scale,
     }));
   if (!Number.isInteger(pdfPage) || pdfPage < 1 || rects.length === 0) {
-    return { selected: null, hint: "请选择同一页文字" };
+    return { selected: null, hint: SELECTION_HINT };
   }
-  const fullSelection = normalized;
-  const text = capCodePoints(fullSelection, MAX_SELECTED_CODE_POINTS);
   const context = contextAroundRange(startLayer, range);
   const last = rects[rects.length - 1];
-  if (last === undefined) return { selected: null, hint: "请选择同一页文字" };
+  const lastClientRect = clientRects[clientRects.length - 1];
+  if (last === undefined || lastClientRect === undefined) {
+    return { selected: null, hint: SELECTION_HINT };
+  }
   return {
     selected: {
       ...metadata,
       pdfPage,
-      text,
+      text: normalized,
       contextBefore: context.before,
       contextAfter: context.after,
       rects,
       buttonAnchor: { x: last.x + last.width, y: last.y + last.height },
+      viewportAnchor: { x: lastClientRect.right, y: lastClientRect.bottom },
     },
     hint: null,
   };

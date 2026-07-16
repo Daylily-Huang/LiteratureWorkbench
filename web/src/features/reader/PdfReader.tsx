@@ -20,6 +20,13 @@ import {
 
 const PDF_RANGE_CHUNK_BYTES = 1024 * 1024;
 
+
+function canvasOutputScale(): number {
+  const ratio = window.devicePixelRatio;
+  if (!Number.isFinite(ratio) || ratio < 1) return 1;
+  return Math.min(ratio, 2);
+}
+
 export type ReaderDocument = {
   documentId: string;
   documentVersionId: string;
@@ -103,8 +110,9 @@ function PdfPage({
       const text = textRef.current;
       if (canvas === null || text === null) return;
       const viewport = page.getViewport({ scale });
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
+      const outputScale = canvasOutputScale();
+      canvas.width = Math.ceil(viewport.width * outputScale);
+      canvas.height = Math.ceil(viewport.height * outputScale);
       canvas.style.width = `${viewport.width}px`;
       canvas.style.height = `${viewport.height}px`;
       const context = canvas.getContext("2d");
@@ -113,7 +121,12 @@ function PdfPage({
       text.style.width = `${viewport.width}px`;
       text.style.height = `${viewport.height}px`;
       setRenderedSize({ width: viewport.width, height: viewport.height });
-      renderTask = page.render({ canvas, canvasContext: context, viewport });
+      renderTask = page.render({
+        canvas,
+        canvasContext: context,
+        transform: [outputScale, 0, 0, outputScale, 0, 0],
+        viewport,
+      });
       textLayer = new TextLayer({
         container: text,
         textContentSource: page.streamTextContent(),
@@ -241,12 +254,14 @@ export function PdfReader({
   function captureSelection() {
     const root = rootRef.current;
     if (root === null) return;
+    const browserSelection = window.getSelection();
     const captured = captureSamePageSelection(
-      window.getSelection(),
+      browserSelection,
       root,
       { documentId, documentVersionId, contentId },
       scale,
     );
+    browserSelection?.removeAllRanges();
     setSelected(captured.selected);
     setSelectionHint(captured.hint);
     if (captured.selected !== null) onSelectionChange?.(captured.selected);
