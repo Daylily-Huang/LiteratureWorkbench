@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ImportConfirmDialog } from "./ImportConfirmDialog";
+import { DocumentTree } from "./DocumentTree";
 import {
   browserDocumentApi,
   type DocumentApi,
@@ -170,20 +171,11 @@ export function LibraryPanel({
       }}
     >
       <h1>文献库</h1>
-      <nav aria-label="文献列表" className="document-list">
-        {documents.map((document) => (
-          <button
-            aria-current={activeDocumentId === document.document_id ? "page" : undefined}
-            className="document-list__item"
-            key={document.document_id}
-            onClick={() => onOpenDocument(document.document_id)}
-            title={document.filename}
-            type="button"
-          >
-            {document.filename}
-          </button>
-        ))}
-      </nav>
+      <DocumentTree
+        activeDocumentId={activeDocumentId}
+        documents={documents}
+        onOpenDocument={onOpenDocument}
+      />
       {documentsFailed && <p role="alert">文献列表暂时无法读取</p>}
       <label>导入文献<input ref={input} type="file" onChange={(event) => choose(event.target.files?.[0])} /></label>
       {unsupported && <p>首版暂不导入；以后可在单次明确授权后用于云处理</p>}

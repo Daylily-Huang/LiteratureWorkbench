@@ -52,8 +52,8 @@ test("document inventory is clickable and marks the active PDF", async () => {
     <LibraryPanel
       activeDocumentId="document-active"
       documentApi={documentApi([
-        { document_id: "document-active", filename: "active.pdf" },
-        { document_id: "document-next", filename: "next.pdf" },
+        { document_id: "document-active", filename: "active.pdf", relative_folder: "研究", authorization_source: "registered_library" },
+        { document_id: "document-next", filename: "next.pdf", relative_folder: "研究", authorization_source: "registered_library" },
       ])}
       importApi={api()}
       onOpenDocument={onOpenDocument}

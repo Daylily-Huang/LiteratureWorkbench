@@ -1,6 +1,8 @@
 export type DocumentListItem = {
   document_id: string;
   filename: string;
+  relative_folder: string;
+  authorization_source: string;
 };
 
 export type DocumentApi = {
@@ -11,6 +13,10 @@ type DocumentPayload = DocumentListItem & {
   current_document_version_id: string | null;
   content_id: string | null;
   status: string;
+  cloud_policy: {
+    auto_cloud_eligible: boolean;
+    authorization_source: string;
+  };
 };
 
 type PagePayload = {
@@ -30,9 +36,14 @@ function isDocument(value: unknown): value is DocumentPayload {
   return (
     typeof item.document_id === "string" &&
     typeof item.filename === "string" &&
+    typeof item.relative_folder === "string" &&
     (typeof item.current_document_version_id === "string" || item.current_document_version_id === null) &&
     (typeof item.content_id === "string" || item.content_id === null) &&
-    typeof item.status === "string"
+    typeof item.status === "string" &&
+    typeof item.cloud_policy === "object" &&
+    item.cloud_policy !== null &&
+    typeof (item.cloud_policy as Record<string, unknown>).auto_cloud_eligible === "boolean" &&
+    typeof (item.cloud_policy as Record<string, unknown>).authorization_source === "string"
   );
 }
 
@@ -77,7 +88,12 @@ export const browserDocumentApi: DocumentApi = {
           document.content_id !== null &&
           (document.status === "candidate_pdf" || document.status === "valid_pdf"),
         )
-        .map(({ document_id, filename }) => ({ document_id, filename }));
+        .map(({ document_id, filename, relative_folder, cloud_policy }) => ({
+          document_id,
+          filename,
+          relative_folder,
+          authorization_source: cloud_policy.authorization_source,
+        }));
     } catch (error) {
       if (error instanceof DocumentApiError) throw error;
       throw new DocumentApiError("document_list_unavailable");
