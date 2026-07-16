@@ -18,6 +18,8 @@ import "./pdfWorker";
 import { OcrTextLayer, type OcrBlock } from "./OcrTextLayer";
 import { PdfToolbar } from "./PdfToolbar";
 import { SelectionOverlay } from "./SelectionOverlay";
+import { AnnotationOverlay } from "../annotations/AnnotationOverlay";
+import type { PdfAnnotation } from "../annotations/annotations";
 import {
   captureSamePageSelection,
   type SelectedText,
@@ -43,6 +45,17 @@ export type ReaderDocument = {
 
 type PdfReaderProps = ReaderDocument & {
   initialPage?: number;
+  requestedPage?: number;
+  annotations?: PdfAnnotation[];
+  activeAnnotationId?: string | null;
+  annotationBusy?: boolean;
+  onAnnotateSelection?(
+    selected: SelectedText,
+    type: "highlight" | "underline" | "comment",
+    color: string,
+    comment?: string,
+  ): void;
+  onOpenAnnotation?(annotationId: string): void;
   onSelectionClear?(): void;
   onSelectionChange?(selected: SelectedText): void;
   onTranslateSelection?(selected: SelectedText): void;
@@ -63,6 +76,12 @@ function PdfPage({
   pageIndex,
   scale,
   selected,
+  annotations,
+  activeAnnotationId,
+  annotationBusy,
+  onAnnotateSelection,
+  onCancelSelection,
+  onOpenAnnotation,
   onTranslateSelection,
 }: {
   document: PDFDocumentProxy;
@@ -71,12 +90,25 @@ function PdfPage({
   pageIndex: number;
   scale: number;
   selected: SelectedText | null;
+  annotations: PdfAnnotation[];
+  activeAnnotationId?: string | null;
+  annotationBusy?: boolean;
+  onAnnotateSelection?(
+    selected: SelectedText,
+    type: "highlight" | "underline" | "comment",
+    color: string,
+    comment?: string,
+  ): void;
+  onCancelSelection?(): void;
+  onOpenAnnotation?(annotationId: string): void;
   onTranslateSelection?(selected: SelectedText): void;
 }) {
+  const pageRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState(false);
   const [renderedSize, setRenderedSize] = useState({ width: 0, height: 0 });
+  const [viewportTransform, setViewportTransform] = useState<number[] | undefined>();
   const [ocrPage, setOcrPage] = useState<{
     parser_name: "pymupdf" | "mineru";
     coordinate_reliable: boolean;
@@ -118,6 +150,10 @@ function PdfPage({
       const text = textRef.current;
       if (canvas === null || text === null) return;
       const viewport = page.getViewport({ scale });
+      if (pageRef.current !== null) {
+        pageRef.current.dataset.pdfTransform = JSON.stringify(viewport.transform);
+      }
+      setViewportTransform([...viewport.transform]);
       const outputScale = canvasOutputScale();
       canvas.width = Math.ceil(viewport.width * outputScale);
       canvas.height = Math.ceil(viewport.height * outputScale);
@@ -158,6 +194,7 @@ function PdfPage({
       aria-label={`PDF 第 ${pageIndex + 1} 页`}
       className="pdf-page"
       data-page-number={pageIndex + 1}
+      ref={pageRef}
     >
       <canvas aria-hidden="true" ref={canvasRef} />
       <div className="textLayer" ref={textRef} />
@@ -172,11 +209,20 @@ function PdfPage({
       )}
       {selected?.pdfPage === pageIndex + 1 && (
         <SelectionOverlay
+          busy={annotationBusy}
+          onAnnotate={(type, color, comment) => onAnnotateSelection?.(selected, type, color, comment)}
+          onCancel={onCancelSelection}
           onTranslate={() => onTranslateSelection?.(selected)}
           scale={scale}
           selected={selected}
         />
       )}
+      <AnnotationOverlay
+        activeAnnotationId={activeAnnotationId}
+        annotations={annotations}
+        onOpen={onOpenAnnotation}
+        pageTransform={viewportTransform}
+      />
       {error && <p role="alert">本页暂时无法显示</p>}
     </section>
   );
@@ -189,6 +235,12 @@ export function PdfReader({
   contentId,
   filename,
   initialPage = 1,
+  requestedPage,
+  annotations = [],
+  activeAnnotationId,
+  annotationBusy,
+  onAnnotateSelection,
+  onOpenAnnotation,
   onSelectionClear,
   onSelectionChange,
   onTranslateSelection,
@@ -238,6 +290,12 @@ export function PdfReader({
     setSelectionHint(null);
     onSelectionClear?.();
   }, [documentId, documentVersionId, contentId, onSelectionClear, pageIndex]);
+
+  useEffect(() => {
+    if (requestedPage !== undefined && pdf !== null) {
+      setPageIndex(Math.min(Math.max(requestedPage - 1, 0), pdf.numPages - 1));
+    }
+  }, [pdf, requestedPage]);
 
   const pageIndexes = useMemo(
     () => visiblePageIndexes(pageIndex, pdf?.numPages ?? 0),
@@ -297,7 +355,7 @@ export function PdfReader({
   function captureSelection(event: ReactPointerEvent<HTMLDivElement>) {
     if (
       event.target instanceof Element
-      && event.target.closest(".selection-overlay__button") !== null
+      && event.target.closest(".selection-overlay__tools") !== null
     ) {
       return;
     }
@@ -339,6 +397,16 @@ export function PdfReader({
             document={pdf}
             documentId={documentId}
             key={index}
+            activeAnnotationId={activeAnnotationId}
+            annotationBusy={annotationBusy}
+            annotations={annotations.filter((annotation) => annotation.page === index + 1)}
+            onAnnotateSelection={onAnnotateSelection}
+            onCancelSelection={() => {
+              setSelected(null);
+              setSelectionHint(null);
+              onSelectionClear?.();
+            }}
+            onOpenAnnotation={onOpenAnnotation}
             onTranslateSelection={onTranslateSelection}
             pageIndex={index}
             scale={scale}

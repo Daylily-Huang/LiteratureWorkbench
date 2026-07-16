@@ -7,6 +7,7 @@ export type SelectedText = {
   contextBefore: string;
   contextAfter: string;
   rects: Array<{ x: number; y: number; width: number; height: number }>;
+  pdfQuads: number[][];
   buttonAnchor: { x: number; y: number };
   viewportAnchor: { x: number; y: number };
   translationEligible: boolean;
@@ -41,6 +42,35 @@ function capCodePoints(value: string, maximum: number): string {
 
 function containingElement(node: Node): Element | null {
   return node instanceof Element ? node : node.parentElement;
+}
+
+
+export function viewportPointToPdfPoint(
+  point: { x: number; y: number },
+  transform: [number, number, number, number, number, number],
+): { x: number; y: number } {
+  const [a, b, c, d, e, f] = transform;
+  const determinant = a * d - b * c;
+  if (Math.abs(determinant) < Number.EPSILON) throw new Error("pdf_viewport_not_invertible");
+  const translatedX = point.x - e;
+  const translatedY = point.y - f;
+  return {
+    x: (d * translatedX - c * translatedY) / determinant,
+    y: (-b * translatedX + a * translatedY) / determinant,
+  };
+}
+
+
+function pageTransform(page: HTMLElement): [number, number, number, number, number, number] | null {
+  const raw = page.dataset.pdfTransform;
+  if (raw === undefined) return null;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!Array.isArray(value) || value.length !== 6 || !value.every(Number.isFinite)) return null;
+    return value as [number, number, number, number, number, number];
+  } catch {
+    return null;
+  }
 }
 
 
@@ -140,6 +170,20 @@ export function captureSamePageSelection(
       width: rect.width / scale,
       height: rect.height / scale,
     }));
+  const transform = pageTransform(startPage);
+  const pdfQuads = transform === null ? [] : clientRects.map((rect) => {
+    const left = rect.left - pageBounds.left;
+    const right = rect.right - pageBounds.left;
+    const top = rect.top - pageBounds.top;
+    const bottom = rect.bottom - pageBounds.top;
+    const points = [
+      viewportPointToPdfPoint({ x: left, y: top }, transform),
+      viewportPointToPdfPoint({ x: right, y: top }, transform),
+      viewportPointToPdfPoint({ x: left, y: bottom }, transform),
+      viewportPointToPdfPoint({ x: right, y: bottom }, transform),
+    ];
+    return points.flatMap((point) => [point.x, point.y]);
+  });
   if (!Number.isInteger(pdfPage) || pdfPage < 1 || rects.length === 0) {
     return { selected: null, hint: SELECTION_HINT };
   }
@@ -157,6 +201,7 @@ export function captureSamePageSelection(
       contextBefore: context.before,
       contextAfter: context.after,
       rects,
+      pdfQuads,
       buttonAnchor: { x: last.x + last.width, y: last.y + last.height },
       viewportAnchor: { x: lastClientRect.right, y: lastClientRect.bottom },
       translationEligible: Array.from(normalized).length <= MAX_TRANSLATION_CODE_POINTS,

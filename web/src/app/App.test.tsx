@@ -30,6 +30,7 @@ vi.mock("../features/reader/PdfReader", () => ({
           contextBefore: "",
           contextAfter: "",
           rects: [],
+          pdfQuads: [],
           buttonAnchor: { x: 0, y: 0 },
           viewportAnchor: { x: 100, y: 100 },
           translationEligible: true,
@@ -54,6 +55,15 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/");
   vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
     const url = String(input);
+    if (url.endsWith("/annotations")) {
+      const documentId = url.split("/").at(-2) ?? "document-next";
+      return Promise.resolve(new Response(JSON.stringify({
+        items: [],
+        document_id: documentId,
+        current_document_version_id: `version-${documentId}`,
+        content_id: "a".repeat(64),
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    }
     const documentId = url.split("/").at(-1) ?? "document-next";
     return Promise.resolve(new Response(JSON.stringify({
       document_id: documentId,

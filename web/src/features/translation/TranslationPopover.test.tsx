@@ -14,6 +14,7 @@ const selected: SelectedText = {
   contextBefore: "untrusted before",
   contextAfter: "untrusted after",
   rects: [],
+  pdfQuads: [],
   buttonAnchor: { x: 0, y: 0 },
   viewportAnchor: { x: 100, y: 100 },
   translationEligible: true,

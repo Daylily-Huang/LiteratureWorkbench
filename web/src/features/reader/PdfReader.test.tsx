@@ -56,6 +56,7 @@ function page(number: number) {
     getViewport: ({ scale }: { scale: number }) => ({
       width: 600 * scale,
       height: 800 * scale,
+      transform: [scale, 0, 0, -scale, 0, 800 * scale],
     }),
     render: (parameters: Record<string, unknown>) => {
       const cancel = vi.fn();
@@ -76,6 +77,7 @@ function sizedPage(number: number, unscaledWidth: number) {
     getViewport: ({ scale }: { scale: number }) => ({
       width: unscaledWidth * scale,
       height: 800 * scale,
+      transform: [scale, 0, 0, -scale, 0, 800 * scale],
     }),
   };
 }
@@ -149,6 +151,17 @@ describe("PdfReader", () => {
         const url = String(input);
         if (url === "/api/imports?active=true") {
           return { ok: true, json: async () => ({ items: [] }) };
+        }
+        if (url.endsWith("/annotations")) {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [],
+              document_id: "document-a",
+              current_document_version_id: "version-a",
+              content_id: "content-a",
+            }),
+          };
         }
         return {
           ok: true,
