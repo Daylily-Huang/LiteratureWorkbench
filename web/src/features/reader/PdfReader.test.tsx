@@ -102,7 +102,8 @@ function setSelection(
     ? endContainer.data.length
     : endContainer.childNodes.length,
 ) {
-  const removeAllRanges = vi.fn();
+  let cleared = false;
+  const removeAllRanges = vi.fn(() => { cleared = true; });
   const range = {
     collapsed,
     startContainer,
@@ -112,11 +113,11 @@ function setSelection(
     getClientRects: () => rects,
   } as unknown as Range;
   vi.spyOn(window, "getSelection").mockReturnValue({
-    isCollapsed: collapsed,
-    rangeCount: 1,
+    get isCollapsed() { return collapsed || cleared; },
+    get rangeCount() { return cleared ? 0 : 1; },
     getRangeAt: () => range,
     removeAllRanges,
-    toString: () => text,
+    toString: () => cleared ? "" : text,
   } as unknown as Selection);
   return removeAllRanges;
 }
@@ -335,6 +336,25 @@ describe("PdfReader", () => {
     });
     expect(removeAllRanges).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "翻译所选文字" })).toBeVisible();
+  });
+
+  it("does not clear the frozen selection before the translate button click", async () => {
+    const onTranslateSelection = vi.fn();
+    render(<PdfReader {...readerProps()} onTranslateSelection={onTranslateSelection} />);
+    const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+    const textNode = await renderedTextNode(pageElement);
+    setSelection(textNode, textNode, "selected", [
+      { left: 20, top: 20, right: 100, bottom: 40, width: 80, height: 20 },
+    ]);
+    fireEvent.pointerUp(pageElement);
+    const button = screen.getByRole("button", { name: "翻译所选文字" });
+
+    fireEvent.pointerUp(button);
+    expect(screen.getByRole("button", { name: "翻译所选文字" })).toBe(button);
+    fireEvent.click(button);
+
+    expect(onTranslateSelection).toHaveBeenCalledTimes(1);
+    expect(onTranslateSelection.mock.calls[0]?.[0]).toMatchObject({ text: "selected" });
   });
 
   it("ignores blank selections and rejects cross-page selections locally", async () => {

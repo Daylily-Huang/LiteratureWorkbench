@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   getDocument,
   TextLayer,
@@ -254,7 +260,13 @@ export function PdfReader({
     }
   }
 
-  function captureSelection() {
+  function captureSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    if (
+      event.target instanceof Element
+      && event.target.closest(".selection-overlay__button") !== null
+    ) {
+      return;
+    }
     const root = rootRef.current;
     if (root === null) return;
     const browserSelection = window.getSelection();
