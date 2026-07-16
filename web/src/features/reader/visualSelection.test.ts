@@ -261,6 +261,39 @@ describe("visual PDF text selection", () => {
     }
   });
 
+  it("keeps a browser caret endpoint when its character box is under the pointer", () => {
+    const first = seed("start", rect(100, 100, 50, 20));
+    const desired = seed("desired", rect(140, 120, 70, 10));
+    const alignedButWrong = seed("wrong", rect(120, 131, 80, 10));
+    const index = createVisualTextIndex([first, desired, alignedButWrong]);
+    const gesture: VisualSelectionGesture = {
+      index,
+      start: { node: first.node, offset: 0, clientX: 100, clientY: 110 },
+      startCandidates: [{ node: first.node, offset: 0, clientX: 100, clientY: 110 }],
+      ownerDocument: document,
+      options: {
+        metadata,
+        page: 1,
+        pageBounds: rect(0, 0, 800, 600),
+        transform: [1, 0, 0, -1, 0, 600],
+        scale: 1,
+      },
+    };
+    const descriptor = Object.getOwnPropertyDescriptor(document, "caretPositionFromPoint");
+    Object.defineProperty(document, "caretPositionFromPoint", {
+      configurable: true,
+      value: () => ({ offsetNode: desired.node, offset: 5 }),
+    });
+    try {
+      const captured = captureVisualSelection(gesture, 190, 130, false);
+      expect(captured.selected?.text).toBe("start desir");
+      expect(captured.selected?.text).not.toContain("wrong");
+    } finally {
+      if (descriptor === undefined) Reflect.deleteProperty(document, "caretPositionFromPoint");
+      else Object.defineProperty(document, "caretPositionFromPoint", descriptor);
+    }
+  });
+
   it("inserts a separator between distinct visual lines with overlapping bounds", () => {
     const first = seed("first line", rect(100, 100, 100, 20));
     const second = seed("second line", rect(100, 110, 110, 20));

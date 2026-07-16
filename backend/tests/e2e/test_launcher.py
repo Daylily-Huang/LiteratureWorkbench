@@ -21,6 +21,7 @@ from literature_workbench.launcher import (
     consume_worker_bootstrap,
     create_desktop_app,
     merge_worker_handlers,
+    partition_worker_handlers,
     recover_exact_stale_worker,
     reuse_running_instance,
     run_worker_until_parent_exit,
@@ -213,6 +214,18 @@ def test_production_worker_handler_inventory_includes_translation() -> None:
         "parse_pdf",
         "translate_selection",
     }
+
+
+def test_production_worker_handlers_separate_interactive_translation() -> None:
+    background, interactive = partition_worker_handlers(
+        cast(LibraryScanner, object()),
+        cast(ImportValidator, object()),
+        cast(ParseWorkerService, object()),
+        cast(TranslationService, object()),
+    )
+
+    assert set(background) == {"scan_library", "validate_import", "parse_pdf"}
+    assert set(interactive) == {"translate_selection"}
 
 
 def test_public_cli_exposes_only_start_and_stop_and_rejects_data_root() -> None:

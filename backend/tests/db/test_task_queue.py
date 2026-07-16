@@ -212,6 +212,55 @@ async def test_worker_with_empty_registry_leases_nothing(database: Database) -> 
 
 
 @pytest.mark.asyncio
+async def test_worker_leases_only_jobs_with_registered_handlers(database: Database) -> None:
+    queue = TaskQueue(database, lambda: datetime.now(UTC))
+    queue.enqueue("parse_pdf", "parse:a", {})
+    queue.enqueue("translate_selection", "translate:a", {})
+    parsed: list[str] = []
+
+    async def parse_handler(job: object, _cancellation: JobCancellation) -> None:
+        parsed.append(str(getattr(job, "kind")))
+
+    worker = Worker(queue, "background-worker", {"parse_pdf": parse_handler})
+
+    assert await worker.run_once() is True
+    assert parsed == ["parse_pdf"]
+    assert queue.count(kind="parse_pdf", status="completed") == 1
+    assert queue.count(kind="translate_selection", status="queued") == 1
+
+
+@pytest.mark.asyncio
+async def test_dedicated_translation_runs_while_background_parse_is_active(
+    database: Database,
+) -> None:
+    queue = TaskQueue(database, lambda: datetime.now(UTC))
+    queue.enqueue("parse_pdf", "parse:a", {})
+    queue.enqueue("translate_selection", "translate:a", {})
+    translation_completed = asyncio.Event()
+    timeline: list[str] = []
+
+    async def parse_handler(_job: object, _cancellation: JobCancellation) -> None:
+        timeline.append("parse-start")
+        await asyncio.wait_for(translation_completed.wait(), timeout=1)
+        timeline.append("parse-end")
+
+    async def translation_handler(_job: object, _cancellation: JobCancellation) -> None:
+        timeline.append("translation")
+        translation_completed.set()
+
+    background = Worker(queue, "background-worker", {"parse_pdf": parse_handler})
+    interactive = Worker(
+        queue,
+        "translation-worker",
+        {"translate_selection": translation_handler},
+    )
+
+    assert await asyncio.gather(background.run_once(), interactive.run_once()) == [True, True]
+    assert timeline == ["parse-start", "translation", "parse-end"]
+    assert queue.count(status="completed") == 2
+
+
+@pytest.mark.asyncio
 async def test_worker_heartbeat_renews_during_blocking_thread_work(database: Database) -> None:
     queue = TaskQueue(database, lambda: datetime.now(UTC))
     other_queue = TaskQueue(database, lambda: datetime.now(UTC))
@@ -288,8 +337,16 @@ async def test_shutdown_between_lease_and_cancellation_registration_blocks_side_
     worker = Worker(queue, "worker-a", {"validate_import": handler}, lease_seconds=1)
     original_lease_next = queue.lease_next
 
-    def lease_then_stop(worker_id: str, lease_seconds: int) -> object:
-        job = original_lease_next(worker_id, lease_seconds)
+    def lease_then_stop(
+        worker_id: str,
+        lease_seconds: int,
+        allowed_kinds: object = None,
+    ) -> object:
+        job = original_lease_next(
+            worker_id,
+            lease_seconds,
+            allowed_kinds,  # type: ignore[arg-type]
+        )
         worker.stop()
         return job
 

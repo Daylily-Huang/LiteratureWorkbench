@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, NewType, TypeAlias, cast
@@ -124,14 +124,28 @@ class TaskQueue:
             return JobId(str(active["id"]))
         return job_id
 
-    def lease_next(self, worker_id: str, lease_seconds: int) -> Job | None:
+    def lease_next(
+        self,
+        worker_id: str,
+        lease_seconds: int,
+        allowed_kinds: Collection[str] | None = None,
+    ) -> Job | None:
         expiry = self._lease_expiry(lease_seconds)
         timestamp = self._timestamp(self._now_utc())
+        normalized_kinds = None if allowed_kinds is None else tuple(sorted(set(allowed_kinds)))
+        if normalized_kinds == ():
+            return None
+        kind_clause = ""
+        parameters: list[str] = []
+        if normalized_kinds is not None:
+            placeholders = ",".join("?" for _ in normalized_kinds)
+            kind_clause = f" AND kind IN ({placeholders})"
+            parameters.extend(normalized_kinds)
         with self._database.transaction() as connection:
             selected = connection.execute(
-                """
+                f"""
                 SELECT id FROM jobs
-                WHERE status = 'queued'
+                WHERE status = 'queued'{kind_clause}
                 ORDER BY
                   CASE
                     WHEN kind = 'translate_selection' THEN 0
@@ -143,7 +157,8 @@ class TaskQueue:
                   END,
                   created_at, id
                 LIMIT 1
-                """
+                """,
+                parameters,
             ).fetchone()
             if selected is None:
                 return None

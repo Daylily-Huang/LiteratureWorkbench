@@ -544,6 +544,30 @@ type CaretDocument = Document & {
 };
 
 
+function trustedCaretHit(
+  index: VisualTextIndex,
+  node: Node | undefined,
+  offset: number | undefined,
+  x: number,
+  y: number,
+): VisualTextHit | null {
+  if (!(node instanceof Text) || offset === undefined) return null;
+  const fragment = index.byNode.get(node);
+  if (fragment === undefined || node.data.length === 0) return null;
+  const clamped = Math.max(0, Math.min(node.data.length, offset));
+  const from = Math.max(0, clamped - 1);
+  const to = Math.min(node.data.length, Math.max(clamped + 1, from + 1));
+  const distance = Math.min(
+    ...fragment.measure(from, to)
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map((rect) => rectDistance(rect, x, y)),
+  );
+  const tolerance = Math.max(6, fragment.bounds.height * 0.5);
+  if (!Number.isFinite(distance) || distance > tolerance) return null;
+  return { node, offset: clamped, clientX: x, clientY: y };
+}
+
+
 function hitsAtPoint(
   index: VisualTextIndex,
   ownerDocument: Document,
@@ -558,18 +582,9 @@ function hitsAtPoint(
     : null;
   const node = position?.offsetNode ?? range?.startContainer;
   const offset = position?.offset ?? range?.startOffset;
+  const caretHit = trustedCaretHit(index, node, offset, x, y);
+  if (caretHit !== null) return [caretHit];
   const hits: VisualTextHit[] = [];
-  if (node instanceof Text && offset !== undefined && index.byNode.has(node)) {
-    const fragment = index.byNode.get(node);
-    hits.push({
-      node,
-      offset: fragment === undefined
-        ? Math.max(0, Math.min(node.data.length, offset))
-        : measuredOffset(fragment, x, y),
-      clientX: x,
-      clientY: y,
-    });
-  }
   const ordered = [...index.fragments].sort((first, second) => (
     rectDistance(first.bounds, x, y) - rectDistance(second.bounds, x, y)
   ));

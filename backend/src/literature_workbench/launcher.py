@@ -49,6 +49,7 @@ from literature_workbench.security.local_session import LocalSession
 from literature_workbench.worker import (
     JobHandler,
     Worker,
+    WorkerPool,
     library_job_handlers,
     parser_job_handlers,
     translation_job_handlers,
@@ -497,6 +498,24 @@ def merge_worker_handlers(
     return handlers
 
 
+def partition_worker_handlers(
+    scanner: LibraryScanner,
+    import_validator: ImportValidator,
+    parser: ParseWorkerService,
+    translation: TranslationService,
+) -> tuple[Mapping[str, JobHandler], Mapping[str, JobHandler]]:
+    all_handlers = merge_worker_handlers(scanner, import_validator, parser, translation)
+    interactive = {
+        kind: handler for kind, handler in all_handlers.items()
+        if kind == "translate_selection"
+    }
+    background = {
+        kind: handler for kind, handler in all_handlers.items()
+        if kind != "translate_selection"
+    }
+    return background, interactive
+
+
 def create_desktop_app(
     settings: AppSettings,
     session: LocalSession,
@@ -672,7 +691,7 @@ def wait_for_worker_ready(
 
 
 async def run_worker_until_parent_exit(
-    worker: Worker,
+    worker: Worker | WorkerPool,
     parent: ProcessIdentity,
     *,
     identity_lookup: IdentityLookup = lookup_process_identity,
@@ -911,10 +930,23 @@ def run_bound_worker(
             QwenLocalClient(),
             qwen_process,
         )
-        worker = Worker(
-            queue,
-            f"desktop-worker-{generation}",
-            merge_worker_handlers(scanner, import_validator, parser, translation),
+        background_handlers, interactive_handlers = partition_worker_handlers(
+            scanner,
+            import_validator,
+            parser,
+            translation,
+        )
+        worker = WorkerPool(
+            Worker(
+                queue,
+                f"desktop-worker-{generation}-background",
+                background_handlers,
+            ),
+            Worker(
+                queue,
+                f"desktop-worker-{generation}-translation",
+                interactive_handlers,
+            ),
         )
         worker_identity = identity_lookup(os.getpid())
         if worker_identity is None:

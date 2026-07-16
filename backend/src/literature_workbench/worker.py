@@ -155,7 +155,11 @@ class Worker:
     async def run_once(self) -> bool:
         if self._shutdown.is_set() or not self._handlers:
             return False
-        job = self._queue.lease_next(self._worker_id, self._lease_seconds)
+        job = self._queue.lease_next(
+            self._worker_id,
+            self._lease_seconds,
+            self._handlers.keys(),
+        )
         if job is None:
             return False
         handler = self._handlers.get(job.kind)
@@ -244,3 +248,22 @@ class Worker:
             except LostLease:
                 cancellation.cancel()
                 return
+
+
+class WorkerPool:
+    def __init__(self, *workers: Worker) -> None:
+        if not workers:
+            raise ValueError("worker pool must not be empty")
+        self._workers = workers
+
+    def stop(self) -> None:
+        for worker in self._workers:
+            worker.stop()
+
+    async def run_forever(self) -> None:
+        tasks = [asyncio.create_task(worker.run_forever()) for worker in self._workers]
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            self.stop()
+            await asyncio.gather(*tasks, return_exceptions=True)
