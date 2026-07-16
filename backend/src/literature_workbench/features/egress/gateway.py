@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import time
 from typing import NoReturn
 from uuid import uuid4
@@ -20,6 +19,10 @@ from literature_workbench.features.models.deepseek import (
     InvalidDeepSeekModel,
     InvalidDeepSeekResponse,
 )
+from literature_workbench.features.translation.repository import (
+    current_page_text_candidates,
+    normalize_selection,
+)
 from literature_workbench.platform.windows.credentials import SecretStore
 
 
@@ -28,10 +31,6 @@ MAX_REQUEST_BYTES = 64 * 1024
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 TOTAL_REQUEST_TIMEOUT_SECONDS = 30.0
 _FIXED_PROBE_PROMPT = "Reply with exactly: model configuration ok"
-
-
-def _normalize_whitespace(value: str) -> str:
-    return re.sub(r"\s+", " ", value, flags=re.UNICODE).strip()
 
 
 class EgressRejected(RuntimeError):
@@ -99,7 +98,7 @@ class DeepSeekGateway:
         with self._database.connect() as connection:
             row = connection.execute(
                 """
-                SELECT d.display_name,p.normalized_text
+                SELECT d.display_name,p.normalized_text,p.raw_text,p.blocks_json
                 FROM documents AS d
                 JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
                 JOIN document_versions AS v
@@ -131,9 +130,13 @@ class DeepSeekGateway:
                     proof.content_sha256,
                 ),
             ).fetchone()
-        if row is None or _normalize_whitespace(
-            proof.verified_text
-        ) not in _normalize_whitespace(str(row["normalized_text"])):
+        if row is None:
+            raise EgressRejected("selection_not_current")
+        normalized_selection = normalize_selection(proof.verified_text)
+        if not any(
+            normalized_selection in candidate
+            for candidate in current_page_text_candidates(row)
+        ):
             raise EgressRejected("selection_not_current")
         return str(row["display_name"])
 

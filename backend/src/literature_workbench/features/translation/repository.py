@@ -79,7 +79,7 @@ def normalize_selection(value: str) -> str:
     return re.sub(r"\s+", " ", value, flags=re.UNICODE).strip()
 
 
-def _current_page_text_candidates(row: sqlite3.Row) -> list[str]:
+def current_page_text_candidates(row: sqlite3.Row) -> list[str]:
     candidates = [
         normalize_selection(str(row["normalized_text"] or row["raw_text"])),
         normalize_selection(str(row["raw_text"])),
@@ -156,7 +156,7 @@ class TranslationRepository:
         matching_text = next(
             (
                 candidate
-                for candidate in _current_page_text_candidates(row)
+                for candidate in current_page_text_candidates(row)
                 if normalized_selection in candidate
             ),
             None,

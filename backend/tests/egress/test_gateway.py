@@ -344,6 +344,31 @@ def test_normalized_selection_spanning_page_whitespace_is_accepted(
     assert len(calls) == 1
 
 
+def test_selection_in_layout_block_survives_interleaved_page_text(
+    database: Database,
+    proof: VerifiedSelectionProof,
+) -> None:
+    calls: list[httpx.Request] = []
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET normalized_text=?,raw_text=?,blocks_json=? "
+            "WHERE parse_run_id=?",
+            (
+                "bounded sidebar source text",
+                "bounded\nsidebar\nsource text",
+                json.dumps([{"text": f"before {SOURCE_TEXT} after"}]),
+                str(PARSE_RUN_ID),
+            ),
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return _success_response(request)
+
+    assert _gateway(database, handler).translate_selection(proof) == TRANSLATED_TEXT
+    assert len(calls) == 1
+
+
 def test_client_disables_environment_and_redirects_and_bounds_timeouts(
     database: Database,
     proof: VerifiedSelectionProof,
