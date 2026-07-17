@@ -485,6 +485,22 @@ describe("PdfReader", () => {
     expect(onTranslateSelection.mock.calls[0]?.[0]).toMatchObject({ text: "selected" });
   });
 
+  it("preserves a frozen selection when the user opens the right-click menu", async () => {
+    render(<PdfReader {...readerProps()} />);
+    const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+    const textNode = await renderedTextNode(pageElement);
+    setSelection(textNode, textNode, "selected", [
+      { left: 20, top: 20, right: 100, bottom: 40, width: 80, height: 20 },
+    ]);
+    fireEvent.pointerUp(pageElement, { button: 0 });
+    const translate = screen.getByRole("button", { name: "翻译所选文字" });
+
+    fireEvent.pointerDown(pageElement, { button: 2 });
+    fireEvent.pointerUp(pageElement, { button: 2 });
+
+    expect(screen.getByRole("button", { name: "翻译所选文字" })).toBe(translate);
+  });
+
   it("ignores blank selections and rejects cross-page selections locally", async () => {
     const onSelection = vi.fn();
     render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
@@ -526,6 +542,31 @@ describe("PdfReader", () => {
     expect(screen.getByRole("button", { name: "翻译所选文字" })).toBeDisabled();
     expect(screen.getByText("超过 8,000 字")).toBeVisible();
     expect(removeAllRanges).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an active native selection when edge dragging scrolls the reader", async () => {
+    const onSelection = vi.fn();
+    render(<PdfReader {...readerProps()} onSelectionChange={onSelection} />);
+    const pageElement = await screen.findByRole("region", { name: "PDF 第 1 页" });
+    const textNode = await renderedTextNode(pageElement);
+    const textElement = textNode.parentElement;
+    const pages = document.querySelector(".pdf-reader__pages");
+    if (textElement === null || !(pages instanceof HTMLElement)) {
+      throw new Error("reader selection surface missing");
+    }
+
+    fireEvent.pointerDown(textElement, { button: 0 });
+    const removeAllRanges = setSelection(textNode, textNode, "edge scrolled selection", [
+      { left: 20, top: 40, right: 170, bottom: 60, width: 150, height: 20 },
+    ]);
+    fireEvent.scroll(pages);
+
+    expect(removeAllRanges).not.toHaveBeenCalled();
+    fireEvent.pointerUp(textElement);
+    expect(onSelection).toHaveBeenCalledTimes(1);
+    expect(onSelection.mock.calls[0]?.[0]).toMatchObject({
+      text: "edge scrolled selection",
+    });
   });
 
   it("rejects cross-column selection but keeps a long same-column selection", async () => {
@@ -753,6 +794,38 @@ describe("PdfReader", () => {
       contentId: "content-b",
       text: "selected",
     }));
+  });
+
+  it("keeps the current PDF visible until an annotation version finishes loading", async () => {
+    const { rerender } = render(<PdfReader {...readerProps()} />);
+    const toolbar = await screen.findByRole("toolbar", { name: "PDF 工具栏" });
+    expect(toolbar).toBeVisible();
+
+    const replacement = {
+      numPages: 5,
+      getPage: vi.fn(async (number: number) => page(number)),
+    };
+    let resolveReplacement: (value: typeof replacement) => void = () => undefined;
+    const replacementPromise = new Promise<typeof replacement>((resolve) => {
+      resolveReplacement = resolve;
+    });
+    pdf.getDocument.mockReturnValueOnce({
+      promise: replacementPromise,
+      destroy: vi.fn(async () => undefined),
+    });
+
+    rerender(
+      <PdfReader
+        {...readerProps()}
+        contentId="content-b"
+        documentVersionId="version-b"
+      />,
+    );
+
+    expect(screen.getByRole("toolbar", { name: "PDF 工具栏" })).toBeVisible();
+    expect(screen.queryByText(/正在打开/)).not.toBeInTheDocument();
+    resolveReplacement(replacement);
+    await waitFor(() => expect(pdf.getDocument).toHaveBeenCalledTimes(2));
   });
 
   it("restores page, zoom, and reader scroll after an annotation version reload", async () => {

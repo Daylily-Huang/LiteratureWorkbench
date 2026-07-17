@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { ReaderDocument } from "../reader/PdfReader";
-import type { AnnotationState, PdfAnnotation } from "./annotations";
+import { annotationColorName, type AnnotationState, type PdfAnnotation } from "./annotations";
 
 
 type AnnotationPanelProps = {
@@ -62,7 +62,7 @@ export function AnnotationPanel({
         <div className="annotation-panel__page" key={page}>
           <strong>第 {page} 页</strong>
           {items.map((annotation) => (
-            <article className="annotation-card" id={`annotation-${annotation.annotation_id}`} key={annotation.annotation_id}>
+            <article className="annotation-card" data-color={annotationColorName(annotation.color)} id={`annotation-${annotation.annotation_id}`} key={annotation.annotation_id}>
               <button className="annotation-card__jump" onClick={() => onJump(annotation)} type="button">
                 {label(annotation)} · {annotation.selected_text || annotation.comment || "无文字内容"}
               </button>

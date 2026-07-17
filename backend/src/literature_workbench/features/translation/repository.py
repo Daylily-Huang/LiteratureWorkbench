@@ -286,6 +286,38 @@ class TranslationRepository:
     def get_for_worker(self, task_id: UUID) -> TranslationTask:
         return self._get(task_id, session_generation=None)
 
+    def expire_other_sessions(self, current_session_generation: str) -> int:
+        timestamp = self._timestamp()
+        with self._database.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT id FROM translation_tasks
+                WHERE session_generation<>? AND status IN ('queued','running')
+                """,
+                (current_session_generation,),
+            ).fetchall()
+            for row in rows:
+                task_id = str(row["id"])
+                connection.execute(
+                    """
+                    UPDATE translation_tasks
+                    SET status='failed',stage='failed',error_code='translation_session_expired',
+                        updated_at=?
+                    WHERE id=? AND status IN ('queued','running')
+                    """,
+                    (timestamp, task_id),
+                )
+                connection.execute(
+                    """
+                    UPDATE jobs
+                    SET status='failed',stage='failed',error_code='translation_session_expired',
+                        retryable=0,lease_owner=NULL,lease_expires_at=NULL,updated_at=?
+                    WHERE dedup_key=? AND status IN ('queued','running')
+                    """,
+                    (timestamp, f"translation:{task_id}"),
+                )
+        return len(rows)
+
     def _get(
         self, task_id: UUID, *, session_generation: str | None
     ) -> TranslationTask:
@@ -375,7 +407,7 @@ class TranslationRepository:
             connection.execute(
                 """UPDATE translation_tasks SET status='completed',stage='completed',
                    provider=?,model=?,fallback_reason=?,result_cache_key=?,error_code=NULL,
-                   updated_at=? WHERE id=?""",
+                   updated_at=? WHERE id=? AND status='running'""",
                 (provider, model, fallback_reason, cache_key, timestamp, str(task_id)),
             )
         return self.get_for_worker(task_id)
@@ -387,7 +419,7 @@ class TranslationRepository:
             connection.execute(
                 """UPDATE translation_tasks SET status='completed',stage='cache_hit',
                    provider=?,model=?,fallback_reason=?,result_cache_key=?,error_code=NULL,
-                   updated_at=? WHERE id=?""",
+                   updated_at=? WHERE id=? AND status='running'""",
                 (cached.provider, cached.model, fallback_reason, cached.cache_key,
                  self._timestamp(), str(task_id)),
             )
@@ -397,7 +429,7 @@ class TranslationRepository:
         with self._database.transaction() as connection:
             connection.execute(
                 """UPDATE translation_tasks SET status='failed',stage='failed',error_code=?,
-                   updated_at=? WHERE id=?""",
+                   updated_at=? WHERE id=? AND status='running'""",
                 (error_code, self._timestamp(), str(task_id)),
             )
         return self.get_for_worker(task_id)

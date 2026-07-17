@@ -5,11 +5,14 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from literature_workbench.db.database import Database
+from literature_workbench.features.egress.billing import UsageCharge
 
 
 @dataclass(frozen=True, slots=True)
 class AuditAttempt:
     id: str
+    model: str
+    purpose: str
 
 
 class EgressAuditRepository:
@@ -72,7 +75,7 @@ class EgressAuditRepository:
                     payload_sha256,
                 ),
             )
-        return AuditAttempt(audit_id)
+        return AuditAttempt(audit_id, model, purpose)
 
     def finish(
         self,
@@ -81,6 +84,7 @@ class EgressAuditRepository:
         outcome: str,
         detail_code: str | None,
         latency_ms: int,
+        charge: UsageCharge | None = None,
     ) -> None:
         with self._database.transaction() as connection:
             changed = connection.execute(
@@ -93,3 +97,28 @@ class EgressAuditRepository:
             )
             if changed.rowcount != 1:
                 raise RuntimeError("egress_audit_finish_failed")
+            if charge is not None:
+                pricing = charge.pricing
+                connection.execute(
+                    """
+                    INSERT INTO deepseek_usage(
+                      audit_id,recorded_at,purpose,model,prompt_cache_hit_tokens,
+                      prompt_cache_miss_tokens,completion_tokens,total_tokens,
+                      cost_nano_cny,pricing_version,cache_hit_nano_cny_per_token,
+                      cache_miss_nano_cny_per_token,output_nano_cny_per_token)
+                    SELECT id,event_time,purpose,model,?,?,?,?,?,?,?,?,?
+                    FROM egress_audit WHERE id=?
+                    """,
+                    (
+                        charge.usage.prompt_cache_hit_tokens,
+                        charge.usage.prompt_cache_miss_tokens,
+                        charge.usage.completion_tokens,
+                        charge.usage.total_tokens,
+                        charge.cost_nano_cny,
+                        charge.pricing_version,
+                        None if pricing is None else pricing.cache_hit_nano_cny_per_token,
+                        None if pricing is None else pricing.cache_miss_nano_cny_per_token,
+                        None if pricing is None else pricing.output_nano_cny_per_token,
+                        attempt.id,
+                    ),
+                )

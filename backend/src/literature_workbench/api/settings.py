@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import cast
 
-from fastapi import APIRouter, Body, Request, Response
+from fastapi import APIRouter, Body, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from literature_workbench.features.egress.gateway import EgressRejected
+from literature_workbench.features.egress.billing import DeepSeekBillingStatus
 from literature_workbench.features.settings.models import (
     DeepSeekKeyUpdate,
     PublicSettings,
@@ -55,3 +56,11 @@ def probe_deepseek(
     except RuntimeError:
         return JSONResponse({"code": "deepseek_probe_failed"}, status_code=502)
     return JSONResponse({"result": result})
+
+
+@router.get("/deepseek-billing")
+def get_deepseek_billing(
+    request: Request,
+    refresh: bool = Query(default=False),
+) -> DeepSeekBillingStatus:
+    return _service(request).read_deepseek_billing(force=refresh)

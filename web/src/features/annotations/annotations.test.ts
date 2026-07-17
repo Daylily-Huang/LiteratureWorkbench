@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  annotationColorName,
   createAnnotation,
   mergeDocumentIdentity,
   mergeSelectionIdentity,
@@ -102,5 +103,15 @@ describe("annotation API", () => {
       documentVersionId: "version-b",
       contentId: "b".repeat(64),
     });
+  });
+
+  it("maps PDF RGB annotation colors back to the UI color names", () => {
+    expect(annotationColorName([1, 0.843, 0])).toBe("yellow");
+    expect(annotationColorName([0.35, 0.78, 0.42])).toBe("green");
+    expect(annotationColorName([0.35, 0.68, 0.95])).toBe("blue");
+    expect(annotationColorName([0.96, 0.47, 0.69])).toBe("pink");
+    expect(annotationColorName([0.9, 0.16, 0.16])).toBe("red");
+    expect(annotationColorName([0.08, 0.08, 0.08])).toBe("black");
+    expect(annotationColorName([0.1, 0.2, 0.3])).toBeUndefined();
   });
 });

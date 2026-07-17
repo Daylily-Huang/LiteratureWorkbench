@@ -68,6 +68,31 @@ test("document inventory is clickable and marks the active PDF", async () => {
   expect(onOpenDocument).toHaveBeenCalledWith("document-next");
 });
 
+test("document inventory automatically shows a PDF discovered after the page opened", async () => {
+  const documents = documentApi();
+  vi.mocked(documents.listDocuments)
+    .mockResolvedValueOnce([
+      { document_id: "document-old", filename: "old.pdf", relative_folder: "研究", authorization_source: "registered_library" },
+    ])
+    .mockResolvedValue([
+      { document_id: "document-old", filename: "old.pdf", relative_folder: "研究", authorization_source: "registered_library" },
+      { document_id: "document-new", filename: "new.pdf", relative_folder: "研究", authorization_source: "registered_library" },
+    ]);
+
+  render(
+    <LibraryPanel
+      activeDocumentId="document-old"
+      documentApi={documents}
+      documentRefreshMs={10}
+      importApi={api()}
+    />,
+  );
+
+  expect(await screen.findByRole("button", { name: "old.pdf" })).toBeVisible();
+  expect(await screen.findByRole("button", { name: "new.pdf" })).toBeVisible();
+  expect(vi.mocked(documents.listDocuments).mock.calls.length).toBeGreaterThanOrEqual(2);
+});
+
 test("a newly completed import opens once, while restored history does not", async () => {
   const user = userEvent.setup();
   const importApi = api();

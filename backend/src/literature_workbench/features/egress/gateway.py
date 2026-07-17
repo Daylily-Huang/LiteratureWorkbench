@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
+from datetime import UTC, datetime
 from typing import NoReturn
 from uuid import uuid4
 
@@ -12,6 +14,13 @@ from literature_workbench.db.database import Database
 from literature_workbench.features.egress.audit_repository import (
     AuditAttempt,
     EgressAuditRepository,
+)
+from literature_workbench.features.egress.billing import (
+    BalanceSnapshot,
+    DeepSeekBillingStatus,
+    DeepSeekUsageRepository,
+    parse_balance_response,
+    price_usage,
 )
 from literature_workbench.features.egress.models import VerifiedSelectionProof
 from literature_workbench.features.models.deepseek import (
@@ -27,9 +36,12 @@ from literature_workbench.platform.windows.credentials import SecretStore
 
 
 DEEPSEEK_CHAT_COMPLETIONS_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance"
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_BALANCE_RESPONSE_BYTES = 64 * 1024
 TOTAL_REQUEST_TIMEOUT_SECONDS = 30.0
+BALANCE_CACHE_SECONDS = 60.0
 _FIXED_PROBE_PROMPT = "Reply with exactly: model configuration ok"
 
 
@@ -51,6 +63,9 @@ class DeepSeekGateway:
         self._audit = EgressAuditRepository(database, process_generation)
         self._adapter = DeepSeekAdapter()
         self._transport = transport
+        self._usage = DeepSeekUsageRepository(database)
+        self._balance_lock = threading.Lock()
+        self._balance_cache: tuple[float, BalanceSnapshot] | None = None
 
     def translate_selection(self, proof: VerifiedSelectionProof) -> str:
         display_name = self._verify_selection(proof)
@@ -92,6 +107,50 @@ class DeepSeekGateway:
             attempt,
             body,
             expected_response="model configuration ok",
+        )
+
+    def billing_status(self, *, force: bool = False) -> DeepSeekBillingStatus:
+        site_usage = self._usage.summary()
+        now = time.monotonic()
+        with self._balance_lock:
+            cached = self._balance_cache
+            if not force and cached is not None and now - cached[0] < BALANCE_CACHE_SECONDS:
+                snapshot = cached[1]
+                return DeepSeekBillingStatus(
+                    available=snapshot.available,
+                    balances=snapshot.balances,
+                    site_usage=site_usage,
+                    refreshed_at=snapshot.refreshed_at,
+                    stale=False,
+                )
+            try:
+                snapshot = self._fetch_balance()
+            except EgressRejected as error:
+                if cached is not None:
+                    snapshot = cached[1]
+                    return DeepSeekBillingStatus(
+                        available=snapshot.available,
+                        balances=snapshot.balances,
+                        site_usage=site_usage,
+                        refreshed_at=snapshot.refreshed_at,
+                        stale=True,
+                        error_code=str(error),
+                    )
+                return DeepSeekBillingStatus(
+                    available=False,
+                    balances=[],
+                    site_usage=site_usage,
+                    refreshed_at=None,
+                    stale=True,
+                    error_code=str(error),
+                )
+            self._balance_cache = (now, snapshot)
+        return DeepSeekBillingStatus(
+            available=snapshot.available,
+            balances=snapshot.balances,
+            site_usage=site_usage,
+            refreshed_at=snapshot.refreshed_at,
+            stale=False,
         )
 
     def _verify_selection(self, proof: VerifiedSelectionProof) -> str:
@@ -211,7 +270,7 @@ class DeepSeekGateway:
         except InvalidDeepSeekResponse:
             self._fail(attempt, "invalid_deepseek_response", started)
         self._check_total_deadline(attempt, deadline, started)
-        if expected_response is not None and result.strip() != expected_response:
+        if expected_response is not None and result.content.strip() != expected_response:
             self._fail(attempt, "configuration_probe_failed", started)
         latency = max(0, int((time.monotonic() - started) * 1000))
         self._audit.finish(
@@ -219,8 +278,48 @@ class DeepSeekGateway:
             outcome="succeeded",
             detail_code=None,
             latency_ms=latency,
+            charge=None if result.usage is None else price_usage(attempt.model, result.usage),
         )
-        return expected_response if expected_response is not None else result
+        return expected_response if expected_response is not None else result.content
+
+    def _fetch_balance(self) -> BalanceSnapshot:
+        try:
+            secret = self._secret_store.get_deepseek_key()
+        except (OSError, RuntimeError):
+            raise EgressRejected("credential_store_failed") from None
+        if secret is None:
+            raise EgressRejected("deepseek_key_unavailable")
+        try:
+            with httpx.Client(
+                transport=self._transport,
+                trust_env=False,
+                follow_redirects=False,
+                timeout=httpx.Timeout(10.0, connect=5.0),
+            ) as client:
+                with client.stream(
+                    "GET",
+                    DEEPSEEK_BALANCE_URL,
+                    headers={"Authorization": f"Bearer {secret.get_secret_value()}"},
+                ) as response:
+                    if response.status_code < 200 or response.status_code >= 300:
+                        if response.status_code in {401, 403}:
+                            raise EgressRejected("deepseek_authorization_failed")
+                        if response.status_code == 402:
+                            raise EgressRejected("deepseek_balance_unavailable")
+                        raise EgressRejected("deepseek_balance_request_failed")
+                    raw = bytearray()
+                    for chunk in response.iter_bytes():
+                        if len(raw) + len(chunk) > MAX_BALANCE_RESPONSE_BYTES:
+                            raise EgressRejected("deepseek_balance_response_too_large")
+                        raw.extend(chunk)
+        except EgressRejected:
+            raise
+        except (httpx.HTTPError, OSError):
+            raise EgressRejected("deepseek_balance_transport_failed") from None
+        try:
+            return parse_balance_response(bytes(raw), refreshed_at=datetime.now(UTC))
+        except ValueError:
+            raise EgressRejected("invalid_deepseek_balance_response") from None
 
     def _check_total_deadline(
         self,

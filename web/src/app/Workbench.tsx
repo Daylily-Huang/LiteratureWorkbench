@@ -17,7 +17,9 @@ import { LibraryPanel } from "../features/library/LibraryPanel";
 import { PdfReader, type ReaderDocument } from "../features/reader/PdfReader";
 import type { SelectedText } from "../features/reader/selection";
 import { SettingsDialog } from "../features/settings/SettingsDialog";
+import { DeepSeekBilling } from "../features/settings/DeepSeekBilling";
 import { TranslationPopover } from "../features/translation/TranslationPopover";
+import { ConfirmDialog } from "../features/ui/ConfirmDialog";
 
 
 type DocumentResponse = {
@@ -28,6 +30,10 @@ type DocumentResponse = {
 };
 
 type ReaderLocation = { documentId: string | null; initialPage: number };
+type ThemePreference = "system" | "light" | "dark";
+type Confirmation =
+  | { kind: "delete"; annotation: PdfAnnotation }
+  | { kind: "restore" };
 
 
 function readerLocation(): ReaderLocation {
@@ -66,6 +72,14 @@ export function Workbench() {
   const [annotationError, setAnnotationError] = useState<string | null>(null);
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const [requestedPage, setRequestedPage] = useState<number | undefined>();
+  const [focusMode, setFocusMode] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<"library" | "assistant" | null>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [theme, setTheme] = useState<ThemePreference>(() => {
+    const stored = localStorage.getItem("lw-theme");
+    return stored === "light" || stored === "dark" ? stored : "system";
+  });
+  const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("light");
   const clearTranslationSelection = useCallback(() => setTranslationSelection(null), []);
 
   useEffect(() => {
@@ -73,6 +87,16 @@ export function Workbench() {
     window.addEventListener("popstate", updateLocation);
     return () => window.removeEventListener("popstate", updateLocation);
   }, []);
+
+  useEffect(() => {
+    const media = typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null;
+    const resolve = () => setResolvedTheme(theme === "system" ? media?.matches ? "dark" : "light" : theme);
+    resolve();
+    media?.addEventListener?.("change", resolve);
+    return () => media?.removeEventListener?.("change", resolve);
+  }, [theme]);
 
   useEffect(() => {
     setDocument(null);
@@ -84,6 +108,7 @@ export function Workbench() {
     setRequestedPage(undefined);
     if (location.documentId === null) return;
     const controller = new AbortController();
+    let stopped = false;
     void fetch(`/api/documents/${location.documentId}`, {
       credentials: "same-origin",
       signal: controller.signal,
@@ -99,15 +124,32 @@ export function Workbench() {
         contentId: value.content_id,
         filename: value.filename,
       };
+      if (stopped) return;
       setDocument(next);
-      setAnnotations(await listAnnotations(next.documentId));
       setDocumentError(false);
+      try {
+        const nextAnnotations = await listAnnotations(next.documentId, controller.signal);
+        if (!stopped) setAnnotations(nextAnnotations);
+      } catch (reason: unknown) {
+        if (
+          !stopped
+          && !(reason instanceof DOMException && reason.name === "AbortError")
+        ) {
+          setAnnotationError("PDF 批注暂时无法读取");
+        }
+      }
     }).catch((reason: unknown) => {
-      if (!(reason instanceof DOMException && reason.name === "AbortError")) {
+      if (
+        !stopped
+        && !(reason instanceof DOMException && reason.name === "AbortError")
+      ) {
         setDocumentError(true);
       }
     });
-    return () => controller.abort();
+    return () => {
+      stopped = true;
+      controller.abort();
+    };
   }, [location.documentId]);
 
   function openDocument(documentId: string) {
@@ -119,6 +161,7 @@ export function Workbench() {
     url.hash = "";
     window.history.pushState({}, "", url);
     setLocation({ documentId, initialPage: 1 });
+    setMobilePanel(null);
   }
 
   async function runMutation(action: () => Promise<{
@@ -158,7 +201,7 @@ export function Workbench() {
 
   let reader: ReactNode;
   if (location.documentId === null) {
-    reader = <><h2>PDF 阅读器</h2><p>请从左侧选择一篇文献</p></>;
+    reader = <div className="empty-state"><span className="empty-state__icon">⌁</span><h2>开始阅读</h2><p>从文献库选择一篇 PDF，或拖拽导入新文献。</p></div>;
   } else if (documentError) {
     reader = <p role="alert">文献信息暂时无法读取</p>;
   } else if (document === null) {
@@ -194,31 +237,43 @@ export function Workbench() {
   }
 
   return (
-    <div className="workbench">
-      <aside aria-label="文献库" className="workbench__library">
-        <LibraryPanel activeDocumentId={location.documentId} onOpenDocument={openDocument} />
-      </aside>
-      <main aria-label="PDF 阅读器" className="workbench__reader">{reader}</main>
-      <aside aria-label="研究助手" className="workbench__assistant">
-        <h2>研究助手</h2>
-        <p>RAG/网络检索将在 v0.2</p>
-        <button onClick={() => setSettingsOpen(true)} type="button">翻译设置</button>
-        <AnnotationPanel
+    <div className="workbench-shell" data-theme={resolvedTheme}>
+      <header className="topbar">
+        <div className="topbar__brand"><span className="topbar__mark">LW</span><strong>Literature Workbench</strong></div>
+        <div className="topbar__document" title={document?.filename ?? "尚未选择文献"}>{document?.filename ?? "本地文献工作台"}</div>
+        <div className="topbar__actions">
+          <button aria-expanded={mobilePanel === "library"} className="topbar__button mobile-only" onClick={() => setMobilePanel((value) => value === "library" ? null : "library")} type="button">文献库</button>
+          <button aria-expanded={mobilePanel === "assistant"} className="topbar__button mobile-only" onClick={() => setMobilePanel((value) => value === "assistant" ? null : "assistant")} type="button">笔记</button>
+          <DeepSeekBilling />
+          <button aria-pressed={focusMode} className="topbar__button" onClick={() => setFocusMode((value) => !value)} type="button">{focusMode ? "退出专注" : "专注阅读"}</button>
+          <button aria-label={`切换为${resolvedTheme === "dark" ? "浅色" : "深色"}主题`} className="icon-button" onClick={() => {
+            const next = resolvedTheme === "dark" ? "light" : "dark";
+            localStorage.setItem("lw-theme", next);
+            setTheme(next);
+          }} type="button">{resolvedTheme === "dark" ? "☀" : "◐"}</button>
+          <button aria-label="打开设置" className="icon-button" onClick={() => setSettingsOpen(true)} type="button">⚙</button>
+        </div>
+      </header>
+      <div className={`workbench${focusMode ? " workbench--focus" : ""}${mobilePanel === "library" ? " workbench--show-library" : ""}${mobilePanel === "assistant" ? " workbench--show-assistant" : ""}`}>
+        {mobilePanel !== null && <button aria-label="关闭侧栏" className="workbench__scrim" onClick={() => setMobilePanel(null)} type="button" />}
+        <aside aria-label="文献库" className="workbench__library">
+          <LibraryPanel activeDocumentId={location.documentId} onOpenDocument={openDocument} />
+        </aside>
+        <main aria-label="PDF 阅读器" className="workbench__reader">{reader}</main>
+        <aside aria-label="研究助手" className="workbench__assistant">
+          <div className="assistant-heading"><div><span className="eyebrow">阅读侧栏</span><h2>研究助手</h2></div><span className="coming-soon">即将推出</span></div>
+          <p className="assistant-placeholder">RAG 与网络检索正在建设中；当前可使用翻译和 PDF 笔记。</p>
+          <button className="button button--secondary" onClick={() => setSettingsOpen(true)} type="button">翻译与模型设置</button>
+          <AnnotationPanel
           busy={annotationBusy}
           document={document}
           error={annotationError}
           onDelete={(annotation) => {
-            if (document !== null && window.confirm("确定删除这条本站批注吗？")) {
-              void runMutation(() => deleteAnnotation(document, annotation.annotation_id));
-            }
+            if (document !== null) setConfirmation({ kind: "delete", annotation });
           }}
           onJump={jumpToAnnotation}
           onRestore={() => {
-            if (document === null) return;
-            const value = window.prompt(`输入文件名以恢复原始 PDF：\n${document.filename}`);
-            if (value === document.filename) {
-              void runMutation(() => restoreAnnotationBaseline(document.documentId, value));
-            }
+            if (document !== null) setConfirmation({ kind: "restore" });
           }}
           onUndo={() => {
             if (document !== null) void runMutation(() => undoAnnotation(document.documentId));
@@ -229,9 +284,32 @@ export function Workbench() {
             }
           }}
           state={annotations}
-        />
-      </aside>
+          />
+        </aside>
+      </div>
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {confirmation?.kind === "delete" && <ConfirmDialog
+        confirmLabel="删除批注"
+        description="这会从原 PDF 中删除该条本站批注，可以使用撤销上次恢复。"
+        label="删除批注"
+        onCancel={() => setConfirmation(null)}
+        onConfirm={() => {
+          const annotation = confirmation.annotation;
+          setConfirmation(null);
+          if (document !== null) void runMutation(() => deleteAnnotation(document, annotation.annotation_id));
+        }}
+      />}
+      {confirmation?.kind === "restore" && document !== null && <ConfirmDialog
+        confirmLabel="恢复原始 PDF"
+        description={`此操作会移除本站写入的全部批注。请输入 ${document.filename} 继续。`}
+        expectedText={document.filename}
+        label="恢复原始 PDF"
+        onCancel={() => setConfirmation(null)}
+        onConfirm={() => {
+          setConfirmation(null);
+          void runMutation(() => restoreAnnotationBaseline(document.documentId, document.filename));
+        }}
+      />}
     </div>
   );
 }

@@ -124,6 +124,7 @@ export function TranslationPopover({
   const [task, setTask] = useState<TranslationTask | null>(null);
   const [requestFailed, setRequestFailed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const notifiedTaskRef = useRef<string | null>(null);
   const cardRef = useRef<HTMLElement>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -234,6 +235,17 @@ export function TranslationPopover({
     window.addEventListener("resize", reposition);
     return () => window.removeEventListener("resize", reposition);
   }, [copied, requestFailed, selected.viewportAnchor, selectionKey, task]);
+
+  useEffect(() => {
+    if (
+      task?.status === "completed"
+      && task.provider === "deepseek"
+      && task.id !== notifiedTaskRef.current
+    ) {
+      notifiedTaskRef.current = task.id;
+      window.dispatchEvent(new Event("deepseek-usage-updated"));
+    }
+  }, [task]);
 
   function startDrag(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.target instanceof Element && event.target.closest("button") !== null) return;

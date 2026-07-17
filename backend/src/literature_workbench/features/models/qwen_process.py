@@ -267,9 +267,11 @@ class QwenProcessManager:
             identity = self._identity_lookup(pid)
         except (psutil.Error, OSError):
             raise QwenProcessError("qwen_process_inspection_failed") from None
+        if identity is None:
+            self._remove_ownership_files()
+            return None
         if (
-            identity is None
-            or identity.pid != pid
+            identity.pid != pid
             or identity.create_time != create_time
             or not self._matches_fixed_process(identity)
         ):

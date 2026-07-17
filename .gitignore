@@ -10,3 +10,9 @@ web/playwright-report/
 web/test-results/
 *.log
 .env
+
+# Local review artifacts and file-based agent planning logs.
+output/
+task_plan.md
+findings.md
+progress.md

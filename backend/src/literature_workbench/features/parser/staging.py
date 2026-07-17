@@ -310,9 +310,12 @@ def persist_structure_validation(
         if isinstance(source_identity, VerifiedHandle)
         else source_identity
     )
+    if isinstance(source_identity, VerifiedHandle):
+        _verify_commit_inputs(validation, source_identity, cancellation)
     with database.transaction() as connection:
         _fence(cancellation, connection)
-        _verify_commit_inputs(validation, source_identity, cancellation)
+        if not isinstance(source_identity, VerifiedHandle):
+            _verify_commit_inputs(validation, source_identity, cancellation)
         connection.execute(
             """
             UPDATE contents
@@ -355,7 +358,6 @@ def persist_structure_validation(
                 (int(eligible), timestamp, str(row["id"])),
             )
         _fence(cancellation, connection)
-        _verify_commit_inputs(validation, source_identity, cancellation)
 
 
 def _verify_commit_inputs(
@@ -365,7 +367,10 @@ def _verify_commit_inputs(
 ) -> None:
     if cancellation is None:
         return
-    if not validation.staged.verify_current_hash(cancellation):
+    hash_cancellation = (
+        cancellation if hasattr(cancellation, "raise_if_cancelled") else None
+    )
+    if not validation.staged.verify_current_hash(hash_cancellation):
         raise StagedContentMismatch("staged_identity_changed_before_commit")
     if not isinstance(source, VerifiedHandle):
         raise StagedContentMismatch("held_source_required_for_fenced_commit")

@@ -3,10 +3,20 @@
 Windows-only personal literature reading and translation application.
 
 Runtime data belongs under `D:\LiteratureWorkbenchData`. The initial monitored
-library is `D:\black-muntjac-project\papers` and is always treated read-only.
+library is `D:\black-muntjac-project\papers`. Scanning, parsing, translation,
+and cloud analysis treat library PDFs as read-only; a user-triggered PDF
+annotation is the explicit exception and writes the annotation into that PDF
+after current-root, file-identity, and single-hard-link verification.
 
 v0.1 contains PDF reading, local parsing/OCR, selection translation, DeepSeek,
 and a verified local Qwen fallback. It does not yet contain RAG or web search.
+
+The top bar shows the live DeepSeek account balance from the official balance
+endpoint. "本站估算消费" starts at database migration `0005_deepseek_billing`
+and is calculated from provider-reported cache-hit, cache-miss, and completion
+tokens using the versioned price snapshot stored with each request. It does not
+claim to represent spending from other applications or requests made before
+this feature was enabled.
 
 ## Windows launcher
 

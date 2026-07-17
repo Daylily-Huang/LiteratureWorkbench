@@ -86,7 +86,7 @@ function Folder({
 }) {
   return (
     <details className="document-tree__folder" open={containsActive(node, activeDocumentId)}>
-      <summary className="document-tree__summary">{node.name}</summary>
+      <summary className="document-tree__summary"><span aria-hidden="true">▸</span>{node.name}<small>{node.documents.length + node.folders.length}</small></summary>
       <div className="document-tree__children">
         {node.folders.map((folder) => (
           <Folder
@@ -105,7 +105,7 @@ function Folder({
             title={document.filename}
             type="button"
           >
-            {document.filename}
+            <span aria-hidden="true" className="document-list__icon" /><span>{document.filename}</span>
           </button>
         ))}
       </div>

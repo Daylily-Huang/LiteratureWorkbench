@@ -14,6 +14,8 @@ import fitz  # type: ignore[import-untyped]
 
 from literature_workbench.db.database import Database
 from literature_workbench.db.task_queue import TaskQueue
+from literature_workbench.features.library.repository import LibraryRepository
+from literature_workbench.platform.windows.filesystem import SafeFileInspector, UnsafePath
 
 
 APP_TITLE = "Literature Workbench"
@@ -73,10 +75,19 @@ class _DocumentLocks:
 
 
 class PdfAnnotationService:
-    def __init__(self, database: Database, data_root: Path, queue: TaskQueue) -> None:
+    def __init__(
+        self,
+        database: Database,
+        data_root: Path,
+        queue: TaskQueue,
+        library_repository: LibraryRepository,
+        file_inspector: SafeFileInspector,
+    ) -> None:
         self._database = database
         self._backup_root = data_root / ".annotation-backups"
         self._queue = queue
+        self._library_repository = library_repository
+        self._file_inspector = file_inspector
         self._locks = _DocumentLocks()
 
     def list_annotations(self, document_id: UUID) -> dict[str, object]:
@@ -336,6 +347,24 @@ class PdfAnnotationService:
         )
 
     def _verify_current_file(self, state: DocumentState) -> str:
+        try:
+            library = self._library_repository.get(state.library_id)
+            identity = self._file_inspector.inspect_under_root(
+                state.path,
+                library,
+            )
+        except (KeyError, OSError, UnsafePath) as error:
+            raise AnnotationError("annotation_external_change") from error
+        expected_identity = (state.volume_id, state.file_id)
+        observed_identity = (identity.volume_id, identity.file_id)
+        if (
+            library.status != "active"
+            or identity.root_id != state.library_id
+            or observed_identity != expected_identity
+            or identity.hard_link_count != state.hard_link_count
+            or identity.hard_link_count != 1
+        ):
+            raise AnnotationError("annotation_external_change")
         try:
             metadata = state.path.stat()
         except OSError as error:

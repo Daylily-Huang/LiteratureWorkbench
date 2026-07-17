@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import fitz
@@ -55,6 +56,58 @@ def _registered_client(tmp_path: Path) -> tuple[TestClient, LocalSession, Path, 
     client.app.state.library_scanner.scan_library(registered.id)
     item = client.get("/api/documents").json()["items"][0]
     return client, session, source, item["document_id"]
+
+
+def _annotation_request(detail: dict[str, object]) -> dict[str, object]:
+    return {
+        "document_version_id": detail["current_document_version_id"],
+        "content_id": detail["content_id"],
+        "page": 1,
+        "type": "highlight",
+        "quads": [[72, 410, 260, 410, 72, 428, 260, 428]],
+        "color": "yellow",
+        "comment": "",
+    }
+
+
+def test_annotation_rejects_same_content_path_replacement(tmp_path: Path) -> None:
+    client, session, source, document_id = _registered_client(tmp_path)
+    try:
+        detail = client.get(f"/api/documents/{document_id}").json()
+        original = source.stat()
+        replacement = source.with_name("replacement.pdf")
+        replacement.write_bytes(source.read_bytes())
+        os.utime(replacement, ns=(original.st_atime_ns, original.st_mtime_ns))
+        os.replace(replacement, source)
+
+        response = client.post(
+            f"/api/documents/{document_id}/annotations",
+            headers=_headers(session),
+            json=_annotation_request(detail),
+        )
+
+        assert response.status_code == 409
+        assert response.json() == {"code": "annotation_external_change"}
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_annotation_rejects_new_hard_link_alias(tmp_path: Path) -> None:
+    client, session, source, document_id = _registered_client(tmp_path)
+    try:
+        detail = client.get(f"/api/documents/{document_id}").json()
+        os.link(source, source.with_name("alias.pdf"))
+
+        response = client.post(
+            f"/api/documents/{document_id}/annotations",
+            headers=_headers(session),
+            json=_annotation_request(detail),
+        )
+
+        assert response.status_code == 409
+        assert response.json() == {"code": "annotation_external_change"}
+    finally:
+        client.__exit__(None, None, None)
 
 
 def test_comment_writeback_edit_undo_and_baseline_restore(tmp_path: Path) -> None:

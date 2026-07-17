@@ -88,7 +88,7 @@ def select_root(request: Request) -> Response:
 
 
 @router.post("", status_code=201)
-def register_library(request: Request, payload: RegisterLibraryRequest) -> Response:
+async def register_library(request: Request, payload: RegisterLibraryRequest) -> Response:
     try:
         selected = _tokens(request).consume(
             payload.selection_token,
@@ -108,6 +108,7 @@ def register_library(request: Request, payload: RegisterLibraryRequest) -> Respo
         if code in {"overlapping_library_root", "registered_root_identity_changed"}:
             return JSONResponse({"code": code}, status_code=409)
         raise
+    await request.app.state.library_watcher.add_library(library.id)
     return JSONResponse({"library_id": str(library.id)}, status_code=201)
 
 

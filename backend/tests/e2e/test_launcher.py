@@ -16,6 +16,7 @@ from literature_workbench.config import AppSettings
 from literature_workbench.launcher import (
     ProcessIdentity,
     RuntimeManifest,
+    WorkerBootstrap,
     WorkerReady,
     build_argument_parser,
     consume_worker_bootstrap,
@@ -49,6 +50,20 @@ class MemoryKeyring(KeyringBackend):
 
     def delete_password(self, service: str, username: str) -> None:
         self.values.pop((service, username), None)
+
+
+def test_worker_bootstrap_carries_current_api_session_generation() -> None:
+    parent = ProcessIdentity(101, 10.5, r"C:\Python\pythonw.exe")
+    bootstrap = WorkerBootstrap(
+        "worker-generation",
+        "t" * 43,
+        parent,
+        session_generation="api-session-generation",
+    )
+
+    restored = WorkerBootstrap.from_json(bootstrap.to_json())
+
+    assert restored.session_generation == "api-session-generation"
 
 
 def test_second_launch_validates_exact_instance_and_opens_fresh_fragment_token(
@@ -433,6 +448,7 @@ def test_supervisor_manifests_real_worker_and_cleans_real_then_shim(
     real_worker = ProcessIdentity(47168, 21.5, r"C:\Python312\python.exe")
     manifests: list[RuntimeManifest] = []
     cleanup: list[tuple[str, ProcessIdentity | None]] = []
+    hardened: list[tuple[Path, Path]] = []
 
     class FakeEvent:
         def wait(self, timeout: float) -> bool:
@@ -488,10 +504,17 @@ def test_supervisor_manifests_real_worker_and_cleans_real_then_shim(
             AppSettings(data_root=tmp_path / "isolated-data"),
             tmp_path / "unused-dist",
             browser_open=lambda _: None,
+            acl_hardener=lambda target, root: hardened.append((target, root.path)),
         )
 
     assert manifests[0].worker == real_worker
     assert cleanup == [("real", real_worker), ("shim", shim)]
+    assert hardened == [
+        (
+            tmp_path / "isolated-data" / "runtime" / "launcher",
+            tmp_path / "isolated-data",
+        )
+    ]
 
 
 def test_stop_waits_for_exact_processes_manifest_and_locks_before_success(
@@ -528,6 +551,84 @@ def test_stop_waits_for_exact_processes_manifest_and_locks_before_success(
         locks_released=lambda _: stopped,
         timeout_seconds=0.1,
     )
+
+
+def test_stop_recovers_exact_unhealthy_instance_without_control_endpoint(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / "runtime" / "launcher" / "launcher.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest = RuntimeManifest(
+        port=58380,
+        supervisor=ProcessIdentity(101, 10.5, r"C:\Python\pythonw.exe"),
+        worker=ProcessIdentity(202, 11.5, r"C:\Python\python.exe"),
+        control_token="c" * 43,
+        generation="generation",
+    )
+    manifest_path.write_text(json.dumps(manifest.to_json()), encoding="utf-8")
+    alive = {101, 202}
+    qwen_running = True
+    control_calls: list[object] = []
+
+    class OwnedQwen:
+        def owned_identity(self) -> object:
+            return "owned-qwen"
+
+        def stop_owned(self) -> bool:
+            nonlocal qwen_running
+            qwen_running = False
+            return True
+
+        def owned_identity_absent(self, expected: object) -> bool:
+            assert expected == "owned-qwen"
+            return not qwen_running
+
+    def lookup(pid: int) -> ProcessIdentity | None:
+        if pid not in alive:
+            return None
+        return manifest.supervisor if pid == 101 else manifest.worker
+
+    def stop_exact(identity: ProcessIdentity) -> None:
+        alive.discard(identity.pid)
+        if identity == manifest.supervisor:
+            manifest_path.unlink()
+
+    assert stop_running_instance(
+        manifest_path,
+        identity_lookup=lookup,
+        health_probe=lambda _: False,
+        control_request=lambda *args: control_calls.append(args) or "unused",
+        locks_released=lambda _: not alive,
+        qwen_manager_factory=lambda _: OwnedQwen(),  # type: ignore[arg-type]
+        exact_stopper=stop_exact,
+        timeout_seconds=0.1,
+    )
+    assert control_calls == []
+    assert not qwen_running
+    assert alive == set()
+
+
+def test_process_handle_is_terminated_when_identity_lookup_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = ProcessIdentity(202, 11.5, r"C:\Python\python.exe")
+
+    class HandleProcess:
+        terminated = False
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def wait(self, timeout: int) -> int:
+            assert timeout == 5
+            return 0
+
+    process = HandleProcess()
+    monkeypatch.setattr(launcher_module, "lookup_process_identity", lambda _: None)
+
+    launcher_module._stop_exact_process(cast(object, process), expected)  # type: ignore[arg-type]
+
+    assert process.terminated
 
 
 def test_stop_fails_when_captured_owned_qwen_is_not_verified_gone(

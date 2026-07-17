@@ -33,6 +33,7 @@ from literature_workbench.features.library.coordinator import LibraryScanCoordin
 from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.features.library.roots import LibraryRootService
 from literature_workbench.features.library.scanner import LibraryScanner
+from literature_workbench.features.library.watcher import WatcherManager
 from literature_workbench.features.library.import_intents import ImportIntentRepository
 from literature_workbench.features.library.import_service import ImportService, ImportValidator
 from literature_workbench.features.library.import_files import MutexTimeout, TrustedImportRoot
@@ -78,6 +79,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         trusted_root = TrustedImportRoot.create(resolved.data_root)
+        library_watcher: WatcherManager | None = None
         supervisor_lock = trusted_root.mutex("api-supervisor")
         try:
             supervisor_lock.acquire(timeout=0)
@@ -128,11 +130,15 @@ def create_app(
                 QwenLocalClient(),
                 QwenProcessManager(resolved.qwen_runtime_dir),
             )
-            app.state.annotation_service = PdfAnnotationService(
-                database, resolved.data_root, task_queue
-            )
             library_repository = LibraryRepository(database, task_queue)
             app.state.library_repository = library_repository
+            app.state.annotation_service = PdfAnnotationService(
+                database,
+                resolved.data_root,
+                task_queue,
+                library_repository,
+                resolved_inspector,
+            )
             app.state.library_root_service = LibraryRootService(
                 library_repository, resolved_inspector
             )
@@ -145,6 +151,11 @@ def create_app(
                 task_queue,
                 coordinator=library_scan_coordinator,
             )
+            library_watcher = WatcherManager(
+                library_repository,
+                app.state.library_scanner,
+            )
+            app.state.library_watcher = library_watcher
             app.state.import_validator = ImportValidator(
                 database,
                 task_queue,
@@ -153,8 +164,11 @@ def create_app(
             )
             if register_initial_library and library_repository.count() == 0:
                 app.state.library_root_service.register_initial_approved_library()
+            await library_watcher.reconcile_active_libraries()
             yield
         finally:
+            if library_watcher is not None:
+                await library_watcher.shutdown()
             supervisor_lock.release()
             supervisor_lock.close()
             trusted_root.close()

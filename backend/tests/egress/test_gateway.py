@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from literature_workbench.db.database import Database
 from literature_workbench.db.migrations import run_migrations
 from literature_workbench.features.egress.gateway import (
+    DEEPSEEK_BALANCE_URL,
     DEEPSEEK_CHAT_COMPLETIONS_URL,
     DeepSeekGateway,
     EgressRejected,
@@ -188,6 +189,33 @@ def _success_response(request: httpx.Request) -> httpx.Response:
     )
 
 
+def test_balance_is_cached_and_force_refreshes(database: Database) -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        assert str(request.url) == DEEPSEEK_BALANCE_URL
+        return httpx.Response(200, json={
+            "is_available": True,
+            "balance_infos": [{
+                "currency": "CNY",
+                "total_balance": "8.50",
+                "granted_balance": "0.50",
+                "topped_up_balance": "8.00",
+            }],
+        }, request=request)
+
+    gateway = _gateway(database, handler)
+    first = gateway.billing_status()
+    cached = gateway.billing_status()
+    refreshed = gateway.billing_status(force=True)
+
+    assert first.balances[0].total_balance == "8.50"
+    assert cached.stale is False
+    assert refreshed.refreshed_at is not None
+    assert len(calls) == 2
+
+
 @pytest.mark.parametrize(
     ("mutation", "proof_update"),
     [
@@ -292,6 +320,34 @@ def test_valid_registered_selection_calls_fixed_transport_once(
 
     assert result == TRANSLATED_TEXT
     assert len(calls) == 1
+
+
+def test_successful_gateway_response_records_provider_usage(
+    database: Database,
+    proof: VerifiedSelectionProof,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": TRANSLATED_TEXT}}],
+            "usage": {
+                "prompt_tokens": 100,
+                "prompt_cache_hit_tokens": 80,
+                "prompt_cache_miss_tokens": 20,
+                "completion_tokens": 10,
+                "total_tokens": 110,
+            },
+        }, request=request)
+
+    assert _gateway(database, handler).translate_selection(proof) == TRANSLATED_TEXT
+
+    with database.connect() as connection:
+        row = connection.execute(
+            """SELECT prompt_cache_hit_tokens,prompt_cache_miss_tokens,
+                      completion_tokens,cost_nano_cny,pricing_version
+               FROM deepseek_usage"""
+        ).fetchone()
+    assert row is not None
+    assert tuple(row) == (80, 20, 10, 41_600, "deepseek-cny-2026-07-17")
 
 
 def test_same_content_older_version_never_calls_transport(

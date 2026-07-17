@@ -623,6 +623,27 @@ def test_stop_owned_keeps_evidence_when_stopper_does_not_end_exact_process(
     assert record_path.exists()
 
 
+def test_dead_owned_process_record_is_removed_as_stale(tmp_path: Path) -> None:
+    runtime = tmp_path / "qwen"
+    runtime.mkdir(parents=True)
+    record_path = runtime / "owned-process.json"
+    record_path.write_text(
+        json.dumps(
+            {
+                "pid": 321,
+                "create_time": 1234.5,
+                "exe": str(EXPECTED_EXE),
+                "model": str(EXPECTED_MODEL),
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager = QwenProcessManager(runtime, identity_lookup=lambda pid: None)
+
+    assert manager.owned_identity() is None
+    assert not record_path.exists()
+
+
 def test_startup_cleanup_keeps_evidence_when_exact_launched_process_survives(
     tmp_path: Path,
 ) -> None:

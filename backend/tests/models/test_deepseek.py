@@ -38,7 +38,60 @@ def test_adapter_extracts_only_the_assistant_text() -> None:
         {"id": "secret-provider-id", "choices": [{"message": {"content": "译文"}}]}
     ).encode()
 
-    assert DeepSeekAdapter().parse_response(raw) == "译文"
+    result = DeepSeekAdapter().parse_response(raw)
+    assert result.content == "译文"
+    assert result.usage is None
+
+
+def test_adapter_extracts_bounded_usage_without_provider_metadata() -> None:
+    raw = json.dumps({
+        "id": "secret-provider-id",
+        "choices": [{"message": {"content": "译文"}}],
+        "usage": {
+            "prompt_tokens": 100,
+            "prompt_cache_hit_tokens": 80,
+            "prompt_cache_miss_tokens": 20,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+        },
+    }).encode()
+
+    result = DeepSeekAdapter().parse_response(raw)
+
+    assert result.content == "译文"
+    assert result.usage is not None
+    assert result.usage.prompt_cache_hit_tokens == 80
+    assert result.usage.prompt_cache_miss_tokens == 20
+    assert result.usage.completion_tokens == 10
+    assert result.usage.total_tokens == 110
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        "provider-changed-shape",
+        {"prompt_tokens": 100, "completion_tokens": 10},
+        {
+            "prompt_tokens": 100,
+            "prompt_cache_hit_tokens": 80,
+            "prompt_cache_miss_tokens": 30,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+        },
+    ],
+)
+def test_adapter_keeps_valid_content_when_optional_usage_is_malformed(
+    usage: object,
+) -> None:
+    raw = json.dumps({
+        "choices": [{"message": {"content": "译文"}}],
+        "usage": usage,
+    }).encode()
+
+    result = DeepSeekAdapter().parse_response(raw)
+
+    assert result.content == "译文"
+    assert result.usage is None
 
 
 @pytest.mark.parametrize(

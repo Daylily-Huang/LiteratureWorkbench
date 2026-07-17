@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Bootstrap } from "./Bootstrap";
@@ -47,5 +47,16 @@ describe("Bootstrap", () => {
     render(<Bootstrap />);
 
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows a recoverable message when the one-use bootstrap fails", async () => {
+    window.history.replaceState(null, "", "/bootstrap#expired-token");
+    vi.spyOn(window, "fetch").mockResolvedValue(new Response(null, { status: 403 }));
+
+    render(<Bootstrap />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "启动链接已失效，请从启动器重新打开",
+    );
   });
 });

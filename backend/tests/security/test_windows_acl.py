@@ -219,10 +219,16 @@ def test_acl_uses_exact_shell_false_commands_and_removes_foreign_allow(tmp_path:
 
     assert sid_runner.calls == [["whoami.exe", "/user", "/fo", "csv", "/nh"]]
     assert acl_runner.calls == [
-        ["icacls.exe", str(target), "/inheritance:r"],
-        ["icacls.exe", str(target), "/remove:g", f"*{SYSTEM_SID}"],
-        ["icacls.exe", str(target), "/remove:g", f"*{FOREIGN_SID}"],
+        [
+            "icacls.exe",
+            str(target),
+            "/grant:r",
+            f"*{OWNER_SID}:(OI)(CI)F",
+            f"*{SYSTEM_SID}:(OI)(CI)F",
+        ],
         ["icacls.exe", str(target), "/setowner", f"*{OWNER_SID}"],
+        ["icacls.exe", str(target), "/inheritance:r"],
+        ["icacls.exe", str(target), "/remove:g", f"*{FOREIGN_SID}"],
         [
             "icacls.exe",
             str(target),
@@ -267,6 +273,29 @@ def test_dacl_reader_script_derives_validity_and_returns_actual_owner_sid(tmp_pa
     script = runner.calls[0][3]
     assert "valid=$true" not in script
     assert "RawSecurityDescriptor" in script
+
+
+def test_dacl_reader_falls_back_to_windows_powershell_when_pwsh_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    payload = (
+        '{"owner_sid":"S-1-5-21-7","valid":true,"protected":true,'
+        '"entries":[]}'
+    )
+
+    class MissingPwshRunner(FakeRunner):
+        def run(self, arguments: list[str]) -> AclCommandResult:
+            self.calls.append(arguments)
+            if arguments[0] == "pwsh.exe":
+                raise AclSecurityError("acl_command_failed")
+            return AclCommandResult(0, payload, "")
+
+    runner = MissingPwshRunner()
+
+    snapshot = PowerShellDaclReader(runner).read(tmp_path / "tokens")
+
+    assert snapshot.owner_sid == "S-1-5-21-7"
+    assert [call[0] for call in runner.calls] == ["pwsh.exe", "powershell.exe"]
 
 
 def test_dacl_reader_rejects_string_validity_instead_of_coercing_it(tmp_path: Path) -> None:

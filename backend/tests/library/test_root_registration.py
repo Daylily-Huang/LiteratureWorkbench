@@ -61,6 +61,14 @@ class FakeInspector:
         raise AssertionError("not used by root registration")
 
 
+@dataclass(slots=True)
+class FakeWatcher:
+    added: list[UUID]
+
+    async def add_library(self, library_id: UUID) -> None:
+        self.added.append(library_id)
+
+
 class FakeDialogRunner:
     def __init__(self, result: CommandResult) -> None:
         self.result = result
@@ -192,6 +200,8 @@ def test_select_then_register_uses_one_use_identity_token(tmp_path: Path) -> Non
     identity = _identity(canonical)
     inspector = FakeInspector(identity, identity)
     with _client(tmp_path, session, FakeFolderDialog(selected), inspector) as client:
+        watcher = FakeWatcher([])
+        client.app.state.library_watcher = watcher
         selection = client.post("/api/libraries/select-root", headers=_headers(session))
         assert selection.status_code == 200
         assert selection.json().keys() == {"selection_token", "display_path", "expires_in_seconds"}
@@ -209,7 +219,8 @@ def test_select_then_register_uses_one_use_identity_token(tmp_path: Path) -> Non
         )
 
     assert registration.status_code == 201
-    assert UUID(registration.json()["library_id"])
+    registered_id = UUID(registration.json()["library_id"])
+    assert watcher.added == [registered_id]
     assert replay.status_code == 403
     assert selection.json()["selection_token"] not in replay.text
 

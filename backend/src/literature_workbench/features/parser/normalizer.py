@@ -76,10 +76,10 @@ class ParseRunRepository:
         verify_inputs: Callable[[], None] | None = None,
     ) -> None:
         timestamp = datetime.now(UTC).isoformat()
+        if verify_inputs is not None:
+            verify_inputs()
         with self._database.transaction() as connection:
             _fence(cancellation, connection)
-            if verify_inputs is not None:
-                verify_inputs()
             run = connection.execute(
                 "SELECT * FROM parse_runs WHERE id=? AND status='running'",
                 (str(run_id),),
@@ -137,8 +137,6 @@ class ParseRunRepository:
             if changed.rowcount != 1:
                 raise ValueError("parse_run_completion_conflict")
             _fence(cancellation, connection)
-            if verify_inputs is not None:
-                verify_inputs()
             pointer = connection.execute(
                 """
                 UPDATE contents SET current_parse_run_id=?,updated_at=?

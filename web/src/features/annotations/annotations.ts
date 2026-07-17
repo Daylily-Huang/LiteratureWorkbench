@@ -22,6 +22,22 @@ export type AnnotationState = {
   content_id: string;
 };
 
+const PDF_ANNOTATION_COLORS = {
+  yellow: [1, 0.84, 0],
+  green: [0.35, 0.78, 0.42],
+  blue: [0.35, 0.68, 0.95],
+  pink: [0.96, 0.47, 0.69],
+  red: [0.9, 0.16, 0.16],
+  black: [0.08, 0.08, 0.08],
+} as const;
+
+export function annotationColorName(color: number[]): string | undefined {
+  if (color.length !== 3) return undefined;
+  return Object.entries(PDF_ANNOTATION_COLORS).find(([, expected]) =>
+    expected.every((component, index) => Math.abs(component - color[index]!) <= 0.02),
+  )?.[0];
+}
+
 type IdentityResponse = {
   document_id: string;
   current_document_version_id: string;
@@ -50,9 +66,13 @@ async function write<T>(url: string, method: string, body?: object): Promise<T> 
 }
 
 
-export async function listAnnotations(documentId: string): Promise<AnnotationState> {
+export async function listAnnotations(
+  documentId: string,
+  signal?: AbortSignal,
+): Promise<AnnotationState> {
   const response = await fetch(`/api/documents/${documentId}/annotations`, {
     credentials: "same-origin",
+    signal,
   });
   const value = await response.json() as AnnotationState & { code?: string };
   if (!response.ok) throw new Error(value.code ?? "annotation_list_failed");

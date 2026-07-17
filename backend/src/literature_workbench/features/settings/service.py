@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from literature_workbench.features.egress.billing import DeepSeekBillingStatus
 from literature_workbench.features.settings.models import PublicSettings, SettingsPatch
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.platform.windows.credentials import SecretStore
@@ -9,6 +10,8 @@ from literature_workbench.platform.windows.credentials import SecretStore
 
 class ConfigurationProbeGateway(Protocol):
     def configuration_probe(self, model: str) -> str: ...
+
+    def billing_status(self, *, force: bool = False) -> DeepSeekBillingStatus: ...
 
 
 class SettingsService:
@@ -45,6 +48,12 @@ class SettingsService:
         if gateway is None:
             raise RuntimeError("deepseek_probe_unavailable")
         return gateway.configuration_probe(self._repository.read().deepseek_model)
+
+    def read_deepseek_billing(self, *, force: bool = False) -> DeepSeekBillingStatus:
+        gateway = self._probe_gateway
+        if gateway is None:
+            raise RuntimeError("deepseek_billing_unavailable")
+        return gateway.billing_status(force=force)
 
     def put_deepseek_key(self, api_key: str) -> None:
         self._secret_store.put_deepseek_key(api_key)

@@ -17,6 +17,7 @@ EXPECTED_TABLES = {
     "contents",
     "document_versions",
     "documents",
+    "deepseek_usage",
     "egress_audit",
     "import_intents",
     "import_promotions",
@@ -80,6 +81,7 @@ def test_migration_creates_current_tables_and_is_idempotent(tmp_path: Path) -> N
         "0002_import_ownership",
         "0003_parser_fencing",
         "0004_pdf_annotations",
+        "0005_deepseek_billing",
     ]
     with db.connect() as connection:
         columns = {
@@ -189,6 +191,7 @@ def test_existing_v01_database_upgrades_fail_closed_and_remains_idempotent(
         "0002_import_ownership",
         "0003_parser_fencing",
         "0004_pdf_annotations",
+        "0005_deepseek_billing",
     ]
     assert tuple(legacy) == (0, "source_claim", None, None)
 

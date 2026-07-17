@@ -290,6 +290,7 @@ export function PdfReader({
   const restoreFrameRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const navigationFrameRef = useRef<number | null>(null);
+  const activeLoadingTaskRef = useRef<PDFDocumentLoadingTask | null>(null);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [basePageSizes, setBasePageSizes] = useState<PageSize[]>([]);
   const [pageIndex, setPageIndex] = useState(Math.max(0, initialPage - 1));
@@ -328,8 +329,10 @@ export function PdfReader({
 
   useEffect(() => {
     let disposed = false;
+    let published = false;
     const root = rootRef.current;
-    if (previousDocumentIdRef.current === documentId) {
+    const sameDocument = previousDocumentIdRef.current === documentId;
+    if (sameDocument) {
       const position = root === null
         ? readerPositionRef.current
         : { top: root.scrollTop, left: root.scrollLeft };
@@ -338,10 +341,13 @@ export function PdfReader({
     } else {
       readerPositionRef.current = { top: 0, left: 0 };
       pendingPositionRef.current = null;
+      const previousTask = activeLoadingTaskRef.current;
+      activeLoadingTaskRef.current = null;
+      if (previousTask !== null) void previousTask.destroy();
+      setPdf(null);
+      setBasePageSizes([]);
     }
     previousDocumentIdRef.current = documentId;
-    setPdf(null);
-    setBasePageSizes([]);
     setError(false);
     const loadingTask: PDFDocumentLoadingTask = getDocument({
       url: `/api/documents/${documentId}/file`,
@@ -355,8 +361,17 @@ export function PdfReader({
       iccUrl: "/pdfjs/iccs/",
     });
     void loadingTask.promise.then((loaded) => {
-      if (disposed) return;
+      if (disposed) {
+        void loadingTask.destroy();
+        return;
+      }
+      published = true;
+      const previousTask = activeLoadingTaskRef.current;
+      activeLoadingTaskRef.current = loadingTask;
       setPdf(loaded);
+      if (previousTask !== null && previousTask !== loadingTask) {
+        void previousTask.destroy();
+      }
       setPageIndex((current) => Math.min(current, loaded.numPages - 1));
       setError(false);
     }).catch(() => {
@@ -364,7 +379,7 @@ export function PdfReader({
     });
     return () => {
       disposed = true;
-      void loadingTask.destroy();
+      if (!published) void loadingTask.destroy();
     };
   }, [documentId, documentVersionId, contentId]);
 
@@ -406,6 +421,9 @@ export function PdfReader({
   }, [documentId, onSelectionClear]);
 
   useEffect(() => () => {
+    const loadingTask = activeLoadingTaskRef.current;
+    activeLoadingTaskRef.current = null;
+    if (loadingTask !== null) void loadingTask.destroy();
     if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
     if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current);
     if (navigationFrameRef.current !== null) cancelAnimationFrame(navigationFrameRef.current);
@@ -532,6 +550,9 @@ export function PdfReader({
   }
 
   function captureSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) {
+      return;
+    }
     if (
       event.target instanceof Element
       && event.target.closest(".selection-overlay__tools") !== null
@@ -574,6 +595,9 @@ export function PdfReader({
   }
 
   function startSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) {
+      return;
+    }
     if (
       event.target instanceof Element
       && event.target.closest(".selection-overlay__tools") !== null
@@ -619,14 +643,6 @@ export function PdfReader({
 
   return (
     <section aria-label={`阅读 ${filename}`} className="pdf-reader">
-      <PdfToolbar
-        currentPage={pageIndex + 1}
-        onFitWidth={() => void fitWidth()}
-        onPageChange={(page) => scrollToPage(page - 1, "smooth")}
-        onScaleChange={setScale}
-        scale={scale}
-        totalPages={pdf.numPages}
-      />
       <div
         className="pdf-reader__pages"
         onPointerCancel={cancelSelectionGesture}
@@ -681,6 +697,14 @@ export function PdfReader({
         })}
       </div>
       {selectionHint !== null && <p role="status">{selectionHint}</p>}
+      <PdfToolbar
+        currentPage={pageIndex + 1}
+        onFitWidth={() => void fitWidth()}
+        onPageChange={(page) => scrollToPage(page - 1, "smooth")}
+        onScaleChange={setScale}
+        scale={scale}
+        totalPages={pdf.numPages}
+      />
     </section>
   );
 }

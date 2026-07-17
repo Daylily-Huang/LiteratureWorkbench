@@ -222,3 +222,27 @@ def test_put_and_delete_key_touch_only_credential_backend(
         "/api/settings/deepseek-key",
         headers=_write_headers(authenticated),
     ).status_code == 204
+
+
+def test_billing_without_a_key_is_sanitized_and_keeps_local_totals(
+    client: TestClient,
+    authenticated,
+) -> None:
+    response = client.get("/api/settings/deepseek-billing")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "available": False,
+        "balances": [],
+        "site_usage": {
+            "currency": "CNY",
+            "today": "0",
+            "month": "0",
+            "total": "0",
+            "started_at": None,
+            "pricing_unknown_requests": 0,
+        },
+        "refreshed_at": None,
+        "stale": True,
+        "error_code": "deepseek_key_unavailable",
+    }

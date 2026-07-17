@@ -43,6 +43,7 @@ from literature_workbench.features.parser.worker import ParseWorkerService
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.features.translation.repository import TranslationRepository
 from literature_workbench.features.translation.service import TranslationService
+from literature_workbench.platform.windows.acl import TrustedRuntimeRoot, secure_owner_directory
 from literature_workbench.platform.windows.credentials import SecretStore, create_windows_secret_store
 from literature_workbench.platform.windows.filesystem import SafeWindowsFileInspector
 from literature_workbench.security.local_session import LocalSession
@@ -157,13 +158,15 @@ class WorkerBootstrap:
     generation: str
     token: str
     parent: ProcessIdentity
+    session_generation: str
 
     def to_json(self) -> dict[str, object]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "generation": self.generation,
             "token": self.token,
             "parent": self.parent.to_json(),
+            "session_generation": self.session_generation,
         }
 
     def write(self, path: Path) -> None:
@@ -176,15 +179,23 @@ class WorkerBootstrap:
         raw = cast(dict[str, object], value)
         generation = raw.get("generation")
         token = raw.get("token")
+        session_generation = raw.get("session_generation")
         if (
-            raw.get("schema_version") != 1
+            raw.get("schema_version") != 2
             or not isinstance(generation, str)
             or not generation
             or not isinstance(token, str)
             or len(token) < 32
+            or not isinstance(session_generation, str)
+            or not session_generation
         ):
             raise ValueError("worker_bootstrap_invalid")
-        return cls(generation, token, ProcessIdentity.from_json(raw.get("parent")))
+        return cls(
+            generation,
+            token,
+            ProcessIdentity.from_json(raw.get("parent")),
+            session_generation,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,7 +399,8 @@ def stop_running_instance(
     control_request: ControlRequest = _control_request,
     locks_released: Callable[[Path], bool] | None = None,
     qwen_manager_factory: Callable[[Path], QwenProcessManager] = QwenProcessManager,
-    timeout_seconds: float = 15.0,
+    exact_stopper: Callable[[ProcessIdentity], None] | None = None,
+    timeout_seconds: float = 60.0,
 ) -> bool:
     try:
         manifest = _read_manifest(manifest_path)
@@ -396,11 +408,21 @@ def stop_running_instance(
             manifest.supervisor, identity_lookup(manifest.supervisor.pid)
         ):
             return False
-        if not health_probe(f"http://127.0.0.1:{manifest.port}/api/health"):
-            return False
         qwen_manager = qwen_manager_factory(manifest_path.parent.parent / "qwen")
-        owned_qwen = qwen_manager.owned_identity()
-        control_request(manifest.port, manifest.control_token, "stop")
+        healthy = health_probe(f"http://127.0.0.1:{manifest.port}/api/health")
+        forced = not healthy
+        if healthy:
+            control_request(manifest.port, manifest.control_token, "stop")
+            owned_qwen = qwen_manager.owned_identity()
+        else:
+            owned_qwen = qwen_manager.owned_identity()
+            qwen_manager.stop_owned()
+            stop_exact = exact_stopper or _stop_exact_identity
+            if _same_identity(
+                manifest.worker, identity_lookup(manifest.worker.pid)
+            ):
+                stop_exact(manifest.worker)
+            stop_exact(manifest.supervisor)
         lock_probe = locks_released or _runtime_locks_released
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
@@ -410,12 +432,16 @@ def stop_running_instance(
             worker_gone = not _same_identity(
                 manifest.worker, identity_lookup(manifest.worker.pid)
             )
+            qwen_gone = qwen_manager.owned_identity_absent(owned_qwen)
+            locks_gone = lock_probe(manifest_path.parent)
+            if forced and supervisor_gone and worker_gone and locks_gone and qwen_gone:
+                manifest_path.unlink(missing_ok=True)
             if (
                 supervisor_gone
                 and worker_gone
                 and not manifest_path.exists()
-                and lock_probe(manifest_path.parent)
-                and qwen_manager.owned_identity_absent(owned_qwen)
+                and locks_gone
+                and qwen_gone
             ):
                 return True
             time.sleep(0.05)
@@ -729,15 +755,16 @@ def _wait_worker_lock_available(path: Path, timeout_seconds: float = 15.0) -> No
 def _stop_exact_process(
     process: subprocess.Popen[bytes], expected: ProcessIdentity | None
 ) -> None:
-    if expected is None or not _same_identity(expected, lookup_process_identity(expected.pid)):
-        return
+    if expected is not None:
+        current = lookup_process_identity(expected.pid)
+        if current is not None and not _same_identity(expected, current):
+            return
     try:
         process.terminate()
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        if _same_identity(expected, lookup_process_identity(expected.pid)):
-            process.kill()
-            process.wait(timeout=5)
+        process.kill()
+        process.wait(timeout=5)
     except (OSError, psutil.Error):
         return
 
@@ -781,9 +808,11 @@ def run_supervisor(
     web_dist: Path,
     *,
     browser_open: BrowserOpen = webbrowser.open,
+    acl_hardener: Callable[[Path, TrustedRuntimeRoot], None] = secure_owner_directory,
 ) -> None:
     runtime_dir = settings.data_root / "runtime" / "launcher"
     runtime_dir.mkdir(parents=True, exist_ok=True)
+    acl_hardener(runtime_dir, TrustedRuntimeRoot(settings.data_root))
     manifest_path = runtime_dir / _MANIFEST_NAME
     worker_lock_path = runtime_dir / _WORKER_LOCK_NAME
     bootstrap_path = runtime_dir / _WORKER_BOOTSTRAP_NAME
@@ -817,7 +846,12 @@ def run_supervisor(
     server_thread.start()
     try:
         _wait_until_healthy(port, server_thread)
-        WorkerBootstrap(generation, worker_token, supervisor_identity).write(bootstrap_path)
+        WorkerBootstrap(
+            generation,
+            worker_token,
+            supervisor_identity,
+            session.session_generation,
+        ).write(bootstrap_path)
         worker = _spawn_worker(runtime_dir / "worker.log", generation, worker_token)
         worker_launcher_identity = _wait_for_identity(worker.pid)
         worker_identity = wait_for_worker_ready(
@@ -843,6 +877,8 @@ def run_supervisor(
         while not stop_event.wait(0.25):
             if worker.poll() is not None:
                 raise RuntimeError("worker_exited")
+            if not server_thread.is_alive():
+                raise RuntimeError("loopback_server_failed")
     finally:
         server.should_exit = True
         server_thread.join(timeout=10)
@@ -897,6 +933,9 @@ def run_bound_worker(
             return datetime.now(UTC)
 
         queue = TaskQueue(database, queue_clock)
+        translation_repository = TranslationRepository(database, queue_clock)
+        translation_repository.expire_other_sessions(bootstrap.session_generation)
+        queue.requeue_expired()
         inspector = SafeWindowsFileInspector()
         trusted_root = TrustedImportRoot.create(settings.data_root)
         qwen_process = QwenProcessManager(settings.qwen_runtime_dir)
@@ -919,7 +958,7 @@ def run_bound_worker(
         )
         secret_store = create_windows_secret_store()
         translation = TranslationService(
-            TranslationRepository(database, queue_clock),
+            translation_repository,
             SettingsRepository(database),
             queue,
             DeepSeekGateway(
@@ -996,6 +1035,9 @@ def start(settings: AppSettings, web_dist: Path) -> None:
             if reuse_running_instance(manifest_path):
                 return
             if time.monotonic() >= deadline:
+                if stop_running_instance(manifest_path, timeout_seconds=20.0):
+                    deadline = time.monotonic() + 15
+                    continue
                 raise RuntimeError("existing_instance_unhealthy") from None
             time.sleep(0.1)
     try:

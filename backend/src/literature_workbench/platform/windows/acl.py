@@ -103,11 +103,16 @@ class PowerShellDaclReader:
     def read(self, target: Path) -> DaclSnapshot:
         encoded_target = base64.b64encode(str(target).encode("utf-8")).decode("ascii")
         script = _DACL_SCRIPT.replace("__TARGET_B64__", encoded_target)
-        try:
-            result = self._runner.run(
-                ["pwsh.exe", "-NoProfile", "-Command", script]
-            )
-        except (OSError, subprocess.TimeoutExpired, AclSecurityError):
+        result: AclCommandResult | None = None
+        for executable in ("pwsh.exe", "powershell.exe"):
+            try:
+                result = self._runner.run(
+                    [executable, "-NoProfile", "-Command", script]
+                )
+            except (OSError, subprocess.TimeoutExpired, AclSecurityError):
+                continue
+            break
+        if result is None:
             raise AclSecurityError("dacl_read_failed") from None
         if result.returncode != 0:
             raise AclSecurityError("dacl_read_failed")
@@ -352,7 +357,22 @@ def secure_owner_directory(
     with verifier.hold(target, trusted_runtime_root) as verified:
         owner_sid = _current_user_sid(resolved_sid_runner)
         initial = resolved_reader.read(verified.canonical_path)
+        inheritance = "(OI)(CI)" if verified.is_directory else ""
 
+        _run_required(
+            resolved_acl_runner,
+            [
+                "icacls.exe",
+                str(verified.canonical_path),
+                "/grant:r",
+                f"*{owner_sid}:{inheritance}F",
+                f"*{SYSTEM_SID}:{inheritance}F",
+            ],
+        )
+        _run_required(
+            resolved_acl_runner,
+            ["icacls.exe", str(verified.canonical_path), "/setowner", f"*{owner_sid}"],
+        )
         _run_required(
             resolved_acl_runner,
             ["icacls.exe", str(verified.canonical_path), "/inheritance:r"],
@@ -363,7 +383,7 @@ def secure_owner_directory(
                 for entry in initial.entries
                 if entry.allow
                 and not entry.inherited
-                and entry.sid != owner_sid
+                and entry.sid not in {owner_sid, SYSTEM_SID}
             }
         )
         for sid in non_owner_allow_sids:
@@ -371,11 +391,6 @@ def secure_owner_directory(
                 resolved_acl_runner,
                 ["icacls.exe", str(verified.canonical_path), "/remove:g", f"*{sid}"],
             )
-        _run_required(
-            resolved_acl_runner,
-            ["icacls.exe", str(verified.canonical_path), "/setowner", f"*{owner_sid}"],
-        )
-        inheritance = "(OI)(CI)" if verified.is_directory else ""
         _run_required(
             resolved_acl_runner,
             [

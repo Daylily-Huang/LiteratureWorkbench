@@ -211,6 +211,32 @@ def test_lost_lease_inside_completion_transaction_has_zero_page_or_pointer_effec
     assert run is not None and run["status"] == "running"
 
 
+def test_expensive_input_verification_runs_once_before_completion_write_lock(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    content_id = _prepare_content(parser_library, b"%PDF-preflight-hash", 1)
+    repository = ParseRunRepository(parser_library.database)
+    run_id = _create_run(parser_library, repository, content_id, "pymupdf", "pymupdf-1")
+    calls = 0
+
+    def verify_inputs() -> None:
+        nonlocal calls
+        calls += 1
+        with parser_library.database.connect() as connection:
+            connection.execute("PRAGMA busy_timeout=1")
+            connection.execute("BEGIN IMMEDIATE")
+            connection.rollback()
+
+    repository.complete_run(
+        run_id,
+        [_page(content_id, run_id, 0, "pymupdf", "verified page")],
+        verify_inputs=verify_inputs,
+    )
+
+    assert calls == 1
+    assert repository.current_run_id(content_id) == run_id
+
+
 def test_older_concurrent_run_cannot_overwrite_newer_published_run(
     parser_library: ParserLibraryFixture,
 ) -> None:

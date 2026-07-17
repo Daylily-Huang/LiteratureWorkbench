@@ -14,6 +14,7 @@ from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.egress.gateway import EgressRejected
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.features.translation.repository import (
+    CachedTranslation,
     SelectionRejected,
     TranslationNotFound,
     TranslationRepository,
@@ -140,6 +141,37 @@ def service(translation_db, *, deepseek=None, qwen=None, process=None) -> Transl
         qwen or FakeQwen(),
         process or FakeQwenProcess(),
     )
+
+
+def test_startup_expires_translation_tasks_from_previous_session(translation_db) -> None:
+    database, ids = translation_db
+    def clock() -> datetime:
+        return datetime.now(UTC)
+
+    repository = TranslationRepository(database, clock)
+    queue = TaskQueue(database, clock)
+    subject = TranslationService(
+        repository,
+        SettingsRepository(database),
+        queue,
+        FakeDeepSeek(),
+        FakeQwen(),
+        FakeQwenProcess(),
+    )
+    old = subject.submit("old-session", request(ids))
+    current = subject.submit("current-session", request(ids))
+
+    assert repository.expire_other_sessions("current-session") == 1
+
+    assert repository.get(old.id, session_generation="old-session").status == "failed"
+    assert repository.get(current.id, session_generation="current-session").status == "queued"
+    with database.connect() as connection:
+        old_job = connection.execute(
+            "SELECT status,error_code,retryable FROM jobs WHERE dedup_key=?",
+            (f"translation:{old.id}",),
+        ).fetchone()
+    assert old_job is not None
+    assert tuple(old_job) == ("failed", "translation_session_expired", 0)
 
 
 def test_rejects_forged_selection_and_stale_identity_before_any_model_call(
@@ -422,6 +454,76 @@ def test_recovered_running_task_never_repeats_an_ambiguous_deepseek_send(
     assert recovered.status == "failed"
     assert recovered.error_code == "translation_send_ambiguous"
     assert deepseek.calls == []
+
+
+def test_stale_completion_cannot_overwrite_a_failed_translation(translation_db) -> None:
+    database, ids = translation_db
+    repository = TranslationRepository(database, lambda: datetime.now(UTC))
+    task = service(translation_db).submit("session", request(ids))
+    repository.mark_running(task.id)
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE translation_tasks SET status='failed',error_code='newer_failure' WHERE id=?",
+            (str(task.id),),
+        )
+
+    result = repository.complete(
+        task.id,
+        cache_key="b" * 64,
+        translated_text="stale result",
+        detected_source_language="und",
+        provider="deepseek",
+        model="deepseek-chat",
+        fallback_reason=None,
+    )
+
+    assert result.status == "failed"
+    assert result.error_code == "newer_failure"
+
+
+def test_stale_cached_completion_cannot_overwrite_a_failed_translation(
+    translation_db,
+) -> None:
+    database, ids = translation_db
+    repository = TranslationRepository(database, lambda: datetime.now(UTC))
+    task = service(translation_db).submit("session", request(ids))
+    repository.mark_running(task.id)
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE translation_tasks SET status='failed',error_code='newer_failure' WHERE id=?",
+            (str(task.id),),
+        )
+
+    result = repository.complete_cached(
+        task.id,
+        CachedTranslation(
+            cache_key="c" * 64,
+            translated_text="cached result",
+            detected_source_language="und",
+            provider="qwen",
+            model="literature-workbench-qwen",
+        ),
+    )
+
+    assert result.status == "failed"
+    assert result.error_code == "newer_failure"
+
+
+def test_stale_failure_cannot_overwrite_a_completed_translation(translation_db) -> None:
+    database, ids = translation_db
+    repository = TranslationRepository(database, lambda: datetime.now(UTC))
+    task = service(translation_db).submit("session", request(ids))
+    repository.mark_running(task.id)
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE translation_tasks SET status='completed',stage='completed' WHERE id=?",
+            (str(task.id),),
+        )
+
+    result = repository.fail(task.id, "stale_failure")
+
+    assert result.status == "completed"
+    assert result.error_code is None
 
 
 def test_session_scoped_lookup_hides_another_sessions_task(translation_db) -> None:

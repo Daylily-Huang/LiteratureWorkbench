@@ -18,13 +18,26 @@ import {
 type Props = {
   activeDocumentId?: string | null;
   documentApi?: DocumentApi;
+  documentRefreshMs?: number;
   importApi?: ImportApi;
   onOpenDocument?: (documentId: string) => void;
 };
 
+function sameDocuments(left: DocumentListItem[], right: DocumentListItem[]): boolean {
+  return left.length === right.length && left.every((item, index) => {
+    const other = right[index];
+    return other !== undefined
+      && item.document_id === other.document_id
+      && item.filename === other.filename
+      && item.relative_folder === other.relative_folder
+      && item.authorization_source === other.authorization_source;
+  });
+}
+
 export function LibraryPanel({
   activeDocumentId = null,
   documentApi = browserDocumentApi,
+  documentRefreshMs = 3000,
   importApi = browserImportApi,
   onOpenDocument = () => undefined,
 }: Props) {
@@ -33,9 +46,14 @@ export function LibraryPanel({
   const [tasks, setTasks] = useState<ImportTask[]>([]);
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
   const [documentsFailed, setDocumentsFailed] = useState(false);
+  const [query, setQuery] = useState("");
   const [pollFailures, setPollFailures] = useState<Set<string>>(new Set());
   const input = useRef<HTMLInputElement>(null);
   const confirming = useRef(false);
+
+  function putDocuments(next: DocumentListItem[]) {
+    setDocuments((current) => sameDocuments(current, next) ? current : next);
+  }
 
   function putTask(task: ImportTask) {
     setTasks((current) => [task, ...current.filter((item) => item.intent_id !== task.intent_id)]);
@@ -43,7 +61,7 @@ export function LibraryPanel({
 
   async function refreshDocuments() {
     try {
-      setDocuments(await documentApi.listDocuments());
+      putDocuments(await documentApi.listDocuments());
       setDocumentsFailed(false);
     } catch {
       setDocumentsFailed(true);
@@ -64,19 +82,27 @@ export function LibraryPanel({
 
   useEffect(() => {
     let stopped = false;
-    void documentApi.listDocuments().then(
-      (items) => {
-        if (!stopped) {
-          setDocuments(items);
-          setDocumentsFailed(false);
-        }
-      },
-      () => {
+    let timer: number | null = null;
+    const pollDocuments = async () => {
+      try {
+        const items = await documentApi.listDocuments();
+        if (stopped) return;
+        putDocuments(items);
+        setDocumentsFailed(false);
+      } catch {
         if (!stopped) setDocumentsFailed(true);
-      },
-    );
-    return () => { stopped = true; };
-  }, [documentApi]);
+      } finally {
+        if (!stopped) {
+          timer = window.setTimeout(() => void pollDocuments(), documentRefreshMs);
+        }
+      }
+    };
+    void pollDocuments();
+    return () => {
+      stopped = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [documentApi, documentRefreshMs]);
 
   useEffect(() => {
     let stopped = false;
@@ -91,11 +117,13 @@ export function LibraryPanel({
     const timers: number[] = [];
     for (const task of tasks) {
       if (task.poll_after_ms === null) continue;
+      let failureCount = 0;
       const poll = () => {
         if (stopped) return;
         void importApi.getImport(task.intent_id).then(
           (next) => {
             if (stopped) return;
+            failureCount = 0;
             setPollFailures((current) => {
               const copy = new Set(current);
               copy.delete(task.intent_id);
@@ -103,10 +131,35 @@ export function LibraryPanel({
             });
             acceptNewTask(task, next);
           },
-          () => {
+          (reason: unknown) => {
             if (stopped) return;
+            if (reason instanceof ImportApiError && reason.code === "import_not_found") {
+              putTask({
+                ...task,
+                status: "failed",
+                error_code: "import_not_found",
+                poll_after_ms: null,
+              });
+              setPollFailures((current) => {
+                const copy = new Set(current);
+                copy.delete(task.intent_id);
+                return copy;
+              });
+              return;
+            }
+            failureCount += 1;
+            if (failureCount >= 6) {
+              putTask({
+                ...task,
+                status: "failed",
+                error_code: "import_failed",
+                poll_after_ms: null,
+              });
+              return;
+            }
             setPollFailures((current) => new Set(current).add(task.intent_id));
-            timers.push(window.setTimeout(poll, 1000));
+            const retryDelay = Math.min(30_000, 1000 * (2 ** (failureCount - 1)));
+            timers.push(window.setTimeout(poll, retryDelay));
           },
         );
       };
@@ -164,20 +217,30 @@ export function LibraryPanel({
   return (
     <section
       aria-label="文献导入区"
+      className="library-panel"
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault();
         choose(event.dataTransfer.files.item(0) ?? undefined);
       }}
     >
-      <h1>文献库</h1>
+      <div className="library-panel__header"><div><span className="eyebrow">本地同步</span><h1>文献库</h1></div><span className="count-badge">{documents.length}</span></div>
+      <label className="library-search">
+        <span aria-hidden="true">⌕</span>
+        <span className="sr-only">搜索文献</span>
+        <input aria-label="搜索文献" onChange={(event) => setQuery(event.target.value)} placeholder="搜索文件名或文件夹" type="search" value={query} />
+      </label>
       <DocumentTree
         activeDocumentId={activeDocumentId}
-        documents={documents}
+        documents={documents.filter((item) => {
+          const needle = query.trim().toLocaleLowerCase("zh-CN");
+          return needle === "" || `${item.relative_folder}/${item.filename}`.toLocaleLowerCase("zh-CN").includes(needle);
+        })}
         onOpenDocument={onOpenDocument}
       />
+      {query.trim() !== "" && documents.every((item) => !`${item.relative_folder}/${item.filename}`.toLocaleLowerCase("zh-CN").includes(query.trim().toLocaleLowerCase("zh-CN"))) && <p className="empty-copy">没有匹配的文献</p>}
       {documentsFailed && <p role="alert">文献列表暂时无法读取</p>}
-      <label>导入文献<input ref={input} type="file" onChange={(event) => choose(event.target.files?.[0])} /></label>
+      <label className="library-drop"><strong>＋ 导入文献</strong><span>点击选择或拖入 PDF</span><input aria-label="导入文献" ref={input} type="file" onChange={(event) => choose(event.target.files?.[0])} /></label>
       {unsupported && <p>首版暂不导入；以后可在单次明确授权后用于云处理</p>}
       {selected && <ImportConfirmDialog fileName={selected.name} status="awaiting_confirmation" onConfirm={() => void confirm()} onCancel={cancel} />}
       {tasks.map((task) => (
