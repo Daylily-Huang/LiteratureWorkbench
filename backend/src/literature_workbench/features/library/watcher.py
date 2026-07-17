@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import Protocol, cast
 from uuid import UUID
@@ -30,6 +30,7 @@ class Reconciler(Protocol):
 
 WatchBatch = set[tuple[object, str]]
 WatchFactory = Callable[..., AsyncIterator[WatchBatch]]
+Sleep = Callable[[float], Awaitable[None]]
 
 
 class WatcherManager:
@@ -40,11 +41,15 @@ class WatcherManager:
         *,
         watch: WatchFactory | None = None,
         restart_delay: float = 0.25,
+        restart_delay_max: float = 30.0,
+        sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._repository = repository
         self._scanner = scanner
         self._watch = watch or cast(WatchFactory, awatch)
         self._restart_delay = restart_delay
+        self._restart_delay_max = max(restart_delay, restart_delay_max)
+        self._sleep = sleep
         self._shutdown = asyncio.Event()
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
 
@@ -109,6 +114,7 @@ class WatcherManager:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _watch_library(self, library: LibraryRoot) -> None:
+        restart_delay = self._restart_delay
         while not self._shutdown.is_set():
             try:
                 async for changes in self._watch(
@@ -119,6 +125,7 @@ class WatcherManager:
                     stop_event=self._shutdown,
                 ):
                     await self.process_changes(library.id, changes)
+                    restart_delay = self._restart_delay
                     if self._shutdown.is_set():
                         return
                 if self._shutdown.is_set():
@@ -133,8 +140,9 @@ class WatcherManager:
                     await asyncio.to_thread(self._scanner.scan_library, library.id)
                 except Exception:
                     pass
-            if self._restart_delay:
-                await asyncio.sleep(self._restart_delay)
+            if restart_delay:
+                await self._sleep(restart_delay)
+                restart_delay = min(self._restart_delay_max, restart_delay * 2)
 
     @staticmethod
     def _contained(candidate: Path, root: Path) -> bool:

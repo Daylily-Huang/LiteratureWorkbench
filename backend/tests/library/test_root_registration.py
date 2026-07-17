@@ -257,6 +257,34 @@ def test_registration_reinspects_identity_and_inserts_nothing_when_changed(
     assert count == 0
 
 
+@pytest.mark.parametrize("relation", ["equal", "ancestor", "descendant"])
+def test_private_data_root_cannot_be_registered(tmp_path: Path, relation: str) -> None:
+    session = LocalSession()
+    selected = {
+        "equal": tmp_path,
+        "ancestor": tmp_path.parent,
+        "descendant": tmp_path / "nested",
+    }[relation]
+    identity = _identity(selected)
+    with _client(
+        tmp_path,
+        session,
+        FakeFolderDialog(selected),
+        FakeInspector(identity, identity),
+    ) as client:
+        selection = client.post("/api/libraries/select-root", headers=_headers(session))
+        response = client.post(
+            "/api/libraries",
+            headers=_headers(session),
+            json={"selection_token": selection.json()["selection_token"]},
+        )
+        count = LibraryRepository(client.app.state.database).count()
+
+    assert response.status_code == 409
+    assert response.json() == {"code": "private_data_root_not_allowed"}
+    assert count == 0
+
+
 def test_exact_duplicate_returns_existing_id_and_overlapping_root_is_rejected(tmp_path: Path) -> None:
     database = Database.open(tmp_path / "library.db")
     run_migrations(database)
@@ -308,7 +336,11 @@ def test_initial_approved_root_is_fixed_and_environment_override_is_ignored(
     database = Database.open(tmp_path / "library.db")
     run_migrations(database)
     inspector = FakeInspector(_identity(INITIAL_APPROVED_LIBRARY))
-    service = LibraryRootService(LibraryRepository(database), inspector)
+    service = LibraryRootService(
+        LibraryRepository(database),
+        inspector,
+        private_data_root=tmp_path / "private-data",
+    )
 
     library = service.register_initial_approved_library()
 

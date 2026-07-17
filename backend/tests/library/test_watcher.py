@@ -162,6 +162,48 @@ async def test_watcher_restart_schedules_full_rescan(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_watcher_restart_uses_bounded_exponential_backoff(tmp_path: Path) -> None:
+    library = _library(tmp_path / "library")
+    delays: list[float] = []
+    fourth_attempt = asyncio.Event()
+    attempts = 0
+
+    async def failing_watch(
+        *_args: object, **_kwargs: object
+    ) -> AsyncIterator[set[tuple[int, str]]]:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 3:
+            raise OSError("watch root unavailable")
+        fourth_attempt.set()
+        await asyncio.Future()
+        if False:
+            yield set()
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+        await asyncio.sleep(0)
+
+    manager = WatcherManager(
+        FakeRepository({library.id: library}),
+        FakeScanner(),
+        watch=failing_watch,
+        restart_delay=0.25,
+        restart_delay_max=1.0,
+        sleep=record_sleep,
+    )
+    await manager.add_library(library.id)
+    for _ in range(100):
+        if fourth_attempt.is_set():
+            break
+        await asyncio.sleep(0.01)
+
+    assert fourth_attempt.is_set(), (attempts, delays)
+    assert delays == [0.25, 0.5, 1.0]
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_registered_library_initial_scan_and_later_create_event_are_observed(
     tmp_path: Path,
 ) -> None:

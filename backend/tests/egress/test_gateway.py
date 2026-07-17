@@ -172,12 +172,15 @@ def _gateway(
     handler: Any,
     *,
     configured: bool = True,
+    monotonic: Any = None,
 ) -> DeepSeekGateway:
+    kwargs = {} if monotonic is None else {"monotonic": monotonic}
     return DeepSeekGateway(
         database,
         _store(configured=configured),
         process_generation="generation-task-9",
         transport=httpx.MockTransport(handler),
+        **kwargs,
     )
 
 
@@ -192,6 +195,14 @@ def _success_response(request: httpx.Request) -> httpx.Response:
 def test_balance_is_cached_and_force_refreshes(database: Database) -> None:
     calls: list[httpx.Request] = []
 
+    class Clock:
+        now = 100.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = Clock()
+
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
         assert str(request.url) == DEEPSEEK_BALANCE_URL
@@ -205,15 +216,55 @@ def test_balance_is_cached_and_force_refreshes(database: Database) -> None:
             }],
         }, request=request)
 
-    gateway = _gateway(database, handler)
+    gateway = _gateway(database, handler, monotonic=clock)
     first = gateway.billing_status()
     cached = gateway.billing_status()
+    throttled = gateway.billing_status(force=True)
+    clock.now += 15.0
     refreshed = gateway.billing_status(force=True)
 
     assert first.balances[0].total_balance == "8.50"
     assert cached.stale is False
+    assert throttled.refreshed_at == first.refreshed_at
     assert refreshed.refreshed_at is not None
     assert len(calls) == 2
+
+
+def test_balance_request_is_metadata_only_audited(database: Database) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"is_available": True, "balance_infos": []},
+            request=request,
+        )
+
+    gateway = _gateway(database, handler)
+    assert gateway.billing_status().available is True
+
+    with database.connect() as connection:
+        row = connection.execute(
+            """SELECT purpose,payload_kind,payload_bytes,outcome,detail_code
+               FROM egress_audit WHERE purpose='balance_refresh'"""
+        ).fetchone()
+    assert row is not None
+    assert tuple(row) == ("balance_refresh", "none", 0, "succeeded", None)
+    assert API_KEY not in repr(row)
+
+
+def test_balance_parse_failure_is_finalized_in_audit(database: Database) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"unexpected": True}, request=request)
+
+    status = _gateway(database, handler).billing_status()
+
+    with database.connect() as connection:
+        row = connection.execute(
+            """SELECT outcome,detail_code FROM egress_audit
+               WHERE purpose='balance_refresh'"""
+        ).fetchone()
+    assert status.error_code == "invalid_deepseek_balance_response"
+    assert row is not None
+    assert tuple(row) == ("failed", "invalid_deepseek_balance_response")
 
 
 @pytest.mark.parametrize(
@@ -348,6 +399,22 @@ def test_successful_gateway_response_records_provider_usage(
         ).fetchone()
     assert row is not None
     assert tuple(row) == (80, 20, 10, 41_600, "deepseek-cny-2026-07-17")
+
+
+def test_success_without_provider_usage_records_unknown_usage(
+    database: Database,
+    proof: VerifiedSelectionProof,
+) -> None:
+    assert _gateway(database, _success_response).translate_selection(proof) == TRANSLATED_TEXT
+
+    with database.connect() as connection:
+        row = connection.execute(
+            """SELECT prompt_cache_hit_tokens,prompt_cache_miss_tokens,
+                      completion_tokens,total_tokens,cost_nano_cny,pricing_version
+               FROM deepseek_usage"""
+        ).fetchone()
+    assert row is not None
+    assert tuple(row) == (None, None, None, None, None, None)
 
 
 def test_same_content_older_version_never_calls_transport(

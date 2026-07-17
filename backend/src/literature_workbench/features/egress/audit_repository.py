@@ -99,6 +99,7 @@ class EgressAuditRepository:
                 raise RuntimeError("egress_audit_finish_failed")
             if charge is not None:
                 pricing = charge.pricing
+                usage = charge.usage
                 connection.execute(
                     """
                     INSERT INTO deepseek_usage(
@@ -110,10 +111,10 @@ class EgressAuditRepository:
                     FROM egress_audit WHERE id=?
                     """,
                     (
-                        charge.usage.prompt_cache_hit_tokens,
-                        charge.usage.prompt_cache_miss_tokens,
-                        charge.usage.completion_tokens,
-                        charge.usage.total_tokens,
+                        None if usage is None else usage.prompt_cache_hit_tokens,
+                        None if usage is None else usage.prompt_cache_miss_tokens,
+                        None if usage is None else usage.completion_tokens,
+                        None if usage is None else usage.total_tokens,
                         charge.cost_nano_cny,
                         charge.pricing_version,
                         None if pricing is None else pricing.cache_hit_nano_cny_per_token,

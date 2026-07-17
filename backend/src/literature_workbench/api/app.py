@@ -140,7 +140,9 @@ def create_app(
                 resolved_inspector,
             )
             app.state.library_root_service = LibraryRootService(
-                library_repository, resolved_inspector
+                library_repository,
+                resolved_inspector,
+                private_data_root=resolved.data_root,
             )
             library_scan_coordinator = LibraryScanCoordinator()
             app.state.library_scan_coordinator = library_scan_coordinator

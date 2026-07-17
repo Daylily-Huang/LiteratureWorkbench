@@ -105,7 +105,11 @@ async def register_library(request: Request, payload: RegisterLibraryRequest) ->
         return JSONResponse({"code": "selection_identity_changed"}, status_code=409)
     except ValueError as error:
         code = str(error)
-        if code in {"overlapping_library_root", "registered_root_identity_changed"}:
+        if code in {
+            "overlapping_library_root",
+            "private_data_root_not_allowed",
+            "registered_root_identity_changed",
+        }:
             return JSONResponse({"code": code}, status_code=409)
         raise
     await request.app.state.library_watcher.add_library(library.id)

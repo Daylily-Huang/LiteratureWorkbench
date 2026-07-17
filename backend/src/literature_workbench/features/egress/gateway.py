@@ -5,6 +5,7 @@ import json
 import threading
 import time
 from datetime import UTC, datetime
+from collections.abc import Callable
 from typing import NoReturn
 from uuid import uuid4
 
@@ -19,8 +20,10 @@ from literature_workbench.features.egress.billing import (
     BalanceSnapshot,
     DeepSeekBillingStatus,
     DeepSeekUsageRepository,
+    SiteUsage,
     parse_balance_response,
     price_usage,
+    unknown_usage_charge,
 )
 from literature_workbench.features.egress.models import VerifiedSelectionProof
 from literature_workbench.features.models.deepseek import (
@@ -42,6 +45,7 @@ MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_BALANCE_RESPONSE_BYTES = 64 * 1024
 TOTAL_REQUEST_TIMEOUT_SECONDS = 30.0
 BALANCE_CACHE_SECONDS = 60.0
+BALANCE_FORCE_REFRESH_MIN_INTERVAL_SECONDS = 15.0
 _FIXED_PROBE_PROMPT = "Reply with exactly: model configuration ok"
 
 
@@ -57,15 +61,19 @@ class DeepSeekGateway:
         *,
         process_generation: str,
         transport: httpx.BaseTransport | None = None,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         self._database = database
         self._secret_store = secret_store
         self._audit = EgressAuditRepository(database, process_generation)
         self._adapter = DeepSeekAdapter()
         self._transport = transport
+        self._monotonic = monotonic or time.monotonic
         self._usage = DeepSeekUsageRepository(database)
         self._balance_lock = threading.Lock()
         self._balance_cache: tuple[float, BalanceSnapshot] | None = None
+        self._balance_last_attempt_at: float | None = None
+        self._balance_last_error: str | None = None
 
     def translate_selection(self, proof: VerifiedSelectionProof) -> str:
         display_name = self._verify_selection(proof)
@@ -111,7 +119,7 @@ class DeepSeekGateway:
 
     def billing_status(self, *, force: bool = False) -> DeepSeekBillingStatus:
         site_usage = self._usage.summary()
-        now = time.monotonic()
+        now = self._monotonic()
         with self._balance_lock:
             cached = self._balance_cache
             if not force and cached is not None and now - cached[0] < BALANCE_CACHE_SECONDS:
@@ -123,34 +131,59 @@ class DeepSeekGateway:
                     refreshed_at=snapshot.refreshed_at,
                     stale=False,
                 )
+            if (
+                force
+                and self._balance_last_attempt_at is not None
+                and now - self._balance_last_attempt_at
+                < BALANCE_FORCE_REFRESH_MIN_INTERVAL_SECONDS
+            ):
+                return self._balance_status_from_cache(
+                    cached,
+                    site_usage=site_usage,
+                    error_code=self._balance_last_error,
+                )
+            self._balance_last_attempt_at = now
             try:
                 snapshot = self._fetch_balance()
             except EgressRejected as error:
-                if cached is not None:
-                    snapshot = cached[1]
-                    return DeepSeekBillingStatus(
-                        available=snapshot.available,
-                        balances=snapshot.balances,
-                        site_usage=site_usage,
-                        refreshed_at=snapshot.refreshed_at,
-                        stale=True,
-                        error_code=str(error),
-                    )
-                return DeepSeekBillingStatus(
-                    available=False,
-                    balances=[],
-                    site_usage=site_usage,
-                    refreshed_at=None,
-                    stale=True,
-                    error_code=str(error),
+                self._balance_last_error = str(error)
+                return self._balance_status_from_cache(
+                    cached, site_usage=site_usage, error_code=str(error)
                 )
-            self._balance_cache = (now, snapshot)
+            self._balance_last_error = None
+            self._balance_cache = (self._monotonic(), snapshot)
         return DeepSeekBillingStatus(
             available=snapshot.available,
             balances=snapshot.balances,
             site_usage=site_usage,
             refreshed_at=snapshot.refreshed_at,
             stale=False,
+        )
+
+    @staticmethod
+    def _balance_status_from_cache(
+        cached: tuple[float, BalanceSnapshot] | None,
+        *,
+        site_usage: SiteUsage,
+        error_code: str | None,
+    ) -> DeepSeekBillingStatus:
+        if cached is None:
+            return DeepSeekBillingStatus(
+                available=False,
+                balances=[],
+                site_usage=site_usage,
+                refreshed_at=None,
+                stale=True,
+                error_code=error_code,
+            )
+        snapshot = cached[1]
+        return DeepSeekBillingStatus(
+            available=snapshot.available,
+            balances=snapshot.balances,
+            site_usage=site_usage,
+            refreshed_at=snapshot.refreshed_at,
+            stale=error_code is not None,
+            error_code=error_code,
         )
 
     def _verify_selection(self, proof: VerifiedSelectionProof) -> str:
@@ -220,7 +253,7 @@ class DeepSeekGateway:
         *,
         expected_response: str | None = None,
     ) -> str:
-        started = time.monotonic()
+        started = self._monotonic()
         deadline = started + TOTAL_REQUEST_TIMEOUT_SECONDS
         try:
             secret = self._secret_store.get_deepseek_key()
@@ -272,13 +305,17 @@ class DeepSeekGateway:
         self._check_total_deadline(attempt, deadline, started)
         if expected_response is not None and result.content.strip() != expected_response:
             self._fail(attempt, "configuration_probe_failed", started)
-        latency = max(0, int((time.monotonic() - started) * 1000))
+        latency = max(0, int((self._monotonic() - started) * 1000))
         self._audit.finish(
             attempt,
             outcome="succeeded",
             detail_code=None,
             latency_ms=latency,
-            charge=None if result.usage is None else price_usage(attempt.model, result.usage),
+            charge=(
+                unknown_usage_charge()
+                if result.usage is None
+                else price_usage(attempt.model, result.usage)
+            ),
         )
         return expected_response if expected_response is not None else result.content
 
@@ -289,6 +326,19 @@ class DeepSeekGateway:
             raise EgressRejected("credential_store_failed") from None
         if secret is None:
             raise EgressRejected("deepseek_key_unavailable")
+        attempt = self._audit.start(
+            task_id=f"balance-refresh:{uuid4()}",
+            authorization_type="configured_balance",
+            document_id=None,
+            content_sha256=None,
+            display_file_name=None,
+            model="deepseek-balance",
+            purpose="balance_refresh",
+            payload_kind="none",
+            payload_bytes=0,
+            payload_sha256=hashlib.sha256(b"").hexdigest(),
+        )
+        started = self._monotonic()
         try:
             with httpx.Client(
                 transport=self._transport,
@@ -312,14 +362,36 @@ class DeepSeekGateway:
                         if len(raw) + len(chunk) > MAX_BALANCE_RESPONSE_BYTES:
                             raise EgressRejected("deepseek_balance_response_too_large")
                         raw.extend(chunk)
-        except EgressRejected:
+        except EgressRejected as error:
+            self._finish_balance_audit(attempt, str(error), started)
             raise
         except (httpx.HTTPError, OSError):
-            raise EgressRejected("deepseek_balance_transport_failed") from None
+            code = "deepseek_balance_transport_failed"
+            self._finish_balance_audit(attempt, code, started)
+            raise EgressRejected(code) from None
         try:
-            return parse_balance_response(bytes(raw), refreshed_at=datetime.now(UTC))
+            snapshot = parse_balance_response(bytes(raw), refreshed_at=datetime.now(UTC))
         except ValueError:
-            raise EgressRejected("invalid_deepseek_balance_response") from None
+            code = "invalid_deepseek_balance_response"
+            self._finish_balance_audit(attempt, code, started)
+            raise EgressRejected(code) from None
+        self._audit.finish(
+            attempt,
+            outcome="succeeded",
+            detail_code=None,
+            latency_ms=max(0, int((self._monotonic() - started) * 1000)),
+        )
+        return snapshot
+
+    def _finish_balance_audit(
+        self, attempt: AuditAttempt, code: str, started: float
+    ) -> None:
+        self._audit.finish(
+            attempt,
+            outcome="failed",
+            detail_code=code,
+            latency_ms=max(0, int((self._monotonic() - started) * 1000)),
+        )
 
     def _check_total_deadline(
         self,
@@ -327,11 +399,11 @@ class DeepSeekGateway:
         deadline: float,
         started: float,
     ) -> None:
-        if time.monotonic() >= deadline:
+        if self._monotonic() >= deadline:
             self._fail(attempt, "deepseek_total_timeout", started)
 
     def _fail(self, attempt: AuditAttempt, code: str, started: float) -> NoReturn:
-        latency = max(0, int((time.monotonic() - started) * 1000))
+        latency = max(0, int((self._monotonic() - started) * 1000))
         self._audit.finish(
             attempt,
             outcome="failed",

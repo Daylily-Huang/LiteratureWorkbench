@@ -415,14 +415,14 @@ def stop_running_instance(
             control_request(manifest.port, manifest.control_token, "stop")
             owned_qwen = qwen_manager.owned_identity()
         else:
-            owned_qwen = qwen_manager.owned_identity()
-            qwen_manager.stop_owned()
             stop_exact = exact_stopper or _stop_exact_identity
             if _same_identity(
                 manifest.worker, identity_lookup(manifest.worker.pid)
             ):
                 stop_exact(manifest.worker)
             stop_exact(manifest.supervisor)
+            owned_qwen = qwen_manager.owned_identity()
+            qwen_manager.stop_owned()
         lock_probe = locks_released or _runtime_locks_released
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:

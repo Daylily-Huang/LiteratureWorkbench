@@ -26,7 +26,7 @@ class PricingSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class UsageCharge:
-    usage: DeepSeekTokenUsage
+    usage: DeepSeekTokenUsage | None
     cost_nano_cny: int | None
     pricing_version: str | None
     pricing: PricingSnapshot | None
@@ -52,6 +52,10 @@ def price_usage(model: str, usage: DeepSeekTokenUsage) -> UsageCharge:
         + usage.completion_tokens * pricing.output_nano_cny_per_token
     )
     return UsageCharge(usage, cost, PRICING_VERSION, pricing)
+
+
+def unknown_usage_charge() -> UsageCharge:
+    return UsageCharge(None, None, None, None)
 
 
 class BalanceInfo(BaseModel):

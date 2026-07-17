@@ -82,6 +82,7 @@ def test_migration_creates_current_tables_and_is_idempotent(tmp_path: Path) -> N
         "0003_parser_fencing",
         "0004_pdf_annotations",
         "0005_deepseek_billing",
+        "0006_deepseek_usage_optional",
     ]
     with db.connect() as connection:
         columns = {
@@ -107,7 +108,14 @@ def test_migration_creates_current_tables_and_is_idempotent(tmp_path: Path) -> N
             str(row["name"]): (str(row["type"]), row["notnull"], row["dflt_value"])
             for row in connection.execute("PRAGMA table_info(parse_runs)")
         }
+        usage_columns = {
+            str(row["name"]): (str(row["type"]), row["notnull"], row["dflt_value"])
+            for row in connection.execute("PRAGMA table_info(deepseek_usage)")
+        }
     assert content_columns["parse_request_revision"] == ("INTEGER", 1, "0")
+    assert usage_columns["prompt_cache_hit_tokens"] == ("INTEGER", 0, None)
+    assert usage_columns["prompt_cache_miss_tokens"] == ("INTEGER", 0, None)
+    assert usage_columns["completion_tokens"] == ("INTEGER", 0, None)
     assert run_columns["request_revision"] == ("INTEGER", 1, "0")
     assert run_columns["source_job_id"] == ("TEXT", 0, None)
 
@@ -192,6 +200,7 @@ def test_existing_v01_database_upgrades_fail_closed_and_remains_idempotent(
         "0003_parser_fencing",
         "0004_pdf_annotations",
         "0005_deepseek_billing",
+        "0006_deepseek_usage_optional",
     ]
     assert tuple(legacy) == (0, "source_claim", None, None)
 

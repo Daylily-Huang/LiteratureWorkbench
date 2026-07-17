@@ -569,13 +569,16 @@ def test_stop_recovers_exact_unhealthy_instance_without_control_endpoint(
     alive = {101, 202}
     qwen_running = True
     control_calls: list[object] = []
+    stop_events: list[str] = []
 
     class OwnedQwen:
         def owned_identity(self) -> object:
+            stop_events.append("qwen-identity")
             return "owned-qwen"
 
         def stop_owned(self) -> bool:
             nonlocal qwen_running
+            stop_events.append("qwen-stop")
             qwen_running = False
             return True
 
@@ -589,6 +592,7 @@ def test_stop_recovers_exact_unhealthy_instance_without_control_endpoint(
         return manifest.supervisor if pid == 101 else manifest.worker
 
     def stop_exact(identity: ProcessIdentity) -> None:
+        stop_events.append("supervisor" if identity == manifest.supervisor else "worker")
         alive.discard(identity.pid)
         if identity == manifest.supervisor:
             manifest_path.unlink()
@@ -606,6 +610,7 @@ def test_stop_recovers_exact_unhealthy_instance_without_control_endpoint(
     assert control_calls == []
     assert not qwen_running
     assert alive == set()
+    assert stop_events == ["worker", "supervisor", "qwen-identity", "qwen-stop"]
 
 
 def test_process_handle_is_terminated_when_identity_lookup_is_unavailable(
