@@ -284,10 +284,6 @@ export function PdfReader({
   onTranslateSelection,
 }: PdfReaderProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const previousDocumentIdRef = useRef(documentId);
-  const readerPositionRef = useRef({ top: 0, left: 0 });
-  const pendingPositionRef = useRef<{ top: number; left: number } | null>(null);
-  const restoreFrameRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const navigationFrameRef = useRef<number | null>(null);
   const activeLoadingTaskRef = useRef<PDFDocumentLoadingTask | null>(null);
@@ -307,47 +303,20 @@ export function PdfReader({
     lastValid: { captured: SelectionCapture; range: Range } | null;
   } | null>(null);
 
-  const restoreReaderPosition = useCallback(() => {
-    const pending = pendingPositionRef.current;
-    if (pending === null || rootRef.current === null) return;
-    if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
-    restoreFrameRef.current = requestAnimationFrame(() => {
-      restoreFrameRef.current = null;
-      const root = rootRef.current;
-      const next = pendingPositionRef.current;
-      if (root === null || next === null) return;
-      root.scrollTop = next.top;
-      root.scrollLeft = next.left;
-      const reached = Math.abs(root.scrollTop - next.top) < 1
-        && Math.abs(root.scrollLeft - next.left) < 1;
-      if (reached) {
-        readerPositionRef.current = next;
-        pendingPositionRef.current = null;
-      }
-    });
-  }, []);
-
   useEffect(() => {
     let disposed = false;
     let published = false;
     const root = rootRef.current;
-    const sameDocument = previousDocumentIdRef.current === documentId;
-    if (sameDocument) {
-      const position = root === null
-        ? readerPositionRef.current
-        : { top: root.scrollTop, left: root.scrollLeft };
-      readerPositionRef.current = position;
-      pendingPositionRef.current = position;
-    } else {
-      readerPositionRef.current = { top: 0, left: 0 };
-      pendingPositionRef.current = null;
-      const previousTask = activeLoadingTaskRef.current;
-      activeLoadingTaskRef.current = null;
-      if (previousTask !== null) void previousTask.destroy();
-      setPdf(null);
-      setBasePageSizes([]);
+    if (root !== null) {
+      root.scrollTop = 0;
+      root.scrollLeft = 0;
     }
-    previousDocumentIdRef.current = documentId;
+    const previousTask = activeLoadingTaskRef.current;
+    activeLoadingTaskRef.current = null;
+    if (previousTask !== null) void previousTask.destroy();
+    setPdf(null);
+    setBasePageSizes([]);
+    setPageIndex(Math.max(0, initialPage - 1));
     setError(false);
     const loadingTask: PDFDocumentLoadingTask = getDocument({
       url: `/api/documents/${documentId}/file`,
@@ -381,7 +350,7 @@ export function PdfReader({
       disposed = true;
       if (!published) void loadingTask.destroy();
     };
-  }, [documentId, documentVersionId, contentId]);
+  }, [documentId]);
 
   useEffect(() => {
     let disposed = false;
@@ -424,7 +393,6 @@ export function PdfReader({
     const loadingTask = activeLoadingTaskRef.current;
     activeLoadingTaskRef.current = null;
     if (loadingTask !== null) void loadingTask.destroy();
-    if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
     if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current);
     if (navigationFrameRef.current !== null) cancelAnimationFrame(navigationFrameRef.current);
   }, []);
@@ -651,12 +619,6 @@ export function PdfReader({
         onPointerUp={captureSelection}
         onScroll={(event) => {
           const root = event.currentTarget;
-          if (pendingPositionRef.current === null) {
-            readerPositionRef.current = {
-              top: root.scrollTop,
-              left: root.scrollLeft,
-            };
-          }
           if (scrollFrameRef.current === null) {
             scrollFrameRef.current = requestAnimationFrame(() => {
               scrollFrameRef.current = null;
@@ -685,7 +647,6 @@ export function PdfReader({
                 onSelectionClear?.();
               }}
               onOpenAnnotation={onOpenAnnotation}
-              onRendered={restoreReaderPosition}
               onTranslateSelection={onTranslateSelection}
               pageIndex={index}
               pageSize={{ height: baseSize.height * scale, width: baseSize.width * scale }}

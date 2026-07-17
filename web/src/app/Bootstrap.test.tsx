@@ -1,10 +1,12 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Bootstrap } from "./Bootstrap";
 
 describe("Bootstrap", () => {
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
     window.history.replaceState(null, "", "/");
   });
@@ -49,7 +51,7 @@ describe("Bootstrap", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("shows a recoverable message when the one-use bootstrap fails", async () => {
+  it("shows an expired-link message when the server rejects the one-use token", async () => {
     window.history.replaceState(null, "", "/bootstrap#expired-token");
     vi.spyOn(window, "fetch").mockResolvedValue(new Response(null, { status: 403 }));
 
@@ -58,5 +60,32 @@ describe("Bootstrap", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "启动链接已失效，请从启动器重新打开",
     );
+    expect(screen.queryByRole("button", { name: "重试建立会话" })).not.toBeInTheDocument();
+  });
+
+  it("retries transient failures with the scrubbed token kept only in memory", async () => {
+    const user = userEvent.setup();
+    const token = "memory-only-bootstrap-token";
+    window.history.replaceState(null, "", `/bootstrap#${token}`);
+    const fetchSpy = vi.spyOn(window, "fetch")
+      .mockRejectedValueOnce(new TypeError("network unavailable"))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const localStorageSpy = vi.spyOn(Storage.prototype, "setItem");
+    const sessionStorageSpy = vi.spyOn(window.sessionStorage, "setItem");
+    const navigate = vi.fn();
+
+    render(<Bootstrap navigate={navigate} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("暂时无法建立本机会话");
+    expect(window.location.hash).toBe("");
+    await user.click(screen.getByRole("button", { name: "重试建立会话" }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/"));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[1]?.[1]).toMatchObject({
+      body: JSON.stringify({ token }),
+    });
+    expect(localStorageSpy).not.toHaveBeenCalled();
+    expect(sessionStorageSpy).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain(token);
   });
 });

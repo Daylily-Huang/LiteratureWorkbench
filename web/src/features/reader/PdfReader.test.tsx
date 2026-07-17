@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../../app/App";
@@ -796,23 +796,10 @@ describe("PdfReader", () => {
     }));
   });
 
-  it("keeps the current PDF visible until an annotation version finishes loading", async () => {
+  it("does not reload the whole PDF for a same-document annotation version", async () => {
     const { rerender } = render(<PdfReader {...readerProps()} />);
     const toolbar = await screen.findByRole("toolbar", { name: "PDF 工具栏" });
     expect(toolbar).toBeVisible();
-
-    const replacement = {
-      numPages: 5,
-      getPage: vi.fn(async (number: number) => page(number)),
-    };
-    let resolveReplacement: (value: typeof replacement) => void = () => undefined;
-    const replacementPromise = new Promise<typeof replacement>((resolve) => {
-      resolveReplacement = resolve;
-    });
-    pdf.getDocument.mockReturnValueOnce({
-      promise: replacementPromise,
-      destroy: vi.fn(async () => undefined),
-    });
 
     rerender(
       <PdfReader
@@ -824,17 +811,38 @@ describe("PdfReader", () => {
 
     expect(screen.getByRole("toolbar", { name: "PDF 工具栏" })).toBeVisible();
     expect(screen.queryByText(/正在打开/)).not.toBeInTheDocument();
-    resolveReplacement(replacement);
-    await waitFor(() => expect(pdf.getDocument).toHaveBeenCalledTimes(2));
+    expect(pdf.getDocument).toHaveBeenCalledTimes(1);
   });
 
-  it("restores page, zoom, and reader scroll after an annotation version reload", async () => {
+  it("loads a new PDF when the document itself changes", async () => {
+    const { rerender } = render(<PdfReader {...readerProps()} />);
+    await screen.findByRole("toolbar", { name: "PDF 工具栏" });
+
+    rerender(
+      <PdfReader
+        {...readerProps()}
+        contentId="content-b"
+        documentId="document-b"
+        documentVersionId="version-b"
+      />,
+    );
+
+    await waitFor(() => expect(pdf.getDocument).toHaveBeenCalledTimes(2));
+    expect(pdf.getDocument).toHaveBeenLastCalledWith(expect.objectContaining({
+      url: "/api/documents/document-b/file",
+    }));
+  });
+
+  it("keeps page, zoom, and reader scroll after an annotation identity update", async () => {
     const { rerender } = render(<PdfReader {...readerProps()} />);
     const toolbar = await screen.findByRole("toolbar", { name: "PDF 工具栏" });
     fireEvent.click(within(toolbar).getByRole("button", { name: "下一页" }));
     fireEvent.click(within(toolbar).getByRole("button", { name: "放大" }));
     await waitFor(() => expect(within(toolbar).getByText("2 / 5")).toBeVisible());
     expect(within(toolbar).getByRole("status", { name: "缩放比例" })).toHaveTextContent("125%");
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
     const pages = document.querySelector(".pdf-reader__pages");
     if (!(pages instanceof HTMLElement)) throw new Error("reader pages missing");
     pages.scrollTop = 420;
@@ -858,5 +866,6 @@ describe("PdfReader", () => {
       expect((reloadedPages as HTMLElement).scrollTop).toBe(420);
       expect((reloadedPages as HTMLElement).scrollLeft).toBe(35);
     });
+    expect(pdf.getDocument).toHaveBeenCalledTimes(1);
   });
 });
