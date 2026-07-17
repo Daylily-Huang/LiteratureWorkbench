@@ -125,10 +125,12 @@ function sameVisualLine(
   const minimumHeight = Math.max(1, Math.min(a.height, b.height));
   const verticalOverlap = overlap(a.top, a.bottom, b.top, b.bottom);
   if (verticalOverlap < minimumHeight * 0.55) return false;
-  if (sourceDistance !== 1) return false;
   const horizontalGap = Math.max(a.left, b.left) - Math.min(a.right, b.right);
   if (horizontalGap > Math.max(36, minimumHeight * 2.5)) return false;
+  // PDF content streams can list a right-side suffix after the next visual line.
+  // A small non-overlapping gap is still unambiguous even when source order differs.
   if (horizontalGap >= -2) return true;
+  if (sourceDistance !== 1) return false;
 
   // PDF.js can give adjacent styled spans bounds which overlap heavily because
   // font metrics are approximate. Only join that kind of overlap when the text

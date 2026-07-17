@@ -289,6 +289,63 @@ describe("visual PDF text selection", () => {
     );
   });
 
+  it("keeps an out-of-order right suffix on its visual line", () => {
+    const aims = seed("Aims", rect(20, 100, 50));
+    const opening = seed(
+      "Subalpine dark coniferous forests are an important representative of the cold-temperate coniferous forests",
+      rect(90, 100, 1000),
+    );
+    const second = seed(
+      "in China. Dark coniferous forests dominated by spruce and fir are the main body of",
+      rect(20, 124, 1070),
+    );
+    const third = seed(
+      "subalpine forests on the eastern edge of the Qingzang Plateau and an important ecological defense in the upper",
+      rect(20, 148, 1070),
+    );
+    const prefix = seed(
+      "such a dark coniferous forest based on the first census data of the 25.2 hm²",
+      rect(20, 172, 760),
+    );
+    const nextLine = seed("western Sichuan.", rect(20, 196, 160));
+    const outOfOrderSuffix = seed(
+      " Wanglang forest dynamics plot in",
+      rect(782, 172, 308),
+    );
+    const index = createVisualTextIndex([
+      aims,
+      opening,
+      second,
+      third,
+      prefix,
+      nextLine,
+      outOfOrderSuffix,
+    ]);
+
+    const captured = resolveVisualSelection(index, {
+      node: aims.node,
+      offset: 0,
+      clientX: 20,
+      clientY: 110,
+    }, {
+      node: nextLine.node,
+      offset: nextLine.node.data.length,
+      clientX: 180,
+      clientY: 206,
+    }, {
+      metadata,
+      page: 1,
+      pageBounds: rect(0, 0, 1200, 800),
+      transform: [1, 0, 0, -1, 0, 800],
+      scale: 1,
+    });
+
+    expect(captured.selected?.text).toContain(
+      "data of the 25.2 hm² Wanglang forest dynamics plot in western Sichuan.",
+    );
+    expect(captured.selected?.rects).toHaveLength(6);
+  });
+
   it("isolates the overlapping two-column geometry observed in the PNAS fixture", () => {
     const left = [
       seed("The population extinction pulse we describe here shows, from a", rect(334.69, 253.73, 531.96, 16)),
