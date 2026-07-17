@@ -146,6 +146,21 @@ test("document inventory failure is sanitized without hiding import controls", a
   expect(screen.getByLabelText("导入文献")).toBeVisible();
 });
 
+test("keyboard activation opens the native PDF picker", async () => {
+  const user = userEvent.setup();
+  render(<LibraryPanel importApi={api()} />);
+  const input = screen.getByLabelText("导入文献");
+  const opened = vi.fn();
+  input.addEventListener("click", opened);
+  const trigger = screen.getByRole("button", { name: "打开文件选择器" });
+
+  trigger.focus();
+  await user.keyboard("{Enter}");
+
+  expect(trigger).toHaveFocus();
+  expect(opened).toHaveBeenCalledTimes(1);
+});
+
 test("PDF bytes do not upload until explicit confirmation", async () => {
   const user = userEvent.setup();
   const importApi = api();

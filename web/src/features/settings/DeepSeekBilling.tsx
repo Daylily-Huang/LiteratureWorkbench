@@ -60,8 +60,8 @@ export function DeepSeekBilling({ fetcher = fetch, pollMs = 60_000 }: DeepSeekBi
   const compact = balance === undefined ? status?.error_code === "deepseek_key_unavailable" ? "DeepSeek 未配置" : "DeepSeek --" : `DeepSeek ${money(balance.currency, balance.total_balance)}`;
   return (
     <div className="billing">
-      <button aria-expanded={open} className="billing__trigger" onClick={() => { setOpen((value) => !value); if (!open) void refresh().catch(() => undefined); }} type="button">
-        <span className={`status-dot${status?.available ? " status-dot--ok" : ""}`} />{compact}
+      <button aria-expanded={open} aria-label={`DeepSeek 用量：${compact}`} className="billing__trigger" onClick={() => { setOpen((value) => !value); if (!open) void refresh().catch(() => undefined); }} type="button">
+        <span className={`status-dot${status?.available ? " status-dot--ok" : ""}`} /><span aria-hidden="true" className="billing__mobile-label">DS</span><span className="billing__compact">{compact}</span>
       </button>
       {open && <section aria-label="DeepSeek 用量" className="billing__popover">
         <div className="billing__header"><div><strong>DeepSeek 账户</strong><small>余额由官方接口返回</small></div><button aria-label="刷新 DeepSeek 余额" className="icon-button" disabled={loading} onClick={() => void refresh(true).catch(() => undefined)} type="button">↻</button></div>

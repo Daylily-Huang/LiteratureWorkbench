@@ -21,6 +21,15 @@ describe("DeepSeekBilling", () => {
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   });
 
+  it("keeps an explicit usage label on the compact trigger", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(billing)));
+    render(<DeepSeekBilling fetcher={fetcher} />);
+
+    expect(
+      await screen.findByRole("button", { name: /DeepSeek 用量.*12\.50/ }),
+    ).toBeVisible();
+  });
+
   it("separates official balance from locally estimated usage", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(billing)));
     render(<DeepSeekBilling fetcher={fetcher} />);

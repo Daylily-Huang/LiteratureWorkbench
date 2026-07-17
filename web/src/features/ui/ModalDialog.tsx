@@ -5,12 +5,14 @@ const FOCUSABLE = ["button:not([disabled])", "input:not([disabled])", "select:no
 
 export function ModalDialog({ children, label, onClose }: ModalDialogProps) {
   const panel = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const root = panel.current;
     root?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     function keydown(event: KeyboardEvent) {
-      if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+      if (event.key === "Escape") { event.preventDefault(); onCloseRef.current(); return; }
       if (event.key !== "Tab" || root === null) return;
       const items = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)];
       const first = items[0];
@@ -20,7 +22,7 @@ export function ModalDialog({ children, label, onClose }: ModalDialogProps) {
     }
     document.addEventListener("keydown", keydown);
     return () => { document.removeEventListener("keydown", keydown); previous?.focus(); };
-  }, [onClose]);
+  }, []);
   return (
     <div className="modal-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div aria-label={label} aria-modal="true" className="modal-dialog" ref={panel} role="dialog">{children}</div>

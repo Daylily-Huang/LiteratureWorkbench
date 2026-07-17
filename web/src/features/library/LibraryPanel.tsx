@@ -240,7 +240,8 @@ export function LibraryPanel({
       />
       {query.trim() !== "" && documents.every((item) => !`${item.relative_folder}/${item.filename}`.toLocaleLowerCase("zh-CN").includes(query.trim().toLocaleLowerCase("zh-CN"))) && <p className="empty-copy">没有匹配的文献</p>}
       {documentsFailed && <p role="alert">文献列表暂时无法读取</p>}
-      <label className="library-drop"><strong>＋ 导入文献</strong><span>点击选择或拖入 PDF</span><input aria-label="导入文献" ref={input} type="file" onChange={(event) => choose(event.target.files?.[0])} /></label>
+      <button aria-label="打开文件选择器" className="library-drop" onClick={() => input.current?.click()} type="button"><strong>＋ 导入文献</strong><span>点击选择或拖入 PDF</span></button>
+      <input aria-hidden="true" aria-label="导入文献" className="sr-only" ref={input} tabIndex={-1} type="file" onChange={(event) => choose(event.target.files?.[0])} />
       {unsupported && <p>首版暂不导入；以后可在单次明确授权后用于云处理</p>}
       {selected && <ImportConfirmDialog fileName={selected.name} status="awaiting_confirmation" onConfirm={() => void confirm()} onCancel={cancel} />}
       {tasks.map((task) => (
