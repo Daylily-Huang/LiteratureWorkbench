@@ -11,6 +11,10 @@ web/test-results/
 web/.pytest_cache/
 *.log
 .env
+*token*.txt
+*tokens*.txt
+*.key
+*.pem
 
 # Root-level tool caches.
 .mypy_cache/
