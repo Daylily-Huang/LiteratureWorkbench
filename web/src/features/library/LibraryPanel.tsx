@@ -21,7 +21,10 @@ type Props = {
   documentRefreshMs?: number;
   importApi?: ImportApi;
   onOpenDocument?: (documentId: string) => void;
+  onDocumentsLoaded?: (documents: DocumentListItem[]) => void;
 };
+
+type LibraryCategory = "all" | "unclassified";
 
 function sameDocuments(left: DocumentListItem[], right: DocumentListItem[]): boolean {
   return left.length === right.length && left.every((item, index) => {
@@ -40,6 +43,7 @@ export function LibraryPanel({
   documentRefreshMs = 3000,
   importApi = browserImportApi,
   onOpenDocument = () => undefined,
+  onDocumentsLoaded,
 }: Props) {
   const [selected, setSelected] = useState<File | null>(null);
   const [unsupported, setUnsupported] = useState(false);
@@ -47,12 +51,19 @@ export function LibraryPanel({
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
   const [documentsFailed, setDocumentsFailed] = useState(false);
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<LibraryCategory>("all");
   const [pollFailures, setPollFailures] = useState<Set<string>>(new Set());
   const input = useRef<HTMLInputElement>(null);
   const confirming = useRef(false);
 
   function putDocuments(next: DocumentListItem[]) {
-    setDocuments((current) => sameDocuments(current, next) ? current : next);
+    setDocuments((current) => {
+      const updated = sameDocuments(current, next) ? current : next;
+      if (updated !== current && onDocumentsLoaded) {
+        onDocumentsLoaded(updated);
+      }
+      return updated;
+    });
   }
 
   function putTask(task: ImportTask) {
@@ -61,7 +72,8 @@ export function LibraryPanel({
 
   async function refreshDocuments() {
     try {
-      putDocuments(await documentApi.listDocuments());
+      const items = await documentApi.listDocuments();
+      putDocuments(items);
       setDocumentsFailed(false);
     } catch {
       setDocumentsFailed(true);
@@ -214,6 +226,18 @@ export function LibraryPanel({
     if (input.current) input.current.value = "";
   }
 
+  const filteredDocuments = documents.filter((item) => {
+    const needle = query.trim().toLocaleLowerCase("zh-CN");
+    const matchesQuery =
+      needle === "" ||
+      `${item.relative_folder}/${item.filename}`.toLocaleLowerCase("zh-CN").includes(needle);
+    if (!matchesQuery) return false;
+    if (category === "unclassified") {
+      return item.relative_folder === "" || item.authorization_source === "confirmed_import";
+    }
+    return true;
+  });
+
   return (
     <section
       aria-label="文献导入区"
@@ -224,29 +248,130 @@ export function LibraryPanel({
         choose(event.dataTransfer.files.item(0) ?? undefined);
       }}
     >
-      <div className="library-panel__header"><div><span className="eyebrow">本地同步</span><h1>文献库</h1></div><span className="count-badge">{documents.length}</span></div>
+      <div className="library-panel__header">
+        <div>
+          <span className="eyebrow">本地同步</span>
+          <h1>文献库</h1>
+        </div>
+        <span className="count-badge">{documents.length}</span>
+      </div>
+
       <label className="library-search">
-        <span aria-hidden="true">⌕</span>
+        <span aria-hidden="true" className="library-search__icon">⌕</span>
         <span className="sr-only">搜索文献</span>
-        <input aria-label="搜索文献" onChange={(event) => setQuery(event.target.value)} placeholder="搜索文件名或文件夹" type="search" value={query} />
+        <input
+          aria-label="搜索文献"
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="搜索文件名或文件夹"
+          type="search"
+          value={query}
+        />
+        {query && (
+          <button
+            aria-label="清空搜索"
+            className="library-search__clear"
+            onClick={() => setQuery("")}
+            type="button"
+          >
+            ×
+          </button>
+        )}
       </label>
-      <DocumentTree
-        activeDocumentId={activeDocumentId}
-        documents={documents.filter((item) => {
-          const needle = query.trim().toLocaleLowerCase("zh-CN");
-          return needle === "" || `${item.relative_folder}/${item.filename}`.toLocaleLowerCase("zh-CN").includes(needle);
-        })}
-        onOpenDocument={onOpenDocument}
-      />
-      {query.trim() !== "" && documents.every((item) => !`${item.relative_folder}/${item.filename}`.toLocaleLowerCase("zh-CN").includes(query.trim().toLocaleLowerCase("zh-CN"))) && <p className="empty-copy">没有匹配的文献</p>}
+
+      {/* Quick Category Views */}
+      <div className="library-categories" role="tablist" aria-label="文献分类">
+        <button
+          className={`library-category-item ${category === "all" ? "library-category-item--active" : ""}`}
+          onClick={() => setCategory("all")}
+          type="button"
+          role="tab"
+          aria-selected={category === "all"}
+        >
+          <span className="library-category-item__icon">📚</span>
+          <span className="library-category-item__label">全部文献</span>
+          <span className="library-category-item__count">{documents.length}</span>
+        </button>
+        <button
+          className={`library-category-item ${category === "unclassified" ? "library-category-item--active" : ""}`}
+          onClick={() => setCategory("unclassified")}
+          type="button"
+          role="tab"
+          aria-selected={category === "unclassified"}
+        >
+          <span className="library-category-item__icon">📁</span>
+          <span className="library-category-item__label">未分类</span>
+          <span className="library-category-item__count">
+            {documents.filter((d) => d.relative_folder === "" || d.authorization_source === "confirmed_import").length}
+          </span>
+        </button>
+      </div>
+
+      <div className="library-panel__tree-container">
+        <div className="library-panel__tree-header">
+          <span>文件目录</span>
+        </div>
+        <DocumentTree
+          activeDocumentId={activeDocumentId}
+          documents={filteredDocuments}
+          onOpenDocument={onOpenDocument}
+        />
+      </div>
+
+      {query.trim() !== "" && filteredDocuments.length === 0 && (
+        <p className="empty-copy">没有匹配的文献</p>
+      )}
       {documentsFailed && <p role="alert">文献列表暂时无法读取</p>}
-      <button aria-label="打开文件选择器" className="library-drop" onClick={() => input.current?.click()} type="button"><strong>＋ 导入文献</strong><span>点击选择或拖入 PDF</span></button>
-      <input aria-hidden="true" aria-label="导入文献" className="sr-only" ref={input} tabIndex={-1} type="file" onChange={(event) => choose(event.target.files?.[0])} />
+
+      {/* Import & Storage Footer */}
+      <div className="library-panel__footer">
+        <button
+          aria-label="打开文件选择器"
+          className="library-drop"
+          onClick={() => input.current?.click()}
+          type="button"
+        >
+          <div className="library-drop__icon">＋</div>
+          <div className="library-drop__text">
+            <strong>导入文献</strong>
+            <span>点击选择或拖入 PDF</span>
+          </div>
+        </button>
+        <input
+          aria-hidden="true"
+          aria-label="导入文献"
+          className="sr-only"
+          ref={input}
+          tabIndex={-1}
+          type="file"
+          onChange={(event) => choose(event.target.files?.[0])}
+        />
+
+        <div className="library-storage-info">
+          <div className="library-storage-info__header">
+            <span>本地只读库</span>
+            <span>{documents.length} 篇已同步</span>
+          </div>
+        </div>
+      </div>
+
       {unsupported && <p>首版暂不导入；以后可在单次明确授权后用于云处理</p>}
-      {selected && <ImportConfirmDialog fileName={selected.name} status="awaiting_confirmation" onConfirm={() => void confirm()} onCancel={cancel} />}
+      {selected && (
+        <ImportConfirmDialog
+          fileName={selected.name}
+          status="awaiting_confirmation"
+          onConfirm={() => void confirm()}
+          onCancel={cancel}
+        />
+      )}
       {tasks.map((task) => (
         <div key={task.intent_id}>
-          <ImportConfirmDialog fileName={task.file_name} status={task.status} errorCode={task.error_code} onConfirm={() => undefined} onCancel={() => undefined} />
+          <ImportConfirmDialog
+            fileName={task.file_name}
+            status={task.status}
+            errorCode={task.error_code}
+            onConfirm={() => undefined}
+            onCancel={() => undefined}
+          />
           {pollFailures.has(task.intent_id) && <p>状态更新暂时失败，正在重试</p>}
         </div>
       ))}

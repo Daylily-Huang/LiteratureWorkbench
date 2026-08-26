@@ -28,6 +28,17 @@ _FALLBACK_ERRORS = {
     "invalid_deepseek_response",
 }
 
+# Transient transport classes: the connection stalled or the server returned a
+# retryable status. A single bounded retry on a fresh request usually succeeds
+# within seconds, so it runs before the (much slower) local-model fallback.
+# Non-retryable classes (credentials, authorization, request/response contract)
+# fail immediately.
+_RETRYABLE_ERRORS = {
+    "deepseek_http_error",
+    "deepseek_transport_failed",
+    "deepseek_total_timeout",
+}
+
 
 class DeepSeekClient(Protocol):
     def translate_selection(self, proof: VerifiedSelectionProof) -> str: ...
@@ -121,7 +132,7 @@ class TranslationService:
             model=task.requested_model,
         )
         try:
-            translated = self._deepseek.translate_selection(proof)
+            translated = self._translate_with_one_retry(proof)
         except EgressRejected as error:
             code = str(error)
             current_settings = self._settings.read()
@@ -129,6 +140,16 @@ class TranslationService:
                 return self._run_qwen(task, fallback_reason=code)
             return self._repository.fail(task.id, code or "deepseek_failed")
         return self._persist(task, translated, "deepseek", task.requested_model, None)
+
+    def _translate_with_one_retry(self, proof: VerifiedSelectionProof) -> str:
+        try:
+            return self._deepseek.translate_selection(proof)
+        except EgressRejected as first_error:
+            if str(first_error) not in _RETRYABLE_ERRORS:
+                raise
+        # The gateway audits every attempt separately (attempt_no), so the
+        # retry leaves a complete trail before any fallback decision.
+        return self._deepseek.translate_selection(proof)
 
     def _run_qwen(self, task: TranslationTask, fallback_reason: str | None) -> TranslationTask:
         cached = self._provider_cache(task, "qwen", QWEN_ALIAS)

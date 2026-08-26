@@ -39,6 +39,7 @@ from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.features.library.scanner import LibraryScanner
 from literature_workbench.features.models.qwen_local import QwenLocalClient
 from literature_workbench.features.models.qwen_process import QwenProcessError, QwenProcessManager
+from literature_workbench.features.parser.normalizer import ParseRunRepository
 from literature_workbench.features.parser.worker import ParseWorkerService
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.features.translation.repository import TranslationRepository
@@ -936,6 +937,9 @@ def run_bound_worker(
         translation_repository = TranslationRepository(database, queue_clock)
         translation_repository.expire_other_sessions(bootstrap.session_generation)
         queue.requeue_expired()
+        orphaned_runs = ParseRunRepository(database).fail_orphaned_runs()
+        if orphaned_runs:
+            print(f"literature-workbench: failed {orphaned_runs} orphaned parse run(s)")
         inspector = SafeWindowsFileInspector()
         trusted_root = TrustedImportRoot.create(settings.data_root)
         qwen_process = QwenProcessManager(settings.qwen_runtime_dir)

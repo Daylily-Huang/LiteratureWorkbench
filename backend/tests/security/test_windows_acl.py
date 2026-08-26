@@ -24,6 +24,9 @@ from literature_workbench.platform.windows.acl import (
     secure_owner_directory,
 )
 from literature_workbench.platform.windows.filesystem import HandleMetadata
+from literature_workbench.platform.windows.powershell import (
+    default_powershell_candidates,
+)
 
 
 OWNER_SID = "S-1-5-21-100-200-300-400"
@@ -296,6 +299,58 @@ def test_dacl_reader_falls_back_to_windows_powershell_when_pwsh_is_unavailable(
 
     assert snapshot.owner_sid == "S-1-5-21-7"
     assert [call[0] for call in runner.calls] == ["pwsh.exe", "powershell.exe"]
+
+
+def test_dacl_reader_falls_back_to_absolute_powershell_when_path_names_are_unavailable(
+    tmp_path: Path,
+) -> None:
+    payload = (
+        '{"owner_sid":"S-1-5-21-7","valid":true,"protected":true,'
+        '"entries":[]}'
+    )
+    absolute = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+    class StrippedPathRunner(FakeRunner):
+        def run(self, arguments: list[str]) -> AclCommandResult:
+            self.calls.append(arguments)
+            if arguments[0] in {"pwsh.exe", "powershell.exe"}:
+                raise AclSecurityError("acl_command_failed")
+            return AclCommandResult(0, payload, "")
+
+    runner = StrippedPathRunner()
+
+    snapshot = PowerShellDaclReader(
+        runner,
+        executables=("pwsh.exe", "powershell.exe", absolute),
+    ).read(tmp_path / "tokens")
+
+    assert snapshot.owner_sid == "S-1-5-21-7"
+    assert [call[0] for call in runner.calls] == ["pwsh.exe", "powershell.exe", absolute]
+
+
+def test_default_powershell_candidates_append_existing_absolute_fallbacks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pwsh_absolute = tmp_path / "PowerShell" / "7" / "pwsh.exe"
+    pwsh_absolute.parent.mkdir(parents=True)
+    pwsh_absolute.write_text("", encoding="utf-8")
+    windows_powershell = (
+        tmp_path / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    )
+    windows_powershell.parent.mkdir(parents=True)
+    windows_powershell.write_text("", encoding="utf-8")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    monkeypatch.setenv("SystemRoot", str(tmp_path))
+
+    candidates = default_powershell_candidates()
+
+    assert candidates == (
+        "pwsh.exe",
+        "powershell.exe",
+        str(pwsh_absolute),
+        str(windows_powershell),
+    )
 
 
 def test_dacl_reader_rejects_string_validity_instead_of_coercing_it(tmp_path: Path) -> None:

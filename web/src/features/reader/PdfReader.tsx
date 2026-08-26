@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -17,6 +18,7 @@ import "pdfjs-dist/web/pdf_viewer.css";
 
 import "./pdfWorker";
 import { OcrTextLayer, type OcrBlock } from "./OcrTextLayer";
+import { CitationHighlight } from "./CitationHighlight";
 import { PdfToolbar } from "./PdfToolbar";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { AnnotationOverlay } from "../annotations/AnnotationOverlay";
@@ -53,9 +55,16 @@ export type ReaderDocument = {
   filename: string;
 };
 
+export type CitationJump = {
+  page: number;
+  rects: number[][];
+  nonce: number;
+};
+
 type PdfReaderProps = ReaderDocument & {
   initialPage?: number;
   requestedPage?: number;
+  citationHighlight?: CitationJump | null;
   annotations?: PdfAnnotation[];
   activeAnnotationId?: string | null;
   annotationBusy?: boolean;
@@ -91,6 +100,7 @@ function PdfPage({
   annotations,
   activeAnnotationId,
   annotationBusy,
+  citationHighlight = null,
   selectionDragging,
   onAnnotateSelection,
   onCancelSelection,
@@ -109,6 +119,7 @@ function PdfPage({
   annotations: PdfAnnotation[];
   activeAnnotationId?: string | null;
   annotationBusy?: boolean;
+  citationHighlight?: { rects: number[][]; nonce: number } | null;
   selectionDragging?: boolean;
   onAnnotateSelection?(
     selected: SelectedText,
@@ -227,7 +238,11 @@ function PdfPage({
       data-page-number={pageIndex + 1}
       data-rendered-page={isRendered ? "true" : "false"}
       ref={pageRef}
-      style={{ height: `${displayedSize.height}px`, width: `${displayedSize.width}px` }}
+      style={{
+        "--scale-factor": scale,
+        height: `${displayedSize.height}px`,
+        width: `${displayedSize.width}px`,
+      } as CSSProperties}
     >
       {isRendered && (
         <>
@@ -259,6 +274,14 @@ function PdfPage({
             onOpen={onOpenAnnotation}
             pageTransform={viewportTransform}
           />
+          {citationHighlight !== null && (
+            <CitationHighlight
+              nonce={citationHighlight.nonce}
+              rects={citationHighlight.rects}
+              renderedHeight={displayedSize.height}
+              renderedWidth={displayedSize.width}
+            />
+          )}
           {error && <p role="alert">本页暂时无法显示</p>}
         </>
       )}
@@ -274,6 +297,7 @@ export function PdfReader({
   filename,
   initialPage = 1,
   requestedPage,
+  citationHighlight = null,
   annotations = [],
   activeAnnotationId,
   annotationBusy,
@@ -640,6 +664,7 @@ export function PdfReader({
               activeAnnotationId={activeAnnotationId}
               annotationBusy={annotationBusy}
               annotations={annotations.filter((annotation) => annotation.page === index + 1)}
+              citationHighlight={citationHighlight?.page === index + 1 ? citationHighlight : null}
               onAnnotateSelection={onAnnotateSelection}
               onCancelSelection={() => {
                 setSelected(null);

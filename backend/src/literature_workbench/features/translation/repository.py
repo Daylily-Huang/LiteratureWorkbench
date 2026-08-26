@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import sqlite3
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -144,6 +146,132 @@ def align_selection_to_candidate(candidate: str, selection: str) -> tuple[str, i
     return candidate[start:end], start
 
 
+_FUZZY_MIN_TOKENS = 3
+_FUZZY_MIN_COVERAGE = 0.9
+_FUZZY_WINDOW_FACTOR = 1.25
+_FUZZY_MAX_ANCHORS = 64
+_CJK_CHAR = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def _fuzzy_tokens(value: str) -> list[tuple[str, int]]:
+    """Tokenize normalized page text for order-tolerant matching.
+
+    Returns ``(token, char_offset)`` pairs.  Latin runs become word tokens;
+    CJK runs become overlapping character bigrams (a lone character stays a
+    single token).  Text is NFKC-normalized and case-folded first so
+    ligatures, full-width forms, and styled punctuation do not defeat
+    matching between the browser text layer and the parser output.
+    """
+    key = unicodedata.normalize("NFKC", value).casefold()
+    tokens: list[tuple[str, int]] = []
+    word_start: int | None = None
+    cjk_run: list[tuple[str, int]] = []
+
+    def flush_word(end: int) -> None:
+        nonlocal word_start
+        if word_start is not None:
+            tokens.append((key[word_start:end], word_start))
+            word_start = None
+
+    def flush_cjk() -> None:
+        if len(cjk_run) == 1:
+            tokens.append(cjk_run[0])
+        else:
+            for first, second in zip(cjk_run, cjk_run[1:], strict=False):
+                tokens.append((first[0] + second[0], first[1]))
+        cjk_run.clear()
+
+    for index, character in enumerate(key):
+        if character.isspace():
+            flush_word(index)
+            flush_cjk()
+        elif _CJK_CHAR.match(character) is not None:
+            flush_word(index)
+            cjk_run.append((character, index))
+        elif character.isalnum():
+            flush_cjk()
+            if word_start is None:
+                word_start = index
+        else:
+            flush_word(index)
+            flush_cjk()
+    flush_word(len(key))
+    flush_cjk()
+    return tokens
+
+
+def align_selection_fuzzy(candidate: str, selection: str) -> tuple[str, int] | None:
+    """Order-tolerant alignment for capture/parser divergence.
+
+    The browser text layer and the parser can disagree about reading order
+    or drop small fragments (figure labels, footer lines), so exact
+    containment fails even though the user selected genuine page text.
+    This fallback anchors a window of candidate tokens at each occurrence
+    of the selection's first token and accepts the best window when at
+    least 90% of the selection's tokens appear inside it (compared as a
+    multiset, so order may differ).  The tight window cap keeps a
+    selection that skips a whole intervening prose block from passing.
+    """
+    selection_tokens = _fuzzy_tokens(selection)
+    if len(selection_tokens) < _FUZZY_MIN_TOKENS:
+        return None
+    candidate_tokens = _fuzzy_tokens(candidate)
+    if not candidate_tokens:
+        return None
+    window_size = min(
+        len(candidate_tokens),
+        max(
+            len(selection_tokens) + 2,
+            math.ceil(len(selection_tokens) * _FUZZY_WINDOW_FACTOR),
+        ),
+    )
+    needed = math.ceil(len(selection_tokens) * _FUZZY_MIN_COVERAGE)
+    first_token = selection_tokens[0][0]
+    best_offset: int | None = None
+    best_matched = 0
+    anchors = 0
+    for index, (token, offset) in enumerate(candidate_tokens):
+        if token != first_token:
+            continue
+        anchors += 1
+        if anchors > _FUZZY_MAX_ANCHORS:
+            break
+        counts: dict[str, int] = {}
+        for window_token, _ in candidate_tokens[index : index + window_size]:
+            counts[window_token] = counts.get(window_token, 0) + 1
+        matched = 0
+        for selection_token, _ in selection_tokens:
+            if counts.get(selection_token, 0) > 0:
+                counts[selection_token] -= 1
+                matched += 1
+        if matched >= needed and matched > best_matched:
+            best_matched = matched
+            best_offset = offset
+    if best_offset is None:
+        return None
+    return selection, best_offset
+
+
+def match_selection_to_candidates(
+    candidates: list[str], selection: str
+) -> tuple[str, tuple[str, int]] | None:
+    """Return the first candidate aligning with ``selection`` and its match.
+
+    Exact containment is preferred across every candidate; the
+    order-tolerant fallback runs only when no candidate contains the
+    selection, so previously accepted selections keep their context.
+    """
+    for candidate in candidates:
+        aligned = align_selection_to_candidate(candidate, selection)
+        if aligned is not None:
+            return candidate, aligned
+    for candidate in candidates:
+        aligned = align_selection_fuzzy(candidate, selection)
+        if aligned is not None:
+            return candidate, aligned
+    return None
+
+
 class TranslationRepository:
     def __init__(self, database: Database, now: Callable[[], datetime]) -> None:
         self._database = database
@@ -195,19 +323,20 @@ class TranslationRepository:
                     content_id,
                 ),
             ).fetchone()
-        if row is None:
-            raise SelectionRejected("selection_not_current")
-        match = next(
-            (
-                (candidate, aligned)
-                for candidate in current_page_text_candidates(row)
-                if (aligned := align_selection_to_candidate(candidate, normalized_selection))
-                is not None
-            ),
-            None,
+            if row is None:
+                raise SelectionRejected(
+                    self._diagnose_rejection(
+                        connection,
+                        document_id=document_id,
+                        document_version_id=document_version_id,
+                        content_id=content_id,
+                    )
+                )
+        match = match_selection_to_candidates(
+            current_page_text_candidates(row), normalized_selection
         )
         if match is None:
-            raise SelectionRejected("selection_not_current")
+            raise SelectionRejected("selection_text_mismatch")
         matching_text, (normalized_selection, position) = match
         before = matching_text[:position].rstrip()
         after = matching_text[position + len(normalized_selection) :].lstrip()
@@ -221,6 +350,56 @@ class TranslationRepository:
             context_after="".join(list(after)[:MAX_CONTEXT_CODE_POINTS]),
             target_language=target_language,
         )
+
+    @staticmethod
+    def _diagnose_rejection(
+        connection: sqlite3.Connection,
+        *,
+        document_id: UUID,
+        document_version_id: UUID,
+        content_id: str,
+    ) -> str:
+        """Explain why the verification join found no usable page row.
+
+        Runs only on the rejection path, so the extra queries cost nothing
+        for accepted selections.  The order matters: a stale version is the
+        most common and most recoverable cause, an unfinished parse is
+        permanent until the parser completes, and anything else means the
+        document identity itself no longer resolves.
+        """
+        document = connection.execute(
+            """
+            SELECT d.content_sha256 AS current_content, d.status AS document_status,
+                   (SELECT latest.id FROM document_versions AS latest
+                    WHERE latest.document_id=d.id
+                    ORDER BY latest.observed_at DESC,latest.rowid DESC LIMIT 1
+                   ) AS latest_version_id
+            FROM documents AS d
+            JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
+            WHERE d.id=? AND d.format='pdf'
+            """,
+            (str(document_id),),
+        ).fetchone()
+        if document is None:
+            return "selection_not_current"
+        if str(document["latest_version_id"] or "") != str(document_version_id):
+            return "selection_version_stale"
+        if str(document["current_content"]) != content_id or str(
+            document["document_status"]
+        ) not in ("candidate_pdf", "valid_pdf"):
+            return "selection_not_current"
+        parse = connection.execute(
+            """
+            SELECT r.status AS run_status
+            FROM contents AS c
+            LEFT JOIN parse_runs AS r ON r.id=c.current_parse_run_id
+            WHERE c.sha256=? AND c.mime_type='application/pdf'
+            """,
+            (content_id,),
+        ).fetchone()
+        if parse is None or parse["run_status"] != "completed":
+            return "selection_parse_pending"
+        return "selection_not_current"
 
     def create(
         self,

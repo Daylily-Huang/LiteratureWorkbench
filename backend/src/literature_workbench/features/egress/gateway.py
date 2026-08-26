@@ -7,7 +7,7 @@ import time
 from datetime import UTC, datetime
 from collections.abc import Callable
 from typing import NoReturn
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -33,6 +33,7 @@ from literature_workbench.features.models.deepseek import (
 )
 from literature_workbench.features.translation.repository import (
     current_page_text_candidates,
+    match_selection_to_candidates,
     normalize_selection,
 )
 from literature_workbench.platform.windows.credentials import SecretStore
@@ -92,6 +93,41 @@ class DeepSeekGateway:
             model=proof.model,
             purpose="translate_selection",
             payload_kind="verified_selection",
+            payload_bytes=len(body),
+            payload_sha256=hashlib.sha256(body).hexdigest(),
+        )
+        return self._send(attempt, body)
+
+    def answer_question(
+        self,
+        *,
+        task_id: str,
+        document_id: UUID | str | None,
+        content_sha256: str | None,
+        display_file_name: str | None,
+        model: str,
+        prompt: str,
+        purpose: str = "research_question",
+    ) -> str:
+        """Answer a research question over retrieved fragments.
+
+        The caller (research service) builds the prompt; this method keeps
+        the full egress trail — audit, usage accounting, retry visibility —
+        identical to translation traffic.  ``purpose`` distinguishes the
+        main answer call from auxiliary calls such as query expansion.
+        Document context is optional because library-wide calls have no
+        single source document.
+        """
+        body = self._serialize(model, prompt)
+        attempt = self._audit.start(
+            task_id=task_id,
+            authorization_type="registered_library",
+            document_id=None if document_id is None else str(document_id),
+            content_sha256=content_sha256,
+            display_file_name=display_file_name,
+            model=model,
+            purpose=purpose,
+            payload_kind="research_prompt",
             payload_bytes=len(body),
             payload_sha256=hashlib.sha256(body).hexdigest(),
         )
@@ -225,11 +261,13 @@ class DeepSeekGateway:
         if row is None:
             raise EgressRejected("selection_not_current")
         normalized_selection = normalize_selection(proof.verified_text)
-        if not any(
-            normalized_selection in candidate
-            for candidate in current_page_text_candidates(row)
+        if (
+            match_selection_to_candidates(
+                current_page_text_candidates(row), normalized_selection
+            )
+            is None
         ):
-            raise EgressRejected("selection_not_current")
+            raise EgressRejected("selection_text_mismatch")
         return str(row["display_name"])
 
     def _serialize(self, model: str, prompt: str) -> bytes:

@@ -30,10 +30,16 @@ from literature_workbench.worker import Worker, translation_job_handlers
 class FakeDeepSeek:
     result: str = "深度求索译文"
     error: str | None = None
+    error_sequence: list[str | None] | None = None
     calls: list[object] = field(default_factory=list)
 
     def translate_selection(self, proof: object) -> str:
         self.calls.append(proof)
+        if self.error_sequence:
+            outcome = self.error_sequence.pop(0)
+            if outcome is not None:
+                raise EgressRejected(outcome)
+            return self.result
         if self.error is not None:
             raise EgressRejected(self.error)
         return self.result
@@ -181,7 +187,7 @@ def test_rejects_forged_selection_and_stale_identity_before_any_model_call(
     deepseek, qwen, process = FakeDeepSeek(), FakeQwen(), FakeQwenProcess()
     subject = service(translation_db, deepseek=deepseek, qwen=qwen, process=process)
 
-    with pytest.raises(SelectionRejected, match="selection_not_current"):
+    with pytest.raises(SelectionRejected, match="selection_text_mismatch"):
         subject.submit("session", request(ids, text="forged text"))
     stale = request(ids)
     with database.transaction() as connection:
@@ -262,8 +268,53 @@ def test_rejects_selection_that_skips_an_intervening_prose_block(translation_db)
             (json.dumps(blocks), ids["run"]),
         )
 
-    with pytest.raises(SelectionRejected, match="selection_not_current"):
+    with pytest.raises(SelectionRejected, match="selection_text_mismatch"):
         service(translation_db).submit("session", request(ids, text=f"{first} {continuation}"))
+
+
+def test_rejects_selection_that_mixes_page_words_with_forged_text(translation_db) -> None:
+    _, ids = translation_db
+
+    with pytest.raises(SelectionRejected, match="selection_text_mismatch"):
+        service(translation_db).submit(
+            "session",
+            request(ids, text="selected words entirely forged trailing"),
+        )
+
+
+def test_accepts_reordered_capture_when_tokens_stay_in_one_window(translation_db) -> None:
+    database, ids = translation_db
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET normalized_text=?,raw_text=? WHERE parse_run_id=?",
+            (
+                "one two three four five six seven eight nine ten eleven twelve",
+                "one two three four five six seven eight nine ten eleven twelve",
+                ids["run"],
+            ),
+        )
+
+    reordered = "three four five seven six eight nine ten"
+    task = service(translation_db).submit("session", request(ids, text=reordered))
+
+    assert task.status == "queued"
+    assert task.selected_text == reordered
+
+
+def test_parse_pending_when_content_has_no_completed_parse_run(translation_db) -> None:
+    database, ids = translation_db
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE parse_runs SET status='failed',error_code='invalid_pdf_structure' WHERE id=?",
+            (ids["run"],),
+        )
+        connection.execute(
+            "UPDATE contents SET current_parse_run_id=NULL WHERE sha256=?",
+            (ids["content"],),
+        )
+
+    with pytest.raises(SelectionRejected, match="selection_parse_pending"):
+        service(translation_db).submit("session", request(ids))
 
 
 def test_accepts_pdf_style_span_gap_before_punctuation(translation_db) -> None:
@@ -405,6 +456,42 @@ def test_credential_or_configuration_failure_is_terminal_without_fallback(
     assert process.calls == 0
 
 
+def test_transient_deepseek_failure_is_retried_once_then_succeeds(translation_db) -> None:
+    database, ids = translation_db
+    SettingsRepository(database).update(qwen_fallback_enabled=True)
+    deepseek = FakeDeepSeek(error_sequence=["deepseek_transport_failed", None])
+    qwen, process = FakeQwen(), FakeQwenProcess()
+    subject = service(translation_db, deepseek=deepseek, qwen=qwen, process=process)
+
+    task = subject.submit("session", request(ids))
+    subject.process_task(task.id)
+
+    completed = subject.get(task.id, session_generation="session")
+    assert completed.status == "completed"
+    assert completed.provider == "deepseek"
+    assert completed.fallback_reason is None
+    assert len(deepseek.calls) == 2
+    assert qwen.calls == []
+    assert process.calls == 0
+
+
+def test_non_retryable_deepseek_failure_is_not_retried(translation_db) -> None:
+    database, ids = translation_db
+    SettingsRepository(database).update(qwen_fallback_enabled=True)
+    deepseek = FakeDeepSeek(error="deepseek_response_too_large")
+    qwen, process = FakeQwen(), FakeQwenProcess()
+    subject = service(translation_db, deepseek=deepseek, qwen=qwen, process=process)
+
+    task = subject.submit("session", request(ids))
+    subject.process_task(task.id)
+
+    completed = subject.get(task.id, session_generation="session")
+    assert completed.status == "completed"
+    assert completed.provider == "qwen"
+    assert completed.fallback_reason == "deepseek_response_too_large"
+    assert len(deepseek.calls) == 1
+
+
 def test_known_transient_deepseek_failure_falls_back_to_qwen_once(translation_db) -> None:
     database, ids = translation_db
     SettingsRepository(database).update(qwen_fallback_enabled=True)
@@ -420,7 +507,9 @@ def test_known_transient_deepseek_failure_falls_back_to_qwen_once(translation_db
     assert completed.provider == "qwen"
     assert completed.model == "literature-workbench-qwen"
     assert completed.fallback_reason == "deepseek_total_timeout"
-    assert len(deepseek.calls) == len(qwen.calls) == process.calls == 1
+    # One bounded retry precedes the fallback, so DeepSeek sees two attempts.
+    assert len(deepseek.calls) == 2
+    assert len(qwen.calls) == process.calls == 1
 
 
 def test_local_only_routes_directly_to_qwen(translation_db) -> None:
@@ -556,5 +645,5 @@ def test_same_content_older_document_version_is_not_current(translation_db) -> N
             ),
         )
 
-    with pytest.raises(SelectionRejected, match="selection_not_current"):
+    with pytest.raises(SelectionRejected, match="selection_version_stale"):
         service(translation_db).submit("session", old_request)

@@ -1,0 +1,2 @@
+# Enforce CRLF line endings on Windows per .editorconfig.
+* text=auto eol=crlf

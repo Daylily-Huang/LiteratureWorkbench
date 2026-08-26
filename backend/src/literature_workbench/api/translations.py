@@ -60,8 +60,8 @@ def create_translation(request: Request, payload: TranslationCreate) -> JSONResp
             request.app.state.local_session.session_generation,
             TranslationRequest(**payload.model_dump()),
         )
-    except SelectionRejected:
-        return JSONResponse({"code": "selection_not_current"}, status_code=409)
+    except SelectionRejected as error:
+        return JSONResponse({"code": str(error)}, status_code=409)
     return JSONResponse(_body(task), status_code=202 if task.status == "queued" else 200)
 
 

@@ -1,0 +1,61 @@
+import { cleanup, render } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { CitationHighlight } from "./CitationHighlight";
+
+
+describe("CitationHighlight", () => {
+  afterEach(cleanup);
+
+  it("maps bbox_1000 rects onto the rendered page box", () => {
+    const { getAllByTestId } = render(
+      <CitationHighlight
+        nonce={1}
+        rects={[[100, 200, 400, 260], [100, 500, 400, 560]]}
+        renderedHeight={800}
+        renderedWidth={500}
+      />,
+    );
+
+    const rects = getAllByTestId("citation-highlight-rect");
+    expect(rects).toHaveLength(2);
+    expect(rects[0]).toHaveStyle({
+      left: "50px",
+      top: "160px",
+      width: "150px",
+      height: "48px",
+    });
+    expect(rects[1]).toHaveStyle({ top: "400px" });
+  });
+
+  it("renders nothing without rects", () => {
+    const { container } = render(
+      <CitationHighlight nonce={1} rects={[]} renderedHeight={800} renderedWidth={500} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("re-keys on nonce so the flash replays for repeat jumps", () => {
+    const { container, rerender } = render(
+      <CitationHighlight
+        nonce={1}
+        rects={[[100, 200, 400, 260]]}
+        renderedHeight={800}
+        renderedWidth={500}
+      />,
+    );
+    const first = container.querySelector(".citation-highlight");
+
+    rerender(
+      <CitationHighlight
+        nonce={2}
+        rects={[[100, 200, 400, 260]]}
+        renderedHeight={800}
+        renderedWidth={500}
+      />,
+    );
+    const second = container.querySelector(".citation-highlight");
+
+    expect(first).not.toBe(second);
+  });
+});

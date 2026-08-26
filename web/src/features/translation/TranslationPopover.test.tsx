@@ -115,6 +115,19 @@ describe("TranslationPopover", () => {
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(4));
   });
 
+  it.each([
+    ["selection_version_stale", "文档已更新，请重新选择后再翻译"],
+    ["selection_parse_pending", "文档尚未完成解析，暂时无法翻译选区"],
+    ["selection_text_mismatch", "选中文本未能与页面文字对齐，请缩小范围重新选择"],
+  ])("maps %s to an actionable message", async (code, message) => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code }), { status: 409 }));
+    render(<TranslationPopover fetcher={fetcher} selected={selected} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+  });
+
   it("retries an expired selection with the latest annotation identity", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf-a" })))

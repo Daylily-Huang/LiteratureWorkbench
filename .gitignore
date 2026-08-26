@@ -8,8 +8,15 @@ web/node_modules/
 web/dist/
 web/playwright-report/
 web/test-results/
+web/.pytest_cache/
 *.log
 .env
+
+# Root-level tool caches.
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+tmp/
 
 # Local review artifacts and file-based agent planning logs.
 output/

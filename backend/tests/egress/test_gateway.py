@@ -492,6 +492,44 @@ def test_selection_in_layout_block_survives_interleaved_page_text(
     assert len(calls) == 1
 
 
+def test_reordered_selection_survives_when_tokens_stay_in_one_window(
+    database: Database,
+    proof: VerifiedSelectionProof,
+) -> None:
+    calls: list[httpx.Request] = []
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET normalized_text=?,raw_text=? WHERE parse_run_id=?",
+            (
+                "one bounded verified source text two three four five",
+                "one bounded verified source text two three four five",
+                str(PARSE_RUN_ID),
+            ),
+        )
+    reordered = VerifiedSelectionProof(
+        **(proof.model_dump() | {"verified_text": "bounded verified text source two three"})
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return _success_response(request)
+
+    assert _gateway(database, handler).translate_selection(reordered) == TRANSLATED_TEXT
+    assert len(calls) == 1
+
+
+def test_forged_selection_fails_with_text_mismatch(
+    database: Database,
+    proof: VerifiedSelectionProof,
+) -> None:
+    forged = VerifiedSelectionProof(
+        **(proof.model_dump() | {"verified_text": "bounded verified entirely forged trailing"})
+    )
+
+    with pytest.raises(EgressRejected, match="selection_text_mismatch"):
+        _gateway(database, lambda request: _success_response(request)).translate_selection(forged)
+
+
 def test_client_disables_environment_and_redirects_and_bounds_timeouts(
     database: Database,
     proof: VerifiedSelectionProof,

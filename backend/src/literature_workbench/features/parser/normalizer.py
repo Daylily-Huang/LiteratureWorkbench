@@ -13,6 +13,7 @@ import fitz  # type: ignore[import-untyped]
 from literature_workbench.db.database import Database
 from literature_workbench.features.library.models import ContentId
 from literature_workbench.features.parser.models import ParsedBlock, ParsedPage, StagedPdf
+from literature_workbench.features.parser.reading_order import reading_order_permutation
 
 
 class ParseRunRepository:
@@ -176,6 +177,31 @@ class ParseRunRepository:
                 (error_code, timestamp, str(run_id)),
             )
 
+    def fail_orphaned_runs(self) -> int:
+        """Fail runs whose source job can no longer drive them to completion.
+
+        A run is created inside a job attempt.  If the process dies before
+        the handler can fail the run (lease expiry, crash, kill), the row
+        stays ``running`` forever: the queue is the source of truth, so at
+        startup any run whose source job is no longer queued or running is
+        orphaned.  Runs belonging to live jobs are left untouched.
+        """
+        timestamp = datetime.now(UTC).isoformat()
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                """
+                UPDATE parse_runs
+                SET status='failed',error_code='parse_job_lost',updated_at=?
+                WHERE status='running'
+                  AND source_job_id IS NOT NULL
+                  AND source_job_id NOT IN (
+                    SELECT id FROM jobs WHERE status IN ('queued','running')
+                  )
+                """,
+                (timestamp,),
+            )
+        return changed.rowcount
+
     def set_output_dir(
         self,
         run_id: UUID,
@@ -289,27 +315,46 @@ def extract_pymupdf_pages(staged: StagedPdf, parse_run_id: UUID) -> list[ParsedP
             page = document.load_page(page_index)
             width = float(page.rect.width)
             height = float(page.rect.height)
-            blocks: list[ParsedBlock] = []
-            for ordinal, raw_block in enumerate(page.get_text("blocks", sort=True)):
+            extracted: list[tuple[float, float, float, float, str]] = []
+            for raw_block in page.get_text("blocks", sort=True):
                 x0, y0, x1, y1, text, *_tail = raw_block
                 if not isinstance(text, str) or not text.strip():
                     continue
+                extracted.append(
+                    (float(x0), float(y0), float(x1), float(y1), text)
+                )
+            order = reading_order_permutation(
+                [(x0, y0, x1, y1) for x0, y0, x1, y1, _text in extracted],
+                width,
+            )
+            blocks: list[ParsedBlock] = []
+            for ordinal, source_index in enumerate(order):
+                x0, y0, x1, y1, text = extracted[source_index]
                 blocks.append(
                     ParsedBlock(
                         block_id=f"{page_index}:{ordinal}",
                         kind="text",
                         text=text,
                         bbox_1000=(
-                            _normalized_coordinate(float(x0), width),
-                            _normalized_coordinate(float(y0), height),
-                            _normalized_coordinate(float(x1), width),
-                            _normalized_coordinate(float(y1), height),
+                            _normalized_coordinate(x0, width),
+                            _normalized_coordinate(y0, height),
+                            _normalized_coordinate(x1, width),
+                            _normalized_coordinate(y1, height),
                         ),
                         source="pymupdf",
                         confidence=None,
                     )
                 )
-            raw_text = str(page.get_text("text", sort=True))
+            if order == list(range(len(extracted))):
+                # Single-column layout: keep the historical raw text exactly.
+                raw_text = str(page.get_text("text", sort=True))
+            else:
+                raw_text = "".join(
+                    text if text.endswith("\n") else f"{text}\n"
+                    for _x0, _y0, _x1, _y1, text in (
+                        extracted[source_index] for source_index in order
+                    )
+                )
             pages.append(
                 ParsedPage(
                     content_id=staged.content_id,

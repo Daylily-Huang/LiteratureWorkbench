@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
 
 from conftest import ParserLibraryFixture
+from literature_workbench.db.task_queue import TaskQueue
 from literature_workbench.features.parser.models import ParsedBlock, ParsedPage
 from literature_workbench.features.parser.normalizer import ParseRunRepository
 
@@ -378,3 +380,46 @@ def test_parsed_block_rejects_invalid_bbox_or_confidence(
             source="mineru_ocr",
             confidence=confidence,
         )
+
+
+def test_fail_orphaned_runs_only_fails_runs_whose_source_job_is_dead(
+    parser_library: ParserLibraryFixture,
+) -> None:
+    content_id = _prepare_content(parser_library, b"%PDF-orphan", 1)
+    repository = ParseRunRepository(parser_library.database)
+    queue = TaskQueue(parser_library.database, lambda: datetime.now(UTC))
+    with parser_library.database.transaction() as connection:
+        live_job = queue.enqueue_in_transaction(
+            connection, "parse_pdf", "parse_pdf:live", {"content_id": content_id}
+        )
+        dead_job = queue.enqueue_in_transaction(
+            connection, "parse_pdf", "parse_pdf:dead", {"content_id": content_id}
+        )
+    orphaned = _create_run(
+        parser_library, repository, content_id, "mineru", "mineru-1",
+        source_job_id=str(dead_job),
+    )
+    driven = _create_run(
+        parser_library, repository, content_id, "mineru", "mineru-1",
+        source_job_id=str(live_job),
+    )
+    unattributed = _create_run(
+        parser_library, repository, content_id, "mineru", "mineru-1",
+    )
+    with parser_library.database.transaction() as connection:
+        connection.execute(
+            "UPDATE jobs SET status='failed',retryable=0 WHERE id=?", (str(dead_job),)
+        )
+
+    assert repository.fail_orphaned_runs() == 1
+
+    with parser_library.database.connect() as connection:
+        states = {
+            str(row["id"]): (row["status"], row["error_code"])
+            for row in connection.execute(
+                "SELECT id,status,error_code FROM parse_runs"
+            ).fetchall()
+        }
+    assert states[str(orphaned)] == ("failed", "parse_job_lost")
+    assert states[str(driven)] == ("running", None)
+    assert states[str(unattributed)] == ("running", None)

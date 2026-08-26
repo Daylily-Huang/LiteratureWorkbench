@@ -14,6 +14,8 @@ from literature_workbench.api.libraries import router as libraries_router
 from literature_workbench.api.documents import router as documents_router
 from literature_workbench.api.session import router as session_router
 from literature_workbench.api.settings import router as settings_router
+from literature_workbench.api.research import library_router as research_library_router
+from literature_workbench.api.research import router as research_router
 from literature_workbench.api.translations import router as translations_router
 from literature_workbench.api.annotations import router as annotations_router
 from literature_workbench.config import AppSettings
@@ -25,6 +27,9 @@ from literature_workbench.features.settings.service import SettingsService
 from literature_workbench.features.egress.gateway import DeepSeekGateway
 from literature_workbench.features.models.qwen_local import QwenLocalClient
 from literature_workbench.features.models.qwen_process import QwenProcessManager
+from literature_workbench.features.research.repository import RagChunkRepository
+from literature_workbench.features.research.retriever import RagRetriever
+from literature_workbench.features.research.service import ResearchService
 from literature_workbench.features.translation.repository import TranslationRepository
 from literature_workbench.features.translation.service import TranslationService
 from literature_workbench.features.annotations.service import PdfAnnotationService
@@ -130,6 +135,16 @@ def create_app(
                 QwenLocalClient(),
                 QwenProcessManager(resolved.qwen_runtime_dir),
             )
+            rag_chunk_repository = RagChunkRepository(database)
+            app.state.research_service = ResearchService(
+                database,
+                rag_chunk_repository,
+                RagRetriever(rag_chunk_repository),
+                SettingsRepository(database),
+                deepseek_gateway,
+                QwenLocalClient(),
+                QwenProcessManager(resolved.qwen_runtime_dir),
+            )
             library_repository = LibraryRepository(database, task_queue)
             app.state.library_repository = library_repository
             app.state.annotation_service = PdfAnnotationService(
@@ -197,6 +212,8 @@ def create_app(
     app.include_router(session_router)
     app.include_router(settings_router)
     app.include_router(translations_router)
+    app.include_router(research_router)
+    app.include_router(research_library_router)
     app.include_router(annotations_router)
     app.include_router(libraries_router)
     app.include_router(documents_router)

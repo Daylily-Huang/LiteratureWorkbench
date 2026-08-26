@@ -101,6 +101,9 @@ function errorMessage(code: string | null | undefined): string {
     deepseek_authorization_failed: "DeepSeek 密钥未获授权",
     deepseek_request_rejected: "DeepSeek 配置或请求被拒绝",
     selection_not_current: "选区已过期，请重新选择",
+    selection_version_stale: "文档已更新，请重新选择后再翻译",
+    selection_parse_pending: "文档尚未完成解析，暂时无法翻译选区",
+    selection_text_mismatch: "选中文本未能与页面文字对齐，请缩小范围重新选择",
     qwen_failed: "本地备用模型暂时不可用",
   };
   return known[code ?? ""] ?? "翻译失败，请重试";

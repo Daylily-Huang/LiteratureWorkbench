@@ -9,6 +9,11 @@ import {
 const MAX_VISIBLE_RECTS = 200;
 const MAX_CONTEXT_CODE_POINTS = 500;
 const SELECTION_HINT = "请在同一栏选择一句或一段";
+// Same-line spans listed far apart in the content stream are column neighbours,
+// not line mates. Out-of-order suffix spans observed in real PDFs sit within a
+// few nodes of their line; two-column layouts put the other column dozens of
+// nodes away.
+const MAX_LINE_BRIDGE_DISTANCE = 8;
 
 
 export type VisualFragmentSeed = {
@@ -128,8 +133,12 @@ function sameVisualLine(
   const horizontalGap = Math.max(a.left, b.left) - Math.min(a.right, b.right);
   if (horizontalGap > Math.max(36, minimumHeight * 2.5)) return false;
   // PDF content streams can list a right-side suffix after the next visual line.
-  // A small non-overlapping gap is still unambiguous even when source order differs.
-  if (horizontalGap >= -2) return true;
+  // A small non-overlapping gap is still unambiguous when the text nodes sit
+  // close together in the content stream. Distant nodes with the same small
+  // gap are almost always two physical columns separated by a narrow gutter
+  // (justified text can end within a few pixels of the next column), so they
+  // must never collapse into one visual line.
+  if (horizontalGap >= -2) return sourceDistance <= MAX_LINE_BRIDGE_DISTANCE;
   if (sourceDistance !== 1) return false;
 
   // PDF.js can give adjacent styled spans bounds which overlap heavily because

@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from literature_workbench.platform.windows.powershell import (
+    default_powershell_candidates,
+)
+
 
 FIXED_DIALOG_SCRIPT = (
     "Add-Type -AssemblyName System.Windows.Forms; "
@@ -49,12 +53,17 @@ class FolderDialog:
         self._runner = runner or SubprocessCommandRunner()
 
     def select(self) -> Path | None:
-        try:
-            result = self._runner.run(
-                ["pwsh.exe", "-NoProfile", "-STA", "-Command", FIXED_DIALOG_SCRIPT]
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            raise FolderDialogError from None
+        result: CommandResult | None = None
+        for executable in default_powershell_candidates():
+            try:
+                result = self._runner.run(
+                    [executable, "-NoProfile", "-STA", "-Command", FIXED_DIALOG_SCRIPT]
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            break
+        if result is None:
+            raise FolderDialogError
         if result.returncode != 0:
             raise FolderDialogError
         selected = result.stdout.rstrip("\r\n")
