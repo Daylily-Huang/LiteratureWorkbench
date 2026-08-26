@@ -55,10 +55,21 @@ def test_win32_child_construction_failure_terminates_exact_suspended_process(
         Win32ProcessBackend().create_suspended(spec)
 
     assert captured_pid > 0
-    open_process = ctypes.WinDLL("kernel32", use_last_error=True).OpenProcess
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_process = kernel32.OpenProcess
     open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     open_process.restype = wintypes.HANDLE
-    assert not open_process(0x1000, False, captured_pid)
+    handle = open_process(0x1000, False, captured_pid)
+    if handle:
+        try:
+            exit_code = wintypes.DWORD()
+            get_exit_code = kernel32.GetExitCodeProcess
+            get_exit_code.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            get_exit_code.restype = wintypes.BOOL
+            assert get_exit_code(handle, ctypes.byref(exit_code))
+            assert exit_code.value != 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
 
 
 def test_startup_handle_list_does_not_leak_unrelated_inheritable_handle(

@@ -1,4 +1,4 @@
-"""Single-document research Q&A orchestration.
+"""Single-document and library-wide research Q&A orchestration.
 
 Synchronous by design for the MVP: one DeepSeek round-trip (~seconds)
 needs no task queue.  Retry and local-fallback semantics deliberately
@@ -49,8 +49,12 @@ _RETRYABLE_ERRORS = {
     "deepseek_total_timeout",
 }
 
-_CITATION_MARK = re.compile(r"\[p(\d+)\]")
-_LIBRARY_CITATION_MARK = re.compile(r"\[d(\d+)\s+p(\d+)\]")
+# Matches [r1 p7], [r1], or legacy [p7]
+_CITATION_MARK = re.compile(r"\[(?:r(\d+)(?:\s+p(\d+))?|p(\d+))\]")
+# Matches [d1 r1 p7], [d1 r1], or legacy [d1 p7]
+_LIBRARY_CITATION_MARK = re.compile(
+    r"\[d(\d+)\s+(?:r(\d+)(?:\s+p(\d+))?|p(\d+))\]"
+)
 _NO_HIT_MESSAGE = (
     "在当前文档中没有检索到与问题相关的内容片段，请换个问法或确认文档已完成解析。"
 )
@@ -102,6 +106,7 @@ class ResearchAnswer:
     provider: str
     model: str
     fallback_reason: str | None = field(default=None)
+    citation_status: str = "verified"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +126,7 @@ class LibraryAnswer:
     model: str
     fallback_reason: str | None = field(default=None)
     indexed_documents: int = 0
+    citation_status: str = "verified"
 
 
 class ResearchService:
@@ -179,6 +185,7 @@ class ResearchService:
                 citations=[],
                 provider="retrieval_only",
                 model="",
+                citation_status="missing",
             )
         prompt = _build_prompt(question, hits)
         if settings.default_translation_mode == "local_only":
@@ -196,11 +203,13 @@ class ResearchService:
             if code in _FALLBACK_ERRORS and settings.qwen_fallback_enabled:
                 return self._ask_qwen(prompt, hits, fallback_reason=code)
             raise ResearchError(code or "deepseek_failed") from None
+        citations, citation_status = _citations_for(answer, hits)
         return ResearchAnswer(
             answer=answer,
-            citations=_citations_for(answer, hits),
+            citations=citations,
             provider="deepseek",
             model=settings.deepseek_model,
+            citation_status=citation_status,
         )
 
     def ask_library(self, *, question: str) -> LibraryAnswer:
@@ -239,6 +248,7 @@ class ResearchService:
                 provider="retrieval_only",
                 model="",
                 indexed_documents=indexed_documents,
+                citation_status="missing",
             )
         prompt, hits_by_ref = _build_library_prompt(question, hits)
         if settings.default_translation_mode == "local_only":
@@ -260,12 +270,14 @@ class ResearchService:
                     prompt, hits_by_ref, indexed_documents, fallback_reason=code
                 )
             raise ResearchError(code or "deepseek_failed") from None
+        citations, citation_status = _library_citations_for(answer, hits_by_ref)
         return LibraryAnswer(
             answer=answer,
-            citations=_library_citations_for(answer, hits_by_ref),
+            citations=citations,
             provider="deepseek",
             model=settings.deepseek_model,
             indexed_documents=indexed_documents,
+            citation_status=citation_status,
         )
 
     def _ensure_library_index(self) -> None:
@@ -279,7 +291,7 @@ class ResearchService:
             if self._repository.indexed_parse_run_id(content_sha256) == parse_run_id:
                 continue
             try:
-                pages = self._repository.read_current_pages(content_sha256)
+                pages = self._repository.read_pages(content_sha256, parse_run_id)
                 if not pages:
                     continue
                 self._repository.rebuild(
@@ -317,13 +329,15 @@ class ResearchService:
             raise ResearchError(str(error) or "qwen_failed") from None
         except (OSError, RuntimeError):
             raise ResearchError("qwen_failed") from None
+        citations, citation_status = _library_citations_for(answer, hits_by_ref)
         return LibraryAnswer(
             answer=answer,
-            citations=_library_citations_for(answer, hits_by_ref),
+            citations=citations,
             provider="qwen",
             model="qwen-local",
             fallback_reason=fallback_reason,
             indexed_documents=indexed_documents,
+            citation_status=citation_status,
         )
 
     def _read_document(
@@ -334,8 +348,9 @@ class ResearchService:
                 """
                 SELECT d.content_sha256,d.display_name,c.current_parse_run_id
                 FROM documents AS d
+                JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
                 LEFT JOIN contents AS c ON c.sha256=d.content_sha256
-                WHERE d.id=? AND d.format='pdf'
+                WHERE d.id=? AND d.format='pdf' AND d.status IN ('candidate_pdf','valid_pdf')
                 """,
                 (str(document_id),),
             ).fetchone()
@@ -351,7 +366,7 @@ class ResearchService:
     def _ensure_index(self, content_id: ContentId, parse_run_id: str) -> None:
         if self._repository.indexed_parse_run_id(content_id) == parse_run_id:
             return
-        pages = self._repository.read_current_pages(content_id)
+        pages = self._repository.read_pages(content_id, parse_run_id)
         if not pages:
             raise ResearchError("parse_required")
         self._repository.rebuild(content_id, parse_run_id, chunk_pages(pages))
@@ -433,48 +448,79 @@ class ResearchService:
             raise ResearchError(str(error) or "qwen_failed") from None
         except (OSError, RuntimeError):
             raise ResearchError("qwen_failed") from None
+        citations, citation_status = _citations_for(answer, hits)
         return ResearchAnswer(
             answer=answer,
-            citations=_citations_for(answer, hits),
+            citations=citations,
             provider="qwen",
             model="qwen-local",
             fallback_reason=fallback_reason,
+            citation_status=citation_status,
         )
 
 
 def _build_prompt(question: str, hits: list[RetrievalHit]) -> str:
     fragments = "\n\n".join(
-        f"[p{hit.physical_page}] {hit.text}" for hit in hits
+        f"[r{idx + 1} p{hit.physical_page}] {hit.text}" for idx, hit in enumerate(hits)
     )
     return (
         "You are a research assistant helping a reader understand one PDF "
         "document. Answer the question using ONLY the fragments below, each "
-        "prefixed with its physical page as [pN]. Cite the supporting page "
-        "immediately after every claim using the same [pN] marks. If the "
-        "fragments do not contain the answer, say so plainly instead of "
-        "guessing. Answer in the question's language.\n\n"
+        "prefixed with its reference and physical page as [rN pM]. Cite the "
+        "supporting fragment immediately after every claim using the same "
+        "[rN pM] marks (e.g. [r1 p7]). If the fragments do not contain the answer, "
+        "say so plainly instead of guessing. Answer in the question's language.\n\n"
         f"<fragments>\n{fragments}\n</fragments>\n\n"
         f"<question>\n{question}\n</question>"
     )
 
 
-def _citations_for(answer: str, hits: list[RetrievalHit]) -> list[ResearchCitation]:
-    pages_by_hit = {hit.physical_page: hit for hit in hits}
-    cited: list[int] = []
+def _citations_for(
+    answer: str, hits: list[RetrievalHit]
+) -> tuple[list[ResearchCitation], str]:
+    hits_by_ref = {idx + 1: hit for idx, hit in enumerate(hits)}
+    # Also index by page for fallback if the model returned [p7] instead of [r1 p7]
+    page_to_hits: dict[int, list[RetrievalHit]] = {}
+    for hit in hits:
+        page_to_hits.setdefault(hit.physical_page, []).append(hit)
+
+    cited: list[RetrievalHit] = []
     for mark in _CITATION_MARK.finditer(answer):
-        page = int(mark.group(1))
-        if page in pages_by_hit and page not in cited:
-            cited.append(page)
-    if not cited:
-        cited = [hit.physical_page for hit in hits[:2]]
-    return [
+        ref_group = mark.group(1)
+        page_group = mark.group(2)
+        legacy_page_group = mark.group(3)
+
+        if ref_group is not None:
+            ref_idx = int(ref_group)
+            if ref_idx in hits_by_ref:
+                hit = hits_by_ref[ref_idx]
+                if page_group is None or int(page_group) == hit.physical_page:
+                    if hit not in cited:
+                        cited.append(hit)
+        elif legacy_page_group is not None:
+            page = int(legacy_page_group)
+            # If [p7] was used and exactly one hit exists on page 7, map it.
+            matching_hits = page_to_hits.get(page, [])
+            if len(matching_hits) == 1:
+                hit = matching_hits[0]
+                if hit not in cited:
+                    cited.append(hit)
+            elif len(matching_hits) > 1:
+                # If ambiguous, take the highest ranking hit on that page
+                hit = matching_hits[0]
+                if hit not in cited:
+                    cited.append(hit)
+
+    citations = [
         ResearchCitation(
-            physical_page=page,
-            excerpt=_excerpt(pages_by_hit[page].text),
-            rects=pages_by_hit[page].rects,
+            physical_page=hit.physical_page,
+            excerpt=_excerpt(hit.text),
+            rects=hit.rects,
         )
-        for page in cited
+        for hit in cited
     ]
+    status = "verified" if citations else "missing"
+    return citations, status
 
 
 def _excerpt(text: str, *, limit: int = 160) -> str:
@@ -487,20 +533,27 @@ def _excerpt(text: str, *, limit: int = 160) -> str:
 def _build_library_prompt(
     question: str, hits: list[LibraryRetrievalHit]
 ) -> tuple[str, dict[tuple[int, int], LibraryRetrievalHit]]:
-    """Build the cross-document prompt and the (doc-number, page) lookup.
+    """Build the cross-document prompt and the (doc-number, ref-number) lookup.
 
     Documents are numbered d1..dN in first-appearance order; fragments are
-    tagged ``[dN pM]`` so the model can cite both the document and the page.
+    tagged ``[dN rM pK]`` so each fragment has an unambiguous unique reference.
     """
     doc_numbers: dict[str, int] = {}
     fragments: list[str] = []
     hits_by_ref: dict[tuple[int, int], LibraryRetrievalHit] = {}
+    doc_ref_counters: dict[int, int] = {}
+
     for hit in hits:
         if hit.document_id not in doc_numbers:
             doc_numbers[hit.document_id] = len(doc_numbers) + 1
         doc_number = doc_numbers[hit.document_id]
-        fragments.append(f"[d{doc_number} p{hit.physical_page}] {hit.text}")
-        hits_by_ref[(doc_number, hit.physical_page)] = hit
+        doc_ref_counters[doc_number] = doc_ref_counters.get(doc_number, 0) + 1
+        ref_number = doc_ref_counters[doc_number]
+        fragments.append(
+            f"[d{doc_number} r{ref_number} p{hit.physical_page}] {hit.text}"
+        )
+        hits_by_ref[(doc_number, ref_number)] = hit
+
     seen: set[int] = set()
     document_lines: list[str] = []
     for hit in hits:
@@ -513,11 +566,11 @@ def _build_library_prompt(
     prompt = (
         "You are a research assistant answering questions across a personal "
         "PDF library. Answer the question using ONLY the fragments below, "
-        "each prefixed with its source as [dN pM] where dN is the document "
-        "number listed under <documents> and pM is its physical page. Cite "
+        "each prefixed with its unique source reference as [dN rM pK] where "
+        "dN is the document number under <documents>, rM is the fragment "
+        "index for that document, and pK is its physical page. Cite "
         "the supporting source immediately after every claim using the same "
-        "[dN pM] marks, and use the relevant document whenever several "
-        "fragments contribute. If the fragments do not contain the answer, "
+        "[dN rM pK] marks (e.g. [d1 r1 p7]). If the fragments do not contain the answer, "
         "say so plainly instead of guessing. Answer in the question's "
         "language.\n\n"
         f"<documents>\n{documents}\n</documents>\n\n"
@@ -529,23 +582,44 @@ def _build_library_prompt(
 
 def _library_citations_for(
     answer: str, hits_by_ref: dict[tuple[int, int], LibraryRetrievalHit]
-) -> list[LibraryCitation]:
-    cited: list[tuple[int, int]] = []
+) -> tuple[list[LibraryCitation], str]:
+    cited: list[LibraryRetrievalHit] = []
+    # Index by (doc_number, physical_page) for legacy citations [d1 p7]
+    doc_page_to_hits: dict[tuple[int, int], list[LibraryRetrievalHit]] = {}
+    for (d_num, _r_num), hit in hits_by_ref.items():
+        doc_page_to_hits.setdefault((d_num, hit.physical_page), []).append(hit)
+
     for mark in _LIBRARY_CITATION_MARK.finditer(answer):
-        ref = (int(mark.group(1)), int(mark.group(2)))
-        if ref in hits_by_ref and ref not in cited:
-            cited.append(ref)
-    if not cited:
-        # The model ignored the marking scheme; fall back to the strongest
-        # fragments so the user still gets a trail into the library.
-        cited = list(hits_by_ref)[:2]
-    return [
+        doc_num = int(mark.group(1))
+        ref_group = mark.group(2)
+        page_group = mark.group(3)
+        legacy_page_group = mark.group(4)
+
+        if ref_group is not None:
+            ref_num = int(ref_group)
+            key = (doc_num, ref_num)
+            if key in hits_by_ref:
+                hit = hits_by_ref[key]
+                if page_group is None or int(page_group) == hit.physical_page:
+                    if hit not in cited:
+                        cited.append(hit)
+        elif legacy_page_group is not None:
+            page = int(legacy_page_group)
+            matching = doc_page_to_hits.get((doc_num, page), [])
+            if matching:
+                hit = matching[0]
+                if hit not in cited:
+                    cited.append(hit)
+
+    citations = [
         LibraryCitation(
-            document_id=hits_by_ref[ref].document_id,
-            display_name=hits_by_ref[ref].display_name,
-            physical_page=ref[1],
-            excerpt=_excerpt(hits_by_ref[ref].text),
-            rects=hits_by_ref[ref].rects,
+            document_id=hit.document_id,
+            display_name=hit.display_name,
+            physical_page=hit.physical_page,
+            excerpt=_excerpt(hit.text),
+            rects=hit.rects,
         )
-        for ref in cited
+        for hit in cited
     ]
+    status = "verified" if citations else "missing"
+    return citations, status

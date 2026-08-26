@@ -8,6 +8,7 @@ from literature_workbench.features.research.repository import RagChunkRepository
 from literature_workbench.features.research.retriever import (
     RagRetriever,
     build_match_query,
+    rects_from_json,
 )
 
 CONTENT = "a" * 64
@@ -38,6 +39,21 @@ def test_build_match_query_rejects_punctuation_and_empty() -> None:
     assert build_match_query("") is None
     # Two-character runs fall below the trigram minimum.
     assert build_match_query("在哪") is None
+
+
+def test_rects_from_json_defends_against_malformed_data() -> None:
+    assert rects_from_json(None) == ()
+    assert rects_from_json("") == ()
+    assert rects_from_json("invalid json string") == ()
+    assert rects_from_json("{}") == ()
+    assert rects_from_json("[1, 2, 3]") == ()
+    assert rects_from_json("[[1, 2, 3]]") == ()
+    assert rects_from_json('[[10, 20, "abc", 50]]') == ()
+    assert rects_from_json("[[10, 20, NaN, 50]]") == ()
+    # Inverted box coordinates x1 <= x0 or y1 <= y0 are dropped
+    assert rects_from_json("[[50, 50, 10, 10]]") == ()
+    # Valid box is parsed accurately
+    assert rects_from_json("[[10, 20, 300, 80]]") == ((10, 20, 300, 80),)
 
 
 def test_search_returns_best_page_first(research_db: Database) -> None:

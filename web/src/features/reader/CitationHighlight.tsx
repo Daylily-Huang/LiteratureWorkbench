@@ -5,15 +5,34 @@
  * highlight lands exactly on the contributing blocks.
  */
 
+export type PdfRect = readonly [number, number, number, number];
+
+export function isValidPdfRect(val: unknown): val is PdfRect {
+  if (!Array.isArray(val) || val.length !== 4) return false;
+  const [x0, y0, x1, y1] = val as unknown[];
+  return (
+    typeof x0 === "number" &&
+    typeof y0 === "number" &&
+    typeof x1 === "number" &&
+    typeof y1 === "number" &&
+    Number.isFinite(x0) &&
+    Number.isFinite(y0) &&
+    Number.isFinite(x1) &&
+    Number.isFinite(y1) &&
+    x0 >= 0 &&
+    y0 >= 0 &&
+    x1 > x0 &&
+    y1 > y0
+  );
+}
 
 type CitationHighlightProps = {
-  rects: number[][];
+  rects: readonly PdfRect[] | number[][];
   renderedWidth: number;
   renderedHeight: number;
   /** Bumped per jump so clicking the same citation re-plays the flash. */
   nonce: number;
 };
-
 
 export function CitationHighlight({
   rects,
@@ -23,7 +42,7 @@ export function CitationHighlight({
 }: CitationHighlightProps) {
   if (rects.length === 0 || renderedWidth <= 0 || renderedHeight <= 0) return null;
   return (
-    <div aria-label="引用来源高亮" className="citation-highlight" key={nonce}>
+    <div aria-hidden="true" className="citation-highlight" key={nonce}>
       {rects.map((rect, index) => {
         const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = rect;
         return (

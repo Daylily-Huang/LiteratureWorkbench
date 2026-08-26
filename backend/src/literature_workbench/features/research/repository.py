@@ -18,18 +18,20 @@ class RagChunkRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
 
-    def read_current_pages(self, content_id: ContentId | str) -> list[ParsedPage]:
+    def read_pages(
+        self, content_id: ContentId | str, parse_run_id: UUID | str
+    ) -> list[ParsedPage]:
+        """Read parsed pages explicitly bound to the given parse_run_id to avoid TOCTOU races."""
         with self._database.connect() as connection:
             rows = connection.execute(
                 """
                 SELECT p.*,r.parser_name,r.parser_version
-                FROM contents AS c
-                JOIN parse_runs AS r ON r.id=c.current_parse_run_id AND r.status='completed'
-                JOIN pages AS p ON p.parse_run_id=r.id AND p.content_sha256=c.sha256
-                WHERE c.sha256=?
+                FROM pages AS p
+                JOIN parse_runs AS r ON r.id=p.parse_run_id AND r.status='completed'
+                WHERE p.content_sha256=? AND p.parse_run_id=?
                 ORDER BY p.page_index
                 """,
-                (str(content_id),),
+                (str(content_id), str(parse_run_id)),
             ).fetchall()
         return [_parsed_page_from_row(row) for row in rows]
 
@@ -112,12 +114,13 @@ class RagChunkRepository:
 
     def parsed_documents(self) -> list[tuple[str, str, str]]:
         """(document_id, content_sha256, current_parse_run_id) for every
-        document whose parse is complete — the sweep's index candidates."""
+        active document whose parse is complete — the sweep's index candidates."""
         with self._database.connect() as connection:
             rows = connection.execute(
                 """
                 SELECT d.id,d.content_sha256,c.current_parse_run_id
                 FROM documents AS d
+                JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
                 JOIN contents AS c ON c.sha256=d.content_sha256
                 WHERE d.status IN ('candidate_pdf','valid_pdf') AND d.format='pdf'
                   AND c.current_parse_run_id IS NOT NULL
@@ -159,6 +162,7 @@ class RagChunkRepository:
                 JOIN rag_chunks AS c ON c.id=rag_chunks_fts.chunk_id
                 JOIN documents AS d ON d.content_sha256=c.content_sha256
                   AND d.status IN ('candidate_pdf','valid_pdf')
+                JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
                 WHERE rag_chunks_fts MATCH ?
                 ORDER BY score
                 LIMIT ?

@@ -7,8 +7,8 @@ import { CitationHighlight } from "./CitationHighlight";
 describe("CitationHighlight", () => {
   afterEach(cleanup);
 
-  it("maps bbox_1000 rects onto the rendered page box", () => {
-    const { getAllByTestId } = render(
+  it("maps bbox_1000 rects onto the rendered page box and sets aria-hidden", () => {
+    const { container, getAllByTestId } = render(
       <CitationHighlight
         nonce={1}
         rects={[[100, 200, 400, 260], [100, 500, 400, 560]]}
@@ -16,6 +16,9 @@ describe("CitationHighlight", () => {
         renderedWidth={500}
       />,
     );
+
+    const root = container.querySelector(".citation-highlight");
+    expect(root).toHaveAttribute("aria-hidden", "true");
 
     const rects = getAllByTestId("citation-highlight-rect");
     expect(rects).toHaveLength(2);

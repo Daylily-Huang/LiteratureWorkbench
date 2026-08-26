@@ -16,6 +16,7 @@ import {
 import { DashboardHome } from "../features/dashboard/DashboardHome";
 import { LibraryPanel } from "../features/library/LibraryPanel";
 import type { DocumentListItem } from "../features/library/documents";
+import type { PdfRect } from "../features/reader/CitationHighlight";
 import { PdfReader, type CitationJump, type ReaderDocument } from "../features/reader/PdfReader";
 import type { SelectedText } from "../features/reader/selection";
 import { AssistantPanel, type LibraryCitation, type ResearchCitation } from "../features/research/AssistantPanel";
@@ -41,26 +42,19 @@ type Confirmation =
 
 function readerLocation(): ReaderLocation {
   const params = new URLSearchParams(window.location.search);
-  const page = Number(params.get("page") ?? "1");
-  return {
-    documentId: params.get("document"),
-    initialPage: Number.isInteger(page) && page > 0 ? page : 1,
-  };
+  const documentId = params.get("document") ?? params.get("documentId");
+  const rawPage = Number(params.get("page"));
+  const initialPage = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+  return { documentId, initialPage };
 }
 
-
-function annotationErrorMessage(reason: unknown): string {
-  const code = reason instanceof Error ? reason.message : "annotation_request_failed";
-  const known: Record<string, string> = {
-    annotation_coordinates_unavailable: "当前页面坐标尚未就绪，请重新选择文字",
-    annotation_document_version_conflict: "PDF 已变化，请重新选择文字",
-    annotation_external_change: "检测到 PDF 被其他程序修改，已停止写入",
-    annotation_pdf_not_incremental: "此 PDF 暂不支持安全的原位批注",
-    annotation_read_only: "历史批注只读，不能修改",
-    annotation_undo_unavailable: "没有可撤销的本站批注操作",
-    annotation_baseline_missing: "尚未创建原始版本备份",
-  };
-  return known[code] ?? "PDF 批注操作失败，原文件未被覆盖";
+function updateReaderLocation(location: ReaderLocation) {
+  const params = new URLSearchParams();
+  if (location.documentId !== null) params.set("document", location.documentId);
+  if (location.initialPage >= 1) params.set("page", String(location.initialPage));
+  const query = params.toString();
+  const next = query.length === 0 ? "/" : `/?${query}`;
+  window.history.pushState(null, "", next);
 }
 
 
@@ -77,13 +71,15 @@ export function Workbench() {
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const [requestedPage, setRequestedPage] = useState<number | undefined>();
   const [citationHighlight, setCitationHighlight] = useState<CitationJump | null>(null);
+
   // A library-scope citation pointing at another document: applied once the
   // target document finishes loading.
   const [pendingCitation, setPendingCitation] = useState<{
     documentId: string;
     page: number;
-    rects: number[][];
+    rects: readonly PdfRect[] | number[][];
   } | null>(null);
+  const [draftQuestion, setDraftQuestion] = useState("");
   const [focusMode, setFocusMode] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"library" | "assistant" | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
@@ -118,74 +114,56 @@ export function Workbench() {
     setAnnotationError(null);
     setActiveAnnotationId(null);
     setRequestedPage(undefined);
-    setCitationHighlight(null);
-    if (location.documentId === null) return;
+
+    if (location.documentId === null) return undefined;
     const controller = new AbortController();
-    let stopped = false;
+
     void fetch(`/api/documents/${location.documentId}`, {
       credentials: "same-origin",
       signal: controller.signal,
-    }).then(async (response) => {
-      if (!response.ok) throw new Error("document_metadata_unavailable");
-      const value = await response.json() as DocumentResponse;
-      if (value.current_document_version_id === null || value.content_id === null) {
-        throw new Error("document_metadata_incomplete");
-      }
-      const next = {
-        documentId: value.document_id,
-        documentVersionId: value.current_document_version_id,
-        contentId: value.content_id,
-        filename: value.filename,
-      };
-      if (stopped) return;
-      setDocument(next);
-      setDocumentError(false);
-      try {
-        const nextAnnotations = await listAnnotations(next.documentId, controller.signal);
-        if (!stopped) setAnnotations(nextAnnotations);
-      } catch (reason: unknown) {
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("document_unavailable");
+        return response.json() as Promise<DocumentResponse>;
+      })
+      .then((data) => {
         if (
-          !stopped
-          && !(reason instanceof DOMException && reason.name === "AbortError")
+          data.current_document_version_id === null ||
+          data.content_id === null
         ) {
-          setAnnotationError("PDF 批注暂时无法读取");
+          throw new Error("document_not_ready");
         }
-      }
-    }).catch((reason: unknown) => {
-      if (
-        !stopped
-        && !(reason instanceof DOMException && reason.name === "AbortError")
-      ) {
+        setDocument({
+          documentId: data.document_id,
+          documentVersionId: data.current_document_version_id,
+          contentId: data.content_id,
+          filename: data.filename,
+        });
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         setDocumentError(true);
-      }
-    });
-    return () => {
-      stopped = true;
-      controller.abort();
-    };
+      });
+
+    return () => controller.abort();
   }, [location.documentId]);
 
-  function openDocument(documentId: string) {
-    const url = new URL(window.location.href);
-    url.pathname = "/";
-    url.search = "";
-    url.searchParams.set("document", documentId);
-    url.searchParams.set("page", "1");
-    url.hash = "";
-    window.history.pushState({}, "", url);
-    setLocation({ documentId, initialPage: 1 });
-    setMobilePanel(null);
-  }
-
-  function goHome() {
-    const url = new URL(window.location.href);
-    url.pathname = "/";
-    url.search = "";
-    url.hash = "";
-    window.history.pushState({}, "", url);
-    setLocation({ documentId: null, initialPage: 1 });
-    setMobilePanel(null);
-  }
+  useEffect(() => {
+    if (document === null) {
+      setAnnotations(null);
+      return undefined;
+    }
+    const controller = new AbortController();
+    void listAnnotations(document.documentId, controller.signal)
+      .then((state) => {
+        setAnnotations(state);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setAnnotationError(error instanceof Error ? error.message : "annotation_load_failed");
+      });
+    return () => controller.abort();
+  }, [document]);
 
   async function runMutation(action: () => Promise<{
     current_document_version_id: string;
@@ -206,30 +184,30 @@ export function Workbench() {
           : null
       ));
     } catch (reason: unknown) {
-      setAnnotationError(annotationErrorMessage(reason));
+      setAnnotationError(reason instanceof Error ? reason.message : "annotation_mutation_failed");
     } finally {
       setAnnotationBusy(false);
     }
   }
 
-  function jumpToAnnotation(annotation: PdfAnnotation) {
-    setRequestedPage(annotation.page);
-    setActiveAnnotationId(annotation.annotation_id);
-    window.setTimeout(() => {
-      globalThis.document
-        .getElementById(`annotation-${annotation.annotation_id}`)
-        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }, 0);
+  function openDocument(documentId: string | null) {
+    const next: ReaderLocation = { documentId, initialPage: 1 };
+    setLocation(next);
+    updateReaderLocation(next);
+    setMobilePanel(null);
+  }
+
+  function goHome() {
+    openDocument(null);
   }
 
   function jumpToPage(page: number) {
-    // Reset first so repeated clicks on the same citation still re-scroll.
-    if (requestedPage === page) {
-      setRequestedPage(undefined);
-      window.setTimeout(() => setRequestedPage(page), 0);
-    } else {
-      setRequestedPage(page);
-    }
+    setRequestedPage(page);
+  }
+
+  function jumpToAnnotation(annotation: PdfAnnotation) {
+    setActiveAnnotationId(annotation.annotation_id);
+    jumpToPage(annotation.page);
   }
 
   function jumpToCitation(citation: ResearchCitation) {
@@ -242,12 +220,14 @@ export function Workbench() {
   }
 
   function jumpToLibraryCitation(citation: LibraryCitation) {
-    if (citation.document_id === location.documentId) {
+    if (document !== null && document.documentId === citation.document_id) {
+      // Citation lands in the currently-open document: flash straight away.
       jumpToCitation(citation);
       return;
     }
-    // Cross-document: remember the target, switch documents, and let the
-    // effect below jump + highlight once the new document is ready.
+    // Citation points at a different document: record the destination and
+    // navigate.  The effect below will apply the highlight and jump once the
+    // reader finishes mounting the new document.
     setPendingCitation({
       documentId: citation.document_id,
       page: citation.physical_page,
@@ -256,6 +236,8 @@ export function Workbench() {
     openDocument(citation.document_id);
   }
 
+  // Once the target document of a cross-document citation jump mounts, apply
+  // the highlight and jump to the cited page.
   useEffect(() => {
     if (document === null || pendingCitation === null) return;
     if (pendingCitation.documentId !== document.documentId) return;
@@ -280,7 +262,16 @@ export function Workbench() {
     reader = (
       <DashboardHome
         documents={documentList}
+        onAskQuestion={(q) => {
+          setDraftQuestion(q);
+          if (focusMode) setFocusMode(false);
+          setMobilePanel("assistant");
+        }}
         onOpenDocument={openDocument}
+        onTriggerImport={() => {
+          if (focusMode) setFocusMode(false);
+          setMobilePanel("library");
+        }}
       />
     );
   } else if (documentError) {
@@ -321,13 +312,18 @@ export function Workbench() {
   return (
     <div className="workbench-shell" data-theme={resolvedTheme}>
       <header className="topbar">
-        <div className="topbar__brand" onClick={goHome} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") goHome(); }}>
-          <span className="topbar__mark">📖</span>
+        <button
+          aria-label="返回文献工作台首页"
+          className="topbar__brand-button"
+          onClick={goHome}
+          type="button"
+        >
+          <span aria-hidden="true" className="topbar__mark">📖</span>
           <div className="topbar__title-wrap">
             <strong>Literature Workbench</strong>
             <span className="topbar__subtitle">文献工作台</span>
           </div>
-        </div>
+        </button>
 
         <div className="topbar__document" title={document?.filename ?? "尚未选择文献"}>
           {document ? (
@@ -415,6 +411,8 @@ export function Workbench() {
         <aside aria-label="研究助手" className="workbench__assistant">
           <AssistantPanel
             document={document}
+            draftQuestion={draftQuestion}
+            onDraftQuestionConsumed={() => setDraftQuestion("")}
             onJumpToCitation={jumpToCitation}
             onJumpToLibraryCitation={jumpToLibraryCitation}
             onOpenSettings={() => setSettingsOpen(true)}

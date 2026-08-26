@@ -50,6 +50,7 @@ def _body(answer: ResearchAnswer) -> dict[str, object]:
         "provider": answer.provider,
         "model": answer.model,
         "fallback_reason": answer.fallback_reason,
+        "citation_status": answer.citation_status,
     }
 
 
@@ -85,6 +86,7 @@ def _library_body(answer: LibraryAnswer) -> dict[str, object]:
         "model": answer.model,
         "fallback_reason": answer.fallback_reason,
         "indexed_documents": answer.indexed_documents,
+        "citation_status": answer.citation_status,
     }
 
 

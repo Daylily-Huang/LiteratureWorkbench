@@ -62,7 +62,7 @@ export function AnnotationPanel({
     grouped.set(item.page, [...(grouped.get(item.page) ?? []), item]);
   }
 
-  const totalAnnotations = state?.items.length ?? 0;
+  const totalAnnotations = state?.items?.length ?? 0;
 
   return (
     <section aria-label="PDF 笔记" className="annotation-panel">
@@ -100,7 +100,7 @@ export function AnnotationPanel({
         </div>
       )}
       {error !== null && <p className="annotation-error" role="alert">{error}</p>}
-      {!busy && state !== null && state.items.length === 0 && (
+      {!busy && state !== null && (state.items?.length ?? 0) === 0 && (
         <div className="annotation-empty-state">
           <p>尚无批注</p>
           <small>在左侧 PDF 中选中文字即可高亮、下划线或添加学术评论</small>

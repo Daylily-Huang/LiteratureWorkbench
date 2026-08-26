@@ -18,6 +18,7 @@ const ANSWER = {
   provider: "deepseek",
   model: "deepseek-v4-flash",
   fallback_reason: null,
+  citation_status: "verified",
 };
 
 
@@ -52,6 +53,7 @@ describe("AssistantPanel", () => {
       model: "deepseek-v4-flash",
       fallback_reason: null,
       indexed_documents: 3,
+      citation_status: "verified",
     };
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf" })))
@@ -99,6 +101,7 @@ describe("AssistantPanel", () => {
             model: "",
             fallback_reason: null,
             indexed_documents: 0,
+            citation_status: "missing",
           }),
           { status: 200 },
         ),
@@ -146,6 +149,82 @@ describe("AssistantPanel", () => {
       excerpt: "Alpha beta gamma",
       rects: [[10, 20, 300, 80]],
     });
+  });
+
+  it("renders notice when answer has missing citations", async () => {
+    const missingAnswer = {
+      answer: "Alpha without citation.",
+      citations: [],
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      fallback_reason: null,
+      citation_status: "missing",
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify(missingAnswer), { status: 200 }));
+    render(
+      <AssistantPanel document={DOCUMENT} fetcher={fetcher} onJumpToCitation={() => undefined} />,
+    );
+    fireEvent.change(screen.getByLabelText("向当前文献提问"), {
+      target: { value: "What is alpha?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "提问" }));
+
+    expect(await screen.findByText("Alpha without citation.")).toBeVisible();
+    expect(screen.getByText("回答未生成可验证的原文引用，请核对原文。")).toBeVisible();
+  });
+
+  it("clears answer when document changes to prevent race/cross-doc pollution", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify(ANSWER), { status: 200 }));
+    const { rerender } = render(
+      <AssistantPanel document={DOCUMENT} fetcher={fetcher} onJumpToCitation={() => undefined} />,
+    );
+    fireEvent.change(screen.getByLabelText("向当前文献提问"), {
+      target: { value: "What is alpha?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "提问" }));
+
+    expect(await screen.findByText("Alpha is the first letter [p1].")).toBeVisible();
+
+    const otherDoc: ReaderDocument = {
+      documentId: "doc-2",
+      documentVersionId: "ver-2",
+      contentId: "d".repeat(64),
+      filename: "other.pdf",
+    };
+
+    rerender(
+      <AssistantPanel document={otherDoc} fetcher={fetcher} onJumpToCitation={() => undefined} />,
+    );
+
+    expect(screen.queryByText("Alpha is the first letter [p1].")).not.toBeInTheDocument();
+  });
+
+  it("syncs draft question passed from external props", () => {
+    const onConsumed = vi.fn();
+    const { rerender } = render(
+      <AssistantPanel
+        document={DOCUMENT}
+        draftQuestion=""
+        onDraftQuestionConsumed={onConsumed}
+        onJumpToCitation={() => undefined}
+      />,
+    );
+
+    rerender(
+      <AssistantPanel
+        document={DOCUMENT}
+        draftQuestion="从 Dashboard 传入的推荐问题"
+        onDraftQuestionConsumed={onConsumed}
+        onJumpToCitation={() => undefined}
+      />,
+    );
+
+    expect(screen.getByLabelText("向当前文献提问")).toHaveValue("从 Dashboard 传入的推荐问题");
+    expect(onConsumed).toHaveBeenCalled();
   });
 
   it("flags local-model fallback answers distinctly", async () => {

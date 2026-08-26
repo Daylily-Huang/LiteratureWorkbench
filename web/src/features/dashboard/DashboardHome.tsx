@@ -5,6 +5,7 @@ type DashboardHomeProps = {
   documents: DocumentListItem[];
   onOpenDocument(documentId: string): void;
   onAskQuestion?(question: string): void;
+  onTriggerImport?(): void;
 };
 
 const DEFAULT_QUESTIONS = [
@@ -25,6 +26,7 @@ export function DashboardHome({
   documents,
   onOpenDocument,
   onAskQuestion,
+  onTriggerImport,
 }: DashboardHomeProps) {
   const [questionSet, setQuestionSet] = useState<0 | 1>(0);
 
@@ -36,6 +38,8 @@ export function DashboardHome({
   function handleStartReading() {
     if (primaryDoc) {
       onOpenDocument(primaryDoc.document_id);
+    } else if (onTriggerImport) {
+      onTriggerImport();
     }
   }
 
@@ -66,7 +70,7 @@ export function DashboardHome({
               onClick={handleStartReading}
               type="button"
             >
-              <span>{primaryDoc ? "继续阅读" : "选择文献阅读"}</span>
+              <span>{primaryDoc ? "继续阅读" : "导入文献开始阅读"}</span>
               <span aria-hidden="true" className="dashboard-hero__arrow">→</span>
             </button>
             <span className="dashboard-hero__badge">
@@ -101,66 +105,75 @@ export function DashboardHome({
                   onClick={() => onOpenDocument(doc.document_id)}
                   type="button"
                 >
-                  <div className="dashboard-reading-item__icon">PDF</div>
+                  <span className="dashboard-reading-item__icon">PDF</span>
                   <div className="dashboard-reading-item__info">
-                    <h4 title={doc.filename}>{doc.filename}</h4>
-                    <p>{doc.relative_folder || "根目录"} · 本地文献</p>
+                    <h4>{doc.filename}</h4>
+                    <p>{doc.relative_folder || "未分类"}</p>
+                    <div className="dashboard-progress">
+                      <div className="dashboard-progress__bar" style={{ width: "65%" }} />
+                    </div>
                   </div>
+                  <span className="dashboard-reading-item__percent">65%</span>
                 </button>
               ))
             ) : (
               <div className="dashboard-empty-card">
-                <p>文献库暂无打开记录</p>
-                <small>请从左侧文献库选择或导入 PDF</small>
+                <p>暂无正在阅读的文献</p>
+                <small>导入文献后将在此处追踪阅读进度</small>
               </div>
             )}
           </div>
         </section>
 
-        {/* Library Stats */}
+        {/* Weekly Reading Goal */}
         <section className="dashboard-card">
           <div className="dashboard-card__header">
-            <h3>文献库概览</h3>
-            <span className="dashboard-card__tag">实时统计</span>
+            <h3>本周阅读目标</h3>
+            <span className="dashboard-card__tag">8 / 12 篇</span>
           </div>
           <div className="dashboard-goal">
             <div className="dashboard-goal__stat">
-              <span className="dashboard-goal__number">
-                {documents.length}
-              </span>
-              <span className="dashboard-goal__total"> 篇文献</span>
+              <span className="dashboard-goal__number">8</span>
+              <span className="dashboard-goal__divider">/</span>
+              <span className="dashboard-goal__total">12 篇精读</span>
             </div>
-            <p className="dashboard-goal__hint">
-              {documents.length === 0
-                ? "尚未导入文献，从左侧文献库或拖拽 PDF 开始"
-                : "选择一篇文献开始阅读，研究助手将为你提供问答支持"}
-            </p>
+            <div className="dashboard-progress dashboard-progress--lg">
+              <div className="dashboard-progress__bar" style={{ width: "67%" }} />
+            </div>
+            <p className="dashboard-goal__hint">距离本周目标还差 4 篇，保持专注！</p>
+            <div className="dashboard-days">
+              {["一", "二", "三", "四", "五", "六", "日"].map((day, idx) => (
+                <div
+                  key={day}
+                  className={`dashboard-day ${idx < 4 ? "dashboard-day--done" : idx === 4 ? "dashboard-day--current" : ""}`}
+                >
+                  <span className="dashboard-day__name">{day}</span>
+                  <span className="dashboard-day__dot">{idx < 4 ? "✓" : "·"}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
-        {/* Research Tips */}
+        {/* Recent Notes */}
         <section className="dashboard-card">
           <div className="dashboard-card__header">
-            <h3>研究助手</h3>
-            <span className="dashboard-card__tag">使用提示</span>
+            <h3>研究与思考笔记</h3>
+            <span className="dashboard-card__tag">最新思考</span>
           </div>
           <div className="dashboard-notes-list">
             <div className="dashboard-note-item">
-              <span className="dashboard-note-item__bullet">💡</span>
+              <span className="dashboard-note-item__bullet">•</span>
               <div className="dashboard-note-item__content">
-                <p>选中 PDF 文字可快速翻译，右侧面板可向 AI 提问</p>
+                <p>“作者关于多模态融合的注意力机制证明了跨模态对齐的鲁棒性……”</p>
+                <time>今天 10:24 · 来自《Multimodal-LLM-Survey.pdf》</time>
               </div>
             </div>
             <div className="dashboard-note-item">
-              <span className="dashboard-note-item__bullet">💡</span>
+              <span className="dashboard-note-item__bullet">•</span>
               <div className="dashboard-note-item__content">
-                <p>在阅读器中可对重点内容添加高亮批注和笔记</p>
-              </div>
-            </div>
-            <div className="dashboard-note-item">
-              <span className="dashboard-note-item__bullet">💡</span>
-              <div className="dashboard-note-item__content">
-                <p>研究助手支持跨文献提问，自动引用原文页码</p>
+                <p>“实验部分的数据集消融实验值得在我们的下一阶段研究中借鉴。”</p>
+                <time>昨天 16:45 · 来自《Deep-Learning-Basics.pdf》</time>
               </div>
             </div>
           </div>
@@ -169,13 +182,13 @@ export function DashboardHome({
 
       {/* Main Grid: Row 2 */}
       <div className="dashboard-grid dashboard-grid--two">
-        {/* Recommended Research Questions */}
+        {/* Recommended Research Prompts */}
         <section className="dashboard-card">
           <div className="dashboard-card__header">
             <h3>推荐研究思考问题</h3>
             <button
               className="dashboard-card__button"
-              onClick={() => setQuestionSet((prev) => (prev === 0 ? 1 : 0))}
+              onClick={() => setQuestionSet((val) => (val === 0 ? 1 : 0))}
               type="button"
             >
               换一批
@@ -189,19 +202,19 @@ export function DashboardHome({
                 onClick={() => handleQuestionClick(q)}
                 type="button"
               >
-                <span className="dashboard-question-pill__num">?</span>
+                <span className="dashboard-question-pill__num">{idx + 1}</span>
                 <span className="dashboard-question-pill__text">{q}</span>
-                <span className="dashboard-question-pill__action">提问 ↗</span>
+                <span className="dashboard-question-pill__action">探讨 →</span>
               </button>
             ))}
           </div>
         </section>
 
-        {/* Literature Overview / Speed Read */}
+        {/* Quick Literature List */}
         <section className="dashboard-card">
           <div className="dashboard-card__header">
             <h3>文献速览</h3>
-            <span className="dashboard-card__tag">库内概览 ({documents.length})</span>
+            <span className="dashboard-card__tag">共 {documents.length} 篇</span>
           </div>
           <div className="dashboard-speedread">
             {documents.slice(0, 4).map((doc) => (
@@ -211,18 +224,18 @@ export function DashboardHome({
                 onClick={() => onOpenDocument(doc.document_id)}
                 type="button"
               >
-                <div className="dashboard-speedread-item__badge">PDF</div>
+                <span className="dashboard-speedread-item__badge">PDF</span>
                 <div className="dashboard-speedread-item__body">
                   <h5>{doc.filename}</h5>
-                  <p>{doc.relative_folder ? `/${doc.relative_folder}` : "本地文献"}</p>
+                  <p>{doc.relative_folder || "未分类"}</p>
                 </div>
-                <span className="dashboard-speedread-item__arrow">→</span>
+                <span className="dashboard-speedread-item__arrow">›</span>
               </button>
             ))}
             {documents.length === 0 && (
               <div className="dashboard-empty-card">
-                <p>暂无导入的文献</p>
-                <small>支持点击或拖拽 PDF 文件导入本地库</small>
+                <p>文献库暂无文档</p>
+                <small>拖拽 PDF 到左侧或点击导入开始建立文献库</small>
               </div>
             )}
           </div>

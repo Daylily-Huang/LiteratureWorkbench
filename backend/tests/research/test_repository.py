@@ -6,7 +6,6 @@ from literature_workbench.db.database import Database
 from literature_workbench.features.research.chunker import RagChunk, chunk_pages
 from literature_workbench.features.research.repository import RagChunkRepository
 
-
 CONTENT = "a" * 64
 
 
@@ -14,14 +13,17 @@ def _chunks(*texts: str) -> list[RagChunk]:
     return [RagChunk(1, index, text) for index, text in enumerate(texts)]
 
 
-def test_read_current_pages_returns_reading_order(research_db: Database) -> None:
+def test_read_pages_returns_reading_order_bound_to_parse_run(research_db: Database) -> None:
     pages = [make_page(1, ["first page"]), make_page(2, ["second page"])]
-    publish_pages(research_db, CONTENT, pages)
+    run_id = publish_pages(research_db, CONTENT, pages)
     repository = RagChunkRepository(research_db)
-    current = repository.read_current_pages(CONTENT)
+    current = repository.read_pages(CONTENT, run_id)
     assert [page.physical_page for page in current] == [1, 2]
     assert current[0].blocks[0].text == "first page"
     assert current[1].normalized_text == "second page"
+
+    # Reading an unassociated parse_run returns empty
+    assert repository.read_pages(CONTENT, "non-existent-run") == []
 
 
 def test_rebuild_replaces_previous_chunks_atomically(research_db: Database) -> None:
@@ -59,9 +61,9 @@ def test_search_filters_by_content(research_db: Database) -> None:
 
 
 def test_chunk_pages_integration_with_published_pages(research_db: Database) -> None:
-    publish_pages(research_db, CONTENT, [make_page(1, ["Annamites " * 200]), make_page(2, ["short"])])
+    run_id = publish_pages(research_db, CONTENT, [make_page(1, ["Annamites " * 200]), make_page(2, ["short"])])
     repository = RagChunkRepository(research_db)
-    pages = repository.read_current_pages(CONTENT)
+    pages = repository.read_pages(CONTENT, run_id)
     chunks = chunk_pages(pages, max_chars=1000)
     assert all(chunk.physical_page in (1, 2) for chunk in chunks)
     assert any("Annamites" in chunk.text for chunk in chunks)

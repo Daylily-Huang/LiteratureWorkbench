@@ -21,7 +21,7 @@ from conftest import make_page, publish_pages
 
 @dataclass(slots=True)
 class FakeDeepSeek:
-    result: str = "Alpha means the first letter [p1]."
+    result: str = "Alpha means the first letter [r1 p1]."
     error_sequence: list[str | None] | None = None
     result_sequence: list[str] | None = None
     calls: list[str] = field(default_factory=list)
@@ -60,7 +60,7 @@ class FakeQwenProcess:
 
 @dataclass(slots=True)
 class FakeQwen:
-    result: str = "本地回答 [p1]"
+    result: str = "本地回答 [r1 p1]"
     calls: list[str] = field(default_factory=list)
 
     def translate(self, prompt: str) -> str:
@@ -74,14 +74,17 @@ def _seed_document(
     content_id: str,
     page_texts: list[list[str]] | None = None,
     publish: bool = True,
+    status: str = "valid_pdf",
+    library_status: str = "active",
 ) -> str:
     """Seed library + document; optionally publish a parse run with pages."""
     now = datetime.now(UTC).isoformat()
     document_id = str(uuid4())
+    library_id = str(uuid4())
     with database.transaction() as connection:
         connection.execute(
-            "INSERT INTO libraries VALUES(?,?,?,?,?,1,'monitored',1,'test','active',?,?)",
-            (str(uuid4()), "/library", "/library", "vol", "root", now, now),
+            "INSERT INTO libraries VALUES(?,?,?,?,?,1,'monitored',1,'test',?,?,?)",
+            (library_id, f"/library_{library_id}", f"/library_{library_id}", "vol", "root", library_status, now, now),
         )
     if publish:
         pages = [
@@ -104,14 +107,15 @@ def _seed_document(
                  id,library_id,content_sha256,path,path_key,display_name,format,size_bytes,
                  mtime_ns,volume_id,file_id,hard_link_count,parse_preference,
                  auto_cloud_eligible,authorization_source,status,created_at,updated_at)
-                 SELECT ?,id,?,?,?,'paper.pdf','pdf',12,1,'vol','file',1,'parse',1,
-                        'registered_library','valid_pdf',?,?
-                 FROM libraries LIMIT 1""",
+                 VALUES(?,?,?,?,?,'paper.pdf','pdf',12,1,'vol','file',1,'parse',1,
+                        'registered_library',?,?,?)""",
             (
                 document_id,
+                library_id,
                 content_id,
                 f"/library/{document_id}.pdf",
                 f"/library/{document_id}.pdf",
+                status,
                 now,
                 now,
             ),
@@ -143,7 +147,7 @@ def test_ask_returns_deepseek_answer_with_page_citations(research_db: Database) 
         content_id="d" * 64,
         page_texts=[["Alpha beta gamma delta"], ["Epsilon zeta eta theta"]],
     )
-    deepseek = FakeDeepSeek(result="Alpha is on page one [p1].")
+    deepseek = FakeDeepSeek(result="Alpha is on page one [r1 p1].")
 
     answer = _service(research_db, deepseek).ask(
         document_id=document_id, question="What is alpha?"
@@ -152,12 +156,76 @@ def test_ask_returns_deepseek_answer_with_page_citations(research_db: Database) 
     assert answer.provider == "deepseek"
     assert answer.model == "deepseek-v4-flash"
     assert answer.fallback_reason is None
+    assert answer.citation_status == "verified"
     assert [citation.physical_page for citation in answer.citations] == [1]
     assert "Alpha" in answer.citations[0].excerpt
     assert answer.citations[0].rects == ((10, 20, 300, 80),)
     assert len(deepseek.calls) == 1
-    assert "[p1]" in deepseek.calls[0]
+    assert "[r1 p1]" in deepseek.calls[0]
     assert "<question>" in deepseek.calls[0]
+
+
+def test_ask_distinguishes_multiple_chunks_on_same_page(research_db: Database) -> None:
+    # Page 1 contains two long paragraphs that exceed max_chars and form two separate chunks on page 1
+    long_para_1 = "Alpha discovery details: " + ("scientific background " * 75)
+    long_para_2 = "Alpha conclusion summary: " + ("verified experimentally " * 75)
+    document_id = _seed_document(
+        research_db,
+        content_id="c" * 64,
+        page_texts=[[long_para_1, long_para_2]],
+    )
+    # Model cites only fragment 2 on page 1: [r2 p1]
+    deepseek = FakeDeepSeek(result="According to the study [r2 p1], the conclusion was verified.")
+
+    answer = _service(research_db, deepseek).ask(
+        document_id=document_id, question="What is alpha?"
+    )
+
+    assert len(answer.citations) == 1
+    assert answer.citation_status == "verified"
+    assert answer.citations[0].physical_page == 1
+    # Must match the second chunk's excerpt, not the first chunk
+    assert "conclusion" in answer.citations[0].excerpt
+
+
+def test_ask_returns_empty_citations_when_model_does_not_cite(research_db: Database) -> None:
+    document_id = _seed_document(
+        research_db,
+        content_id="e0" * 32,
+        page_texts=[["Alpha beta gamma delta"]],
+    )
+    # Model returns answer with NO citation marks at all
+    deepseek = FakeDeepSeek(result="Alpha is a well-known scientific concept.")
+
+    answer = _service(research_db, deepseek).ask(
+        document_id=document_id, question="What is alpha?"
+    )
+
+    assert answer.provider == "deepseek"
+    assert answer.citations == []
+    assert answer.citation_status == "missing"
+
+
+def test_ask_rejects_missing_or_inactive_document(research_db: Database) -> None:
+    missing_doc = _seed_document(
+        research_db,
+        content_id="m" * 64,
+        status="missing",
+    )
+    with pytest.raises(ResearchError, match="document_not_found"):
+        _service(research_db, FakeDeepSeek()).ask(
+            document_id=missing_doc, question="What is alpha?"
+        )
+
+    inactive_lib_doc = _seed_document(
+        research_db,
+        content_id="i" * 64,
+        library_status="inactive",
+    )
+    with pytest.raises(ResearchError, match="document_not_found"):
+        _service(research_db, FakeDeepSeek()).ask(
+            document_id=inactive_lib_doc, question="What is alpha?"
+        )
 
 
 def test_ask_retries_once_on_transient_deepseek_error(research_db: Database) -> None:
@@ -180,7 +248,7 @@ def test_ask_falls_back_to_qwen_when_enabled_and_deepseek_fails(
     deepseek = FakeDeepSeek(
         error_sequence=["deepseek_transport_failed", "deepseek_transport_failed"]
     )
-    qwen = FakeQwen(result="本地回答 [p1]")
+    qwen = FakeQwen(result="本地回答 [r1 p1]")
     qwen_process = FakeQwenProcess()
 
     answer = _service(research_db, deepseek, qwen, qwen_process).ask(
@@ -189,7 +257,6 @@ def test_ask_falls_back_to_qwen_when_enabled_and_deepseek_fails(
 
     assert answer.provider == "qwen"
     assert answer.fallback_reason == "deepseek_transport_failed"
-    # One initial attempt plus the single retry, both audited by the gateway.
     assert len(deepseek.calls) == 2
     assert qwen_process.calls == 1
     assert len(qwen.calls) == 1
@@ -233,6 +300,7 @@ def test_ask_without_hits_returns_canned_answer_without_provider_call(
 
     assert answer.provider == "retrieval_only"
     assert answer.citations == []
+    assert answer.citation_status == "missing"
     assert answer.answer
     assert deepseek.calls == []
     assert qwen.calls == []
@@ -288,7 +356,7 @@ def test_ask_expands_cjk_question_through_deepseek(research_db: Database) -> Non
         page_texts=[["Alpha beta gamma delta"], ["Epsilon zeta eta theta"]],
     )
     deepseek = FakeDeepSeek(
-        result_sequence=["alpha, beta", "阿尔法就是 alpha [p1]"]
+        result_sequence=["alpha, beta", "阿尔法就是 alpha [r1 p1]"]
     )
 
     answer = _service(research_db, deepseek).ask(
@@ -296,12 +364,11 @@ def test_ask_expands_cjk_question_through_deepseek(research_db: Database) -> Non
     )
 
     assert answer.provider == "deepseek"
-    assert answer.answer == "阿尔法就是 alpha [p1]"
+    assert answer.answer == "阿尔法就是 alpha [r1 p1]"
     assert [citation.physical_page for citation in answer.citations] == [1]
-    # First call expands the query; second call answers with the hits.
     assert deepseek.purposes == ["research_query_expansion", "research_question"]
     assert "阿尔法是什么意思？" in deepseek.calls[0]
-    assert "[p1]" in deepseek.calls[1]
+    assert "[r1 p1]" in deepseek.calls[1]
 
 
 def test_ask_uses_leading_chunks_for_overview_questions(research_db: Database) -> None:
@@ -311,7 +378,7 @@ def test_ask_uses_leading_chunks_for_overview_questions(research_db: Database) -
         page_texts=[["Alpha beta gamma delta"], ["Epsilon zeta eta theta"]],
     )
     deepseek = FakeDeepSeek(
-        result_sequence=["OVERVIEW", "本文研究了 alpha [p1]"]
+        result_sequence=["OVERVIEW", "本文研究了 alpha [r1 p1]"]
     )
 
     answer = _service(research_db, deepseek).ask(
@@ -320,8 +387,7 @@ def test_ask_uses_leading_chunks_for_overview_questions(research_db: Database) -
 
     assert answer.provider == "deepseek"
     assert deepseek.purposes == ["research_query_expansion", "research_question"]
-    # Overview fragments come from the document's leading pages.
-    assert "[p1]" in deepseek.calls[1]
+    assert "[r1 p1]" in deepseek.calls[1]
     assert "Alpha beta" in deepseek.calls[1]
     assert [citation.physical_page for citation in answer.citations] == [1]
 
@@ -359,8 +425,6 @@ def test_ask_skips_expansion_in_local_only_mode(research_db: Database) -> None:
         document_id=document_id, question="阿尔法是什么意思？"
     )
 
-    # Nothing may leave the machine in local_only mode, so the canned
-    # answer is returned without any expansion or provider call.
     assert answer.provider == "retrieval_only"
     assert deepseek.calls == []
     assert qwen.calls == []

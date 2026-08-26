@@ -57,14 +57,12 @@ export function LibraryPanel({
   const confirming = useRef(false);
 
   function putDocuments(next: DocumentListItem[]) {
-    setDocuments((current) => {
-      const updated = sameDocuments(current, next) ? current : next;
-      if (updated !== current && onDocumentsLoaded) {
-        onDocumentsLoaded(updated);
-      }
-      return updated;
-    });
+    setDocuments((current) => (sameDocuments(current, next) ? current : next));
   }
+
+  useEffect(() => {
+    onDocumentsLoaded?.(documents);
+  }, [documents, onDocumentsLoaded]);
 
   function putTask(task: ImportTask) {
     setTasks((current) => [task, ...current.filter((item) => item.intent_id !== task.intent_id)]);
@@ -279,24 +277,22 @@ export function LibraryPanel({
       </label>
 
       {/* Quick Category Views */}
-      <div className="library-categories" role="tablist" aria-label="文献分类">
+      <div aria-label="文献分类" className="library-categories" role="group">
         <button
+          aria-pressed={category === "all"}
           className={`library-category-item ${category === "all" ? "library-category-item--active" : ""}`}
           onClick={() => setCategory("all")}
           type="button"
-          role="tab"
-          aria-selected={category === "all"}
         >
           <span className="library-category-item__icon">📚</span>
           <span className="library-category-item__label">全部文献</span>
           <span className="library-category-item__count">{documents.length}</span>
         </button>
         <button
+          aria-pressed={category === "unclassified"}
           className={`library-category-item ${category === "unclassified" ? "library-category-item--active" : ""}`}
           onClick={() => setCategory("unclassified")}
           type="button"
-          role="tab"
-          aria-selected={category === "unclassified"}
         >
           <span className="library-category-item__icon">📁</span>
           <span className="library-category-item__label">未分类</span>

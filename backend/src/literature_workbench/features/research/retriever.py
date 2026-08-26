@@ -10,6 +10,7 @@ short CJK windows.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 
@@ -96,16 +97,43 @@ def build_match_query(question: str) -> str | None:
 
 
 def rects_from_json(raw: str | None) -> tuple[BBox, ...]:
-    if not raw:
+    if not raw or not isinstance(raw, str):
         return ()
     try:
         value = json.loads(raw)
-    except ValueError:
+    except (ValueError, TypeError):
+        return ()
+    if not isinstance(value, list):
         return ()
     rects: list[BBox] = []
-    for item in value if isinstance(value, list) else []:
-        if isinstance(item, list) and len(item) == 4:
-            rects.append((int(item[0]), int(item[1]), int(item[2]), int(item[3])))
+    for item in value:
+        if not (isinstance(item, (list, tuple)) and len(item) == 4):
+            continue
+        try:
+            x0_f = float(item[0])
+            y0_f = float(item[1])
+            x1_f = float(item[2])
+            y1_f = float(item[3])
+            if (
+                math.isnan(x0_f)
+                or math.isnan(y0_f)
+                or math.isnan(x1_f)
+                or math.isnan(y1_f)
+                or math.isinf(x0_f)
+                or math.isinf(y0_f)
+                or math.isinf(x1_f)
+                or math.isinf(y1_f)
+            ):
+                continue
+            x0 = int(round(x0_f))
+            y0 = int(round(y0_f))
+            x1 = int(round(x1_f))
+            y1 = int(round(y1_f))
+        except (ValueError, TypeError, OverflowError):
+            continue
+        if x0 < 0 or y0 < 0 or x1 <= x0 or y1 <= y0:
+            continue
+        rects.append((x0, y0, x1, y1))
     return tuple(rects)
 
 

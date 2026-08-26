@@ -34,7 +34,7 @@ class StubResearchService:
 
 def _answer() -> ResearchAnswer:
     return ResearchAnswer(
-        answer="Alpha is the first letter [p1].",
+        answer="Alpha is the first letter [r1 p1].",
         citations=[
             ResearchCitation(
                 physical_page=1,
@@ -44,6 +44,7 @@ def _answer() -> ResearchAnswer:
         ],
         provider="deepseek",
         model="deepseek-v4-flash",
+        citation_status="verified",
     )
 
 
@@ -60,13 +61,14 @@ def test_ask_returns_answer_body(client: TestClient, authenticated) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["answer"] == "Alpha is the first letter [p1]."
+    assert body["answer"] == "Alpha is the first letter [r1 p1]."
     assert body["citations"] == [
         {"physical_page": 1, "excerpt": "Alpha beta gamma", "rects": [[10, 20, 300, 80]]}
     ]
     assert body["provider"] == "deepseek"
     assert body["model"] == "deepseek-v4-flash"
     assert body["fallback_reason"] is None
+    assert body["citation_status"] == "verified"
     assert stub.calls == [(document_id, "What is alpha?")]
 
 
@@ -135,6 +137,7 @@ def test_ask_without_retrieval_hits_returns_canned_answer(
     body = response.json()
     assert body["provider"] == "retrieval_only"
     assert body["citations"] == []
+    assert body["citation_status"] == "missing"
     assert body["answer"]
 
 
@@ -209,7 +212,7 @@ def test_library_ask_returns_attributed_citations(
             if self.calls is not None:
                 self.calls.append(question)
             return LibraryAnswer(
-                answer="库里有alpha [d1 p1]",
+                answer="库里有alpha [d1 r1 p1]",
                 citations=[
                     LibraryCitation(
                         document_id="doc-1",
@@ -222,6 +225,7 @@ def test_library_ask_returns_attributed_citations(
                 provider="deepseek",
                 model="deepseek-v4-flash",
                 indexed_documents=3,
+                citation_status="verified",
             )
 
     stub = StubLibraryService(calls=[])
@@ -235,7 +239,7 @@ def test_library_ask_returns_attributed_citations(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["answer"] == "库里有alpha [d1 p1]"
+    assert body["answer"] == "库里有alpha [d1 r1 p1]"
     assert body["citations"] == [
         {
             "document_id": "doc-1",
@@ -248,6 +252,7 @@ def test_library_ask_returns_attributed_citations(
     assert body["provider"] == "deepseek"
     assert body["fallback_reason"] is None
     assert body["indexed_documents"] == 3
+    assert body["citation_status"] == "verified"
     assert stub.calls == ["库里有alpha吗？"]
 
 
@@ -265,6 +270,7 @@ def test_library_ask_empty_library_returns_canned_answer(
     body = response.json()
     assert body["provider"] == "retrieval_only"
     assert body["citations"] == []
+    assert body["citation_status"] == "missing"
     assert body["indexed_documents"] == 0
 
 

@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
+import { isValidPdfRect, type PdfRect } from "../reader/CitationHighlight";
 import type { ReaderDocument } from "../reader/PdfReader";
 
 
@@ -8,7 +9,7 @@ type Fetcher = typeof fetch;
 export type ResearchCitation = {
   physical_page: number;
   excerpt: string;
-  rects: number[][];
+  rects: readonly PdfRect[];
 };
 
 export type LibraryCitation = {
@@ -16,19 +17,20 @@ export type LibraryCitation = {
   display_name: string;
   physical_page: number;
   excerpt: string;
-  rects: number[][];
+  rects: readonly PdfRect[];
 };
 
-type DocumentAnswer = {
+export type DocumentAnswer = {
   scope: "document";
   answer: string;
   citations: ResearchCitation[];
   provider: string;
   model: string;
   fallback_reason: string | null;
+  citation_status?: "verified" | "missing";
 };
 
-type LibraryAnswer = {
+export type LibraryAnswer = {
   scope: "library";
   answer: string;
   citations: LibraryCitation[];
@@ -36,12 +38,13 @@ type LibraryAnswer = {
   model: string;
   fallback_reason: string | null;
   indexed_documents: number;
+  citation_status?: "verified" | "missing";
 };
 
-type Answer = DocumentAnswer | LibraryAnswer;
+export type Answer = DocumentAnswer | LibraryAnswer;
 
 type Scope = "document" | "library";
-type AssistantMode = "qa" | "summary" | "translate" | "inspiration";
+type AssistantMode = "qa" | "summary" | "inspiration";
 
 type AssistantPanelProps = {
   document: ReaderDocument | null;
@@ -50,14 +53,19 @@ type AssistantPanelProps = {
   onOpenSettings?(): void;
   fetcher?: Fetcher;
   initialQuestion?: string;
+  draftQuestion?: string;
+  onDraftQuestionConsumed?(): void;
 };
 
 
 const MAX_QUESTION_CHARS = 2000;
 
 
-async function csrf(fetcher: Fetcher): Promise<string> {
-  const response = await fetcher("/api/session/current", { credentials: "same-origin" });
+async function csrf(fetcher: Fetcher, signal?: AbortSignal): Promise<string> {
+  const response = await fetcher("/api/session/current", {
+    credentials: "same-origin",
+    signal,
+  });
   if (!response.ok) throw new Error("session_unavailable");
   const value = await response.json() as { csrf_token: string };
   return value.csrf_token;
@@ -77,6 +85,108 @@ export function assistantErrorMessage(code: string | null | undefined): string {
     qwen_failed: "本地模型暂时不可用",
   };
   return known[code ?? ""] ?? "回答失败，请重试";
+}
+
+
+function parseResearchCitation(item: unknown): ResearchCitation | null {
+  if (!item || typeof item !== "object") return null;
+  const obj = item as Record<string, unknown>;
+  if (typeof obj.physical_page !== "number" || !Number.isInteger(obj.physical_page) || obj.physical_page < 1) {
+    return null;
+  }
+  if (typeof obj.excerpt !== "string") return null;
+  const rawRects = Array.isArray(obj.rects) ? obj.rects : [];
+  const rects: PdfRect[] = [];
+  for (const r of rawRects) {
+    if (isValidPdfRect(r)) rects.push(r);
+  }
+  return {
+    physical_page: obj.physical_page,
+    excerpt: obj.excerpt,
+    rects,
+  };
+}
+
+
+function parseLibraryCitation(item: unknown): LibraryCitation | null {
+  if (!item || typeof item !== "object") return null;
+  const obj = item as Record<string, unknown>;
+  if (typeof obj.document_id !== "string" || !obj.document_id) return null;
+  if (typeof obj.display_name !== "string") return null;
+  if (typeof obj.physical_page !== "number" || !Number.isInteger(obj.physical_page) || obj.physical_page < 1) {
+    return null;
+  }
+  if (typeof obj.excerpt !== "string") return null;
+  const rawRects = Array.isArray(obj.rects) ? obj.rects : [];
+  const rects: PdfRect[] = [];
+  for (const r of rawRects) {
+    if (isValidPdfRect(r)) rects.push(r);
+  }
+  return {
+    document_id: obj.document_id,
+    display_name: obj.display_name,
+    physical_page: obj.physical_page,
+    excerpt: obj.excerpt,
+    rects,
+  };
+}
+
+
+function parseDocumentResponse(data: unknown): DocumentAnswer | null {
+  if (!data || typeof data !== "object") return null;
+  const obj = data as Record<string, unknown>;
+  if (typeof obj.answer !== "string") return null;
+  if (typeof obj.provider !== "string") return null;
+  if (typeof obj.model !== "string") return null;
+  const fallback_reason = typeof obj.fallback_reason === "string" ? obj.fallback_reason : null;
+  const rawCitations = Array.isArray(obj.citations) ? obj.citations : [];
+  const citations: ResearchCitation[] = [];
+  for (const c of rawCitations) {
+    const parsed = parseResearchCitation(c);
+    if (parsed) citations.push(parsed);
+  }
+  const citation_status = obj.citation_status === "missing" || obj.citation_status === "verified"
+    ? obj.citation_status
+    : undefined;
+  return {
+    scope: "document",
+    answer: obj.answer,
+    citations,
+    provider: obj.provider,
+    model: obj.model,
+    fallback_reason,
+    citation_status,
+  };
+}
+
+
+function parseLibraryResponse(data: unknown): LibraryAnswer | null {
+  if (!data || typeof data !== "object") return null;
+  const obj = data as Record<string, unknown>;
+  if (typeof obj.answer !== "string") return null;
+  if (typeof obj.provider !== "string") return null;
+  if (typeof obj.model !== "string") return null;
+  const fallback_reason = typeof obj.fallback_reason === "string" ? obj.fallback_reason : null;
+  const indexed_documents = typeof obj.indexed_documents === "number" ? obj.indexed_documents : 0;
+  const rawCitations = Array.isArray(obj.citations) ? obj.citations : [];
+  const citations: LibraryCitation[] = [];
+  for (const c of rawCitations) {
+    const parsed = parseLibraryCitation(c);
+    if (parsed) citations.push(parsed);
+  }
+  const citation_status = obj.citation_status === "missing" || obj.citation_status === "verified"
+    ? obj.citation_status
+    : undefined;
+  return {
+    scope: "library",
+    answer: obj.answer,
+    citations,
+    provider: obj.provider,
+    model: obj.model,
+    fallback_reason,
+    indexed_documents,
+    citation_status,
+  };
 }
 
 
@@ -104,6 +214,8 @@ export function AssistantPanel({
   onOpenSettings,
   fetcher = fetch,
   initialQuestion = "",
+  draftQuestion,
+  onDraftQuestionConsumed,
 }: AssistantPanelProps) {
   const [question, setQuestion] = useState(initialQuestion);
   const [scope, setScope] = useState<Scope>("document");
@@ -111,6 +223,39 @@ export function AssistantPanel({
   const [busy, setBusy] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
+
+  const requestIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const prevDocumentIdRef = useRef<string | null>(readerDocument?.documentId ?? null);
+
+  // Sync draft question from parent (e.g. Dashboard)
+  useEffect(() => {
+    if (draftQuestion && draftQuestion.trim()) {
+      setQuestion(draftQuestion);
+      onDraftQuestionConsumed?.();
+    }
+  }, [draftQuestion, onDraftQuestionConsumed]);
+
+  // Cancel in-flight requests and clear state on document switch
+  useEffect(() => {
+    const currentDocId = readerDocument?.documentId ?? null;
+    if (prevDocumentIdRef.current !== currentDocId) {
+      prevDocumentIdRef.current = currentDocId;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      requestIdRef.current++;
+      setBusy(false);
+      setAnswer(null);
+      setErrorCode(null);
+    }
+  }, [readerDocument?.documentId]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   // No document open: only the library scope is meaningful, so it wins.
   const effectiveScope: Scope = readerDocument === null ? "library" : scope;
@@ -121,36 +266,71 @@ export function AssistantPanel({
     if (event) event.preventDefault();
     const queryToAsk = (customQuery ?? trimmed).trim();
     if (!queryToAsk || busy) return;
+
+    const requestId = ++requestIdRef.current;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setBusy(true);
     setErrorCode(null);
+
     try {
-      const token = await csrf(fetcher);
+      const token = await csrf(fetcher, controller.signal);
+      if (requestId !== requestIdRef.current) return;
+
       const url = effectiveScope === "library"
         ? "/api/libraries/ask"
         : `/api/documents/${readerDocument?.documentId ?? ""}/ask`;
+
       const response = await fetcher(url, {
         method: "POST",
         credentials: "same-origin",
+        signal: controller.signal,
         headers: { "Content-Type": "application/json", "X-LW-CSRF": token },
         body: JSON.stringify({ question: queryToAsk }),
       });
-      const value = await response.json() as (
-        Omit<DocumentAnswer, "scope"> & Omit<LibraryAnswer, "scope"> & { code?: string }
-      );
+
+      if (requestId !== requestIdRef.current) return;
+
+      const rawJson: unknown = await response.json();
+      if (requestId !== requestIdRef.current) return;
+
       if (!response.ok) {
         setAnswer(null);
-        setErrorCode(value.code ?? "research_failed");
+        const code = rawJson && typeof rawJson === "object" && "code" in rawJson && typeof (rawJson as { code: unknown }).code === "string"
+          ? (rawJson as { code: string }).code
+          : "research_failed";
+        setErrorCode(code);
         return;
       }
-      setAnswer({ ...value, scope: effectiveScope } as Answer);
-      if (value.provider === "deepseek") {
+
+      const parsedAnswer = effectiveScope === "library"
+        ? parseLibraryResponse(rawJson)
+        : parseDocumentResponse(rawJson);
+
+      if (!parsedAnswer) {
+        setAnswer(null);
+        setErrorCode("research_failed");
+        return;
+      }
+
+      setAnswer(parsedAnswer);
+      if (parsedAnswer.provider === "deepseek") {
         window.dispatchEvent(new Event("deepseek-usage-updated"));
       }
-    } catch {
-      setAnswer(null);
-      setErrorCode("research_failed");
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+      if (requestId === requestIdRef.current) {
+        setAnswer(null);
+        setErrorCode("research_failed");
+      }
     } finally {
-      setBusy(false);
+      if (requestId === requestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 
@@ -176,49 +356,34 @@ export function AssistantPanel({
         )}
       </div>
 
-      {/* Mode Tabs */}
-      <div className="assistant-mode-tabs" role="tablist" aria-label="助手模式">
+      {/* Mode Group */}
+      <div aria-label="助手模式" className="assistant-mode-tabs" role="group">
         <button
+          aria-pressed={mode === "qa"}
           className={`assistant-mode-tab ${mode === "qa" ? "assistant-mode-tab--active" : ""}`}
           onClick={() => setMode("qa")}
-          role="tab"
-          aria-selected={mode === "qa"}
           type="button"
         >
           问答
         </button>
         <button
+          aria-pressed={mode === "summary"}
           className={`assistant-mode-tab ${mode === "summary" ? "assistant-mode-tab--active" : ""}`}
           onClick={() => {
             setMode("summary");
             setQuestion("请用学术严谨的语言总结本文的核心研究问题、主要方法、关键实验结果与结论。");
           }}
-          role="tab"
-          aria-selected={mode === "summary"}
           type="button"
         >
           总结
         </button>
         <button
-          className={`assistant-mode-tab ${mode === "translate" ? "assistant-mode-tab--active" : ""}`}
-          onClick={() => {
-            setMode("translate");
-            setQuestion("请将选中的学术段落翻译为地道、准确的中文学术表达。");
-          }}
-          role="tab"
-          aria-selected={mode === "translate"}
-          type="button"
-        >
-          翻译
-        </button>
-        <button
+          aria-pressed={mode === "inspiration"}
           className={`assistant-mode-tab ${mode === "inspiration" ? "assistant-mode-tab--active" : ""}`}
           onClick={() => {
             setMode("inspiration");
             setQuestion("基于当前文献，有哪些值得深入探索的新课题或交叉方向？");
           }}
-          role="tab"
-          aria-selected={mode === "inspiration"}
           type="button"
         >
           灵感
@@ -315,6 +480,13 @@ export function AssistantPanel({
             )}
           </div>
           <p className="assistant-answer__text">{answer.answer}</p>
+
+          {answer.citation_status === "missing" && (
+            <p className="assistant-answer__missing-hint" role="note">
+              回答未生成可验证的原文引用，请核对原文。
+            </p>
+          )}
+
           {answer.citations.length > 0 && (
             <div aria-label="引用来源" className="assistant-citations">
               <span className="assistant-citations__title">引用来源:</span>
@@ -322,7 +494,7 @@ export function AssistantPanel({
                 ? answer.citations.map((citation) => (
                   <button
                     className="assistant-citation"
-                    key={`${citation.document_id}:${citation.physical_page}`}
+                    key={`${citation.document_id}:${citation.physical_page}:${citation.excerpt.slice(0, 20)}`}
                     onClick={() => onJumpToLibraryCitation?.(citation)}
                     title={citation.excerpt}
                     type="button"
@@ -330,10 +502,10 @@ export function AssistantPanel({
                     《{citation.display_name}》第 {citation.physical_page} 页
                   </button>
                 ))
-                : answer.citations.map((citation) => (
+                : answer.citations.map((citation, cIdx) => (
                   <button
                     className="assistant-citation"
-                    key={citation.physical_page}
+                    key={`${citation.physical_page}:${cIdx}`}
                     onClick={() => onJumpToCitation(citation)}
                     title={citation.excerpt}
                     type="button"

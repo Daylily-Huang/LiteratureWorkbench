@@ -23,7 +23,7 @@ from conftest import make_page, publish_pages
 
 @dataclass(slots=True)
 class FakeDeepSeek:
-    result: str = "Alpha means the first letter [d1 p1]."
+    result: str = "Alpha means the first letter [d1 r1 p1]."
     error_sequence: list[str | None] | None = None
     result_sequence: list[str] | None = None
     calls: list[str] = field(default_factory=list)
@@ -62,7 +62,7 @@ class FakeQwenProcess:
 
 @dataclass(slots=True)
 class FakeQwen:
-    result: str = "本地回答 [d1 p1]"
+    result: str = "本地回答 [d1 r1 p1]"
     calls: list[str] = field(default_factory=list)
 
     def translate(self, prompt: str) -> str:
@@ -145,7 +145,7 @@ def test_ask_library_indexes_parsed_documents_and_answers(
     )
     repository = RagChunkRepository(research_db)
     assert repository.indexed_content_count() == 0
-    deepseek = FakeDeepSeek(result="Chevrotains were camera-trapped [d1 p1].")
+    deepseek = FakeDeepSeek(result="Chevrotains were camera-trapped [d1 r1 p1].")
 
     answer = _service(research_db, deepseek).ask_library(
         question="What camera trap evidence exists?"
@@ -154,14 +154,15 @@ def test_ask_library_indexes_parsed_documents_and_answers(
     assert answer.provider == "deepseek"
     assert answer.indexed_documents == 2
     assert len(answer.citations) == 1
+    assert answer.citation_status == "verified"
     citation = answer.citations[0]
     assert citation.document_id == first
     assert citation.display_name == "chevrotain.pdf"
     assert citation.physical_page == 1
     assert citation.rects == ((10, 20, 300, 80),)
-    # The prompt carries the document list and the [dN pM] fragments.
+    # The prompt carries the document list and the [dN rM pK] fragments.
     assert "d1: 《chevrotain.pdf》" in deepseek.calls[0]
-    assert "[d1 p1]" in deepseek.calls[0]
+    assert "[d1 r1 p1]" in deepseek.calls[0]
     assert "<documents>" in deepseek.calls[0]
 
 
@@ -180,38 +181,56 @@ def test_ask_library_sweep_reuses_existing_index(research_db: Database) -> None:
     assert repository.indexed_content_count() == 1
 
 
-def test_library_citations_drop_bogus_marks_and_fall_back() -> None:
+def test_library_citations_drop_bogus_marks_and_do_not_fall_back() -> None:
     hits = [
         _library_hit("doc-a", "a.pdf", 1, "First fragment text"),
         _library_hit("doc-b", "b.pdf", 2, "Second fragment text"),
     ]
     _, hits_by_ref = _build_library_prompt("q", hits)
 
-    citations = _library_citations_for("答非所引 [d9 p1] 还有 [d1 p9]", hits_by_ref)
+    citations, status = _library_citations_for("答非所引 [d9 r1 p1] 还有 [d1 r9 p1]", hits_by_ref)
 
-    # Neither mark resolves to a real fragment, so the top two hits stand in.
-    assert [(c.document_id, c.physical_page) for c in citations] == [
-        ("doc-a", 1),
-        ("doc-b", 2),
+    # Invalid marks must NOT fall back to top hits.
+    assert citations == []
+    assert status == "missing"
+
+    valid_citations, valid_status = _library_citations_for("有据可依 [d2 r1 p2]", hits_by_ref)
+    assert [(c.document_id, c.physical_page) for c in valid_citations] == [("doc-b", 2)]
+    assert valid_status == "verified"
+    assert valid_citations[0].display_name == "b.pdf"
+    assert "Second fragment" in valid_citations[0].excerpt
+
+
+def test_library_citations_distinguishes_multiple_chunks_same_doc_and_page() -> None:
+    hits = [
+        _library_hit("doc-a", "a.pdf", 7, "Chunk 1 on page seven", rects=((10, 10, 50, 50),)),
+        _library_hit("doc-a", "a.pdf", 7, "Chunk 2 on page seven", rects=((100, 100, 200, 200),)),
     ]
+    _, hits_by_ref = _build_library_prompt("q", hits)
 
-    citations = _library_citations_for("有据可依 [d2 p2]", hits_by_ref)
-    assert [(c.document_id, c.physical_page) for c in citations] == [("doc-b", 2)]
-    assert citations[0].display_name == "b.pdf"
-    assert "Second fragment" in citations[0].excerpt
+    # Model cites only the second fragment on page 7: [d1 r2 p7]
+    citations, status = _library_citations_for("Only chunk 2 cited [d1 r2 p7]", hits_by_ref)
+    assert len(citations) == 1
+    assert status == "verified"
+    assert citations[0].excerpt == "Chunk 2 on page seven"
+    assert citations[0].rects == ((100, 100, 200, 200),)
 
 
 def _library_hit(
-    document_id: str, display_name: str, page: int, text: str
+    document_id: str,
+    display_name: str,
+    page: int,
+    text: str,
+    rects: tuple[tuple[int, int, int, int], ...] = ((10, 20, 300, 80),),
 ) -> LibraryRetrievalHit:
     return LibraryRetrievalHit(
-        chunk_id=f"{document_id}:{page}",
+        chunk_id=f"{document_id}:{page}:{uuid4()}",
         document_id=document_id,
         display_name=display_name,
         physical_page=page,
         text=text,
         score=1.0,
-        rects=((10, 20, 300, 80),),
+        rects=rects,
     )
 
 
@@ -225,16 +244,16 @@ def test_ask_library_expands_cjk_question_through_deepseek(
         page_texts=[["Alpha beta gamma delta"]],
     )
     deepseek = FakeDeepSeek(
-        result_sequence=["alpha, beta", "阿尔法就是 alpha [d1 p1]"]
+        result_sequence=["alpha, beta", "阿尔法就是 alpha [d1 r1 p1]"]
     )
 
     answer = _service(research_db, deepseek).ask_library(question="阿尔法是什么？")
 
     assert answer.provider == "deepseek"
-    assert answer.answer == "阿尔法就是 alpha [d1 p1]"
+    assert answer.answer == "阿尔法就是 alpha [d1 r1 p1]"
     assert deepseek.purposes == ["research_query_expansion", "research_question"]
     assert "阿尔法是什么？" in deepseek.calls[0]
-    assert "[d1 p1]" in deepseek.calls[1]
+    assert "[d1 r1 p1]" in deepseek.calls[1]
     assert [c.display_name for c in answer.citations] == ["paper.pdf"]
 
 
@@ -248,7 +267,7 @@ def test_ask_library_overview_falls_back_to_abstract_keywords(
         page_texts=[["Abstract: we study alpha particles in detail"]],
     )
     deepseek = FakeDeepSeek(
-        result_sequence=["OVERVIEW", "库里都在研究 alpha [d1 p1]"]
+        result_sequence=["OVERVIEW", "库里都在研究 alpha [d1 r1 p1]"]
     )
 
     answer = _service(research_db, deepseek).ask_library(question="文献库总览")
@@ -257,7 +276,7 @@ def test_ask_library_overview_falls_back_to_abstract_keywords(
     assert deepseek.purposes == ["research_query_expansion", "research_question"]
     # The abstract-keyword fallback retrieved the fragment even though the
     # CJK question has no Latin tokens.
-    assert "[d1 p1]" in deepseek.calls[1]
+    assert "[d1 r1 p1]" in deepseek.calls[1]
     assert "Abstract" in deepseek.calls[1]
 
 
@@ -267,7 +286,7 @@ def test_ask_library_uses_qwen_directly_in_local_only_mode(
     _seed_document(research_db, content_id="6" * 64, display_name="paper.pdf")
     SettingsRepository(research_db).update(default_translation_mode="local_only")
     deepseek = FakeDeepSeek()
-    qwen = FakeQwen(result="本地回答 [d1 p1]")
+    qwen = FakeQwen(result="本地回答 [d1 r1 p1]")
     qwen_process = FakeQwenProcess()
 
     answer = _service(research_db, deepseek, qwen, qwen_process).ask_library(
@@ -291,7 +310,7 @@ def test_ask_library_falls_back_to_qwen_when_deepseek_fails(
     deepseek = FakeDeepSeek(
         error_sequence=["deepseek_transport_failed", "deepseek_transport_failed"]
     )
-    qwen = FakeQwen(result="本地回答 [d1 p1]")
+    qwen = FakeQwen(result="本地回答 [d1 r1 p1]")
 
     answer = _service(research_db, deepseek, qwen).ask_library(
         question="What is alpha?"
@@ -320,6 +339,7 @@ def test_ask_library_without_hits_returns_canned_answer(
 
     assert answer.provider == "retrieval_only"
     assert answer.citations == []
+    assert answer.citation_status == "missing"
     assert answer.indexed_documents == 1
     assert deepseek.calls == []
     assert qwen.calls == []
@@ -334,4 +354,5 @@ def test_ask_library_empty_library_reports_zero_coverage(
 
     assert answer.provider == "retrieval_only"
     assert answer.indexed_documents == 0
+    assert answer.citation_status == "missing"
     assert deepseek.calls == []

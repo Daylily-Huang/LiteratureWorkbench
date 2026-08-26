@@ -18,7 +18,7 @@ import "pdfjs-dist/web/pdf_viewer.css";
 
 import "./pdfWorker";
 import { OcrTextLayer, type OcrBlock } from "./OcrTextLayer";
-import { CitationHighlight } from "./CitationHighlight";
+import { CitationHighlight, type PdfRect } from "./CitationHighlight";
 import { PdfToolbar } from "./PdfToolbar";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { AnnotationOverlay } from "../annotations/AnnotationOverlay";
@@ -57,7 +57,7 @@ export type ReaderDocument = {
 
 export type CitationJump = {
   page: number;
-  rects: number[][];
+  rects: readonly PdfRect[] | number[][];
   nonce: number;
 };
 
@@ -119,7 +119,7 @@ function PdfPage({
   annotations: PdfAnnotation[];
   activeAnnotationId?: string | null;
   annotationBusy?: boolean;
-  citationHighlight?: { rects: number[][]; nonce: number } | null;
+  citationHighlight?: { rects: readonly PdfRect[] | number[][]; nonce: number } | null;
   selectionDragging?: boolean;
   onAnnotateSelection?(
     selected: SelectedText,
@@ -630,6 +630,19 @@ export function PdfReader({
     }
   }
 
+  const annotationsByPage = useMemo(() => {
+    const map = new Map<number, PdfAnnotation[]>();
+    for (const annotation of annotations) {
+      const list = map.get(annotation.page);
+      if (list) {
+        list.push(annotation);
+      } else {
+        map.set(annotation.page, [annotation]);
+      }
+    }
+    return map;
+  }, [annotations]);
+
   if (error) return <p role="alert">PDF 暂时无法打开</p>;
   if (pdf === null) return <p>正在打开 {filename}</p>;
 
@@ -663,7 +676,7 @@ export function PdfReader({
               key={index}
               activeAnnotationId={activeAnnotationId}
               annotationBusy={annotationBusy}
-              annotations={annotations.filter((annotation) => annotation.page === index + 1)}
+              annotations={annotationsByPage.get(index + 1) ?? []}
               citationHighlight={citationHighlight?.page === index + 1 ? citationHighlight : null}
               onAnnotateSelection={onAnnotateSelection}
               onCancelSelection={() => {
