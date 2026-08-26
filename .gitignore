@@ -16,10 +16,12 @@ web/.pytest_cache/
 *.key
 *.pem
 
-# Root-level tool caches.
+# Root-level tool and IDE caches.
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.superpowers/
+.agents/
 tmp/
 
 # Local review artifacts and file-based agent planning logs.
