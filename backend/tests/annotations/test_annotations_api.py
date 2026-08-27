@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -214,5 +215,44 @@ def test_annotation_rejects_stale_document_identity_without_touching_pdf(tmp_pat
         assert response.status_code == 409
         assert response.json() == {"code": "annotation_document_version_conflict"}
         assert _hash(source) == before
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_annotation_crash_journal_recovery(tmp_path: Path) -> None:
+    client, session, source, document_id = _registered_client(tmp_path)
+    try:
+        data_root = tmp_path / "data"
+        backup_root = data_root / ".annotation-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+
+        original_hash = _hash(source)
+        # Create a backup snapshot of original file
+        fake_snapshot = backup_root / "fake_snapshot.pdf"
+        fake_snapshot.write_bytes(source.read_bytes())
+
+        # Simulate corrupted / half-written file on disk
+        source.write_bytes(b"%PDF-corrupted-content")
+        assert _hash(source) != original_hash
+
+        # Write an orphaned crash journal
+        journal_file = backup_root / f"journal-{document_id}.json"
+        journal_file.write_text(
+            json.dumps({
+                "document_id": document_id,
+                "path": str(source),
+                "pre_hash": original_hash,
+                "backup_path": str(fake_snapshot),
+                "created_at": "2026-08-20T00:00:00Z",
+            }),
+            encoding="utf-8",
+        )
+
+        # Trigger recovery
+        client.app.state.annotation_service.reconcile_crashed_mutations()
+
+        # Target file restored to pre-mutation hash and journal cleaned up
+        assert _hash(source) == original_hash
+        assert not journal_file.exists()
     finally:
         client.__exit__(None, None, None)

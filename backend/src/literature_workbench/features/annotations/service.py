@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -89,6 +90,7 @@ class PdfAnnotationService:
         self._library_repository = library_repository
         self._file_inspector = file_inspector
         self._locks = _DocumentLocks()
+        self.reconcile_crashed_mutations()
 
     def list_annotations(self, document_id: UUID) -> dict[str, object]:
         state = self._load_state(document_id)
@@ -285,6 +287,7 @@ class PdfAnnotationService:
             pre_hash = self._verify_current_file(state)
             self._ensure_baseline(state, pre_hash)
             backup = self._create_snapshot(state, pre_hash)
+            journal = self._write_journal(state, pre_hash, backup)
             try:
                 with fitz.open(state.path) as document:
                     if document.is_encrypted or not document.can_save_incrementally():
@@ -307,11 +310,57 @@ class PdfAnnotationService:
                     backup=backup,
                 )
                 self._prune_snapshots(state.document_id)
+                self._clear_journal(journal)
                 return {"annotation_id": annotation_id, **identity}
             except BaseException:
                 if self._hash_file(state.path) != pre_hash:
                     shutil.copy2(backup, state.path)
+                self._clear_journal(journal)
                 raise
+
+    def _write_journal(self, state: DocumentState, pre_hash: str, backup: Path) -> Path:
+        self._backup_root.mkdir(parents=True, exist_ok=True)
+        journal_path = self._backup_root / f"journal-{state.document_id}.json"
+        record = {
+            "document_id": str(state.document_id),
+            "path": str(state.path),
+            "pre_hash": pre_hash,
+            "backup_path": str(backup),
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        journal_path.write_text(json.dumps(record), encoding="utf-8")
+        return journal_path
+
+    def _clear_journal(self, journal_path: Path) -> None:
+        try:
+            journal_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def reconcile_crashed_mutations(self) -> None:
+        if not self._backup_root.is_dir():
+            return
+        for journal_file in self._backup_root.glob("journal-*.json"):
+            try:
+                record = json.loads(journal_file.read_text(encoding="utf-8"))
+                doc_id = record["document_id"]
+                target_path = Path(record["path"])
+                pre_hash = record["pre_hash"]
+                backup_path = Path(record["backup_path"])
+
+                with self._database.connect() as connection:
+                    row = connection.execute(
+                        "SELECT content_sha256 FROM documents WHERE id = ?",
+                        (doc_id,),
+                    ).fetchone()
+                if row is not None and row["content_sha256"] == pre_hash:
+                    if target_path.exists() and backup_path.is_file():
+                        current_hash = self._hash_file(target_path)
+                        if current_hash != pre_hash:
+                            shutil.copy2(backup_path, target_path)
+                journal_file.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def _load_state(self, document_id: UUID) -> DocumentState:
         with self._database.connect() as connection:
