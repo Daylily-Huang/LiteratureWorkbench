@@ -29,20 +29,24 @@ jobs:
           enable-cache: true
 
       - name: Install backend dependencies
+        working-directory: backend
         run: |
-          uv pip install --system -e "./backend[dev]"
+          uv pip install --system -e ".[dev]"
 
       - name: Run Ruff Linter
+        working-directory: backend
         run: |
-          ruff check backend/src backend/tests
+          python -m ruff check src tests
 
       - name: Run Mypy Typechecker
+        working-directory: backend
         run: |
-          mypy backend/src
+          python -m mypy src
 
       - name: Run Pytest Suite
+        working-directory: backend
         run: |
-          pytest backend/tests -m "not live_library and not live_credentials and not live_qwen and not live_v01"
+          python -m pytest tests -m "not live_library and not live_credentials and not live_qwen and not live_v01"
 
   frontend:
     name: Frontend Typecheck, Test & Build
@@ -60,16 +64,20 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: web
-        run: npm ci
+        run: |
+          npm ci
 
-      - name: Run TypeScript typecheck
+      - name: Run TypeScript Checks
         working-directory: web
-        run: npm run typecheck
+        run: |
+          npm run typecheck
 
       - name: Run Vitest Suite
         working-directory: web
-        run: npm test
+        run: |
+          npm test
 
-      - name: Build production bundle
+      - name: Run Production Build
         working-directory: web
-        run: npm run build
+        run: |
+          npm run build

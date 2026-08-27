@@ -7,16 +7,16 @@ A local-first, privacy-focused desktop literature reading, translation, and AI r
 ## 🌟 Features
 
 - **📖 High-Performance PDF Reader**
-  - Continuous scrolling with virtualized neighborhood page rendering.
+  - Continuous scrolling with neighborhood canvas rendering on virtual scroll viewport.
   - Fast mathematical page index computation with zero DOM layout thrashing.
   - Precise text selection overlay, cross-column drag disambiguation, and coordinate-faithful annotation overlays.
   - Native PDF annotation support (highlight, underline, comment) with incremental saving and crash-recovery journaling.
 
 - **🤖 AI Research Assistant & RAG**
   - **Single Document & Whole-Library Q&A**: Fast FTS5 trigram full-text search across documents and corpora with Chinese/English mixed tokenization.
-  - **Trustworthy Fragment Citations**: Strict fragment-level verification (`[pX]`, `[rN:pX]`) with bounded `bbox_1000` flash highlighting and multi-chunk collision disambiguation.
-  - **Harden Prompt Trust Boundary**: Retrieved chunks are strictly separated into untrusted evidence channels using XML tags (`<source_fragment>`).
-  - **Dual-Engine Architecture**: DeepSeek Cloud API with automatic local `Qwen` (llama.cpp) fallback and process management.
+  - **Trustworthy Fragment Citations**: Strict fragment-level verification (`[rN pM]`, `[dN rM pK]`) with bounded `bbox_1000` flash highlighting and multi-chunk collision disambiguation.
+  - **Harden Prompt Trust Boundary**: System instruction (`role=system`) defines the boundary while retrieved evidence is safely demarcated with `<source_fragment>` XML tags.
+  - **Dual-Engine Architecture**: DeepSeek Cloud API with automatic local `Qwen` (llama.cpp) fallback and cross-process lock lifecycle management.
 
 - **🈳 Academic Translation**
   - Inline selection translation with sentence-level context preservation.
