@@ -81,6 +81,28 @@ type PdfReaderProps = ReaderDocument & {
 };
 
 
+export function findCurrentPageIndex(
+  scrollTop: number,
+  viewportHeight: number,
+  basePageSizes: readonly PageSize[],
+  scale: number,
+  gap = 16,
+): number {
+  if (basePageSizes.length === 0) return 0;
+  const targetOffset = scrollTop + viewportHeight / 2;
+  let accumulated = 0;
+  for (let i = 0; i < basePageSizes.length; i++) {
+    const pageHeight = (basePageSizes[i]?.height ?? FALLBACK_PAGE_SIZE.height) * scale;
+    const pageBottom = accumulated + pageHeight + gap;
+    if (targetOffset < pageBottom || i === basePageSizes.length - 1) {
+      return i;
+    }
+    accumulated = pageBottom;
+  }
+  return 0;
+}
+
+
 function renderedPageIndexes(current: number, total: number): number[] {
   const first = Math.max(0, current - PAGE_RENDER_RADIUS);
   const last = Math.min(total - 1, current + PAGE_RENDER_RADIUS);
@@ -458,10 +480,23 @@ export function PdfReader({
     const rootBounds = root.getBoundingClientRect();
     const viewportHeight = root.clientHeight || rootBounds.height;
     if (viewportHeight <= 0) return;
+
+    if (basePageSizes.length > 0) {
+      const calculatedIndex = findCurrentPageIndex(
+        root.scrollTop,
+        viewportHeight,
+        basePageSizes,
+        scale,
+        16,
+      );
+      setPageIndex((current) => current === calculatedIndex ? current : calculatedIndex);
+      return;
+    }
+
     const viewportCenter = rootBounds.top + viewportHeight / 2;
     let closestIndex = 0;
     let closestDistance = Number.POSITIVE_INFINITY;
-    for (const page of root.querySelectorAll<HTMLElement>("[data-page-number]")) {
+    for (const page of root.querySelectorAll<HTMLElement>(".pdf-page--rendered")) {
       const pageNumber = Number(page.dataset.pageNumber);
       const pageBounds = page.getBoundingClientRect();
       const distance = Math.abs(pageBounds.top + pageBounds.height / 2 - viewportCenter);
@@ -471,7 +506,7 @@ export function PdfReader({
       }
     }
     setPageIndex((current) => current === closestIndex ? current : closestIndex);
-  }, []);
+  }, [basePageSizes, scale]);
 
   async function fitWidth() {
     const root = rootRef.current;

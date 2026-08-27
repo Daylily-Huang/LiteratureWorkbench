@@ -868,4 +868,32 @@ describe("PdfReader", () => {
     });
     expect(pdf.getDocument).toHaveBeenCalledTimes(1);
   });
+
+  it("calculates page index mathematically from scroll position and page heights", async () => {
+    const { findCurrentPageIndex } = await import("./PdfReader");
+    const pageSizes = [
+      { width: 600, height: 800 },
+      { width: 600, height: 800 },
+      { width: 600, height: 1000 },
+      { width: 600, height: 800 },
+    ];
+
+    // Page 0 (height 800 + gap 16 = 816): top is 0..816
+    expect(findCurrentPageIndex(0, 800, pageSizes, 1, 16)).toBe(0);
+    expect(findCurrentPageIndex(200, 800, pageSizes, 1, 16)).toBe(0);
+
+    // Scrolled into page 1: center lands in page 1
+    expect(findCurrentPageIndex(816, 800, pageSizes, 1, 16)).toBe(1);
+
+    // Scrolled into page 2 (height 1000)
+    expect(findCurrentPageIndex(1632, 800, pageSizes, 1, 16)).toBe(2);
+
+    // Zoom scale 1.5
+    expect(findCurrentPageIndex(0, 800, pageSizes, 1.5, 16)).toBe(0);
+    // Page 0 at 1.5 scale is 1200 + 16 = 1216
+    expect(findCurrentPageIndex(1216, 800, pageSizes, 1.5, 16)).toBe(1);
+
+    // Empty page sizes fallback
+    expect(findCurrentPageIndex(500, 800, [], 1, 16)).toBe(0);
+  });
 });
