@@ -878,22 +878,26 @@ describe("PdfReader", () => {
       { width: 600, height: 800 },
     ];
 
-    // Page 0 (height 800 + gap 16 = 816): top is 0..816
-    expect(findCurrentPageIndex(0, 800, pageSizes, 1, 16)).toBe(0);
-    expect(findCurrentPageIndex(200, 800, pageSizes, 1, 16)).toBe(0);
+    // Page 0 (paddingTop 24 + height 800 + gap 24 = 848): targetOffset at 0 is 400 < 848
+    expect(findCurrentPageIndex(0, 800, pageSizes, 1)).toBe(0);
+    expect(findCurrentPageIndex(200, 800, pageSizes, 1)).toBe(0);
 
     // Scrolled into page 1: center lands in page 1
-    expect(findCurrentPageIndex(816, 800, pageSizes, 1, 16)).toBe(1);
+    expect(findCurrentPageIndex(848, 800, pageSizes, 1)).toBe(1);
 
     // Scrolled into page 2 (height 1000)
-    expect(findCurrentPageIndex(1632, 800, pageSizes, 1, 16)).toBe(2);
+    expect(findCurrentPageIndex(1672, 800, pageSizes, 1)).toBe(2);
 
     // Zoom scale 1.5
-    expect(findCurrentPageIndex(0, 800, pageSizes, 1.5, 16)).toBe(0);
-    // Page 0 at 1.5 scale is 1200 + 16 = 1216
-    expect(findCurrentPageIndex(1216, 800, pageSizes, 1.5, 16)).toBe(1);
+    expect(findCurrentPageIndex(0, 800, pageSizes, 1.5)).toBe(0);
+    // Page 0 at 1.5 scale is 24 + 1200 + 24 = 1248
+    expect(findCurrentPageIndex(1248, 800, pageSizes, 1.5)).toBe(1);
+
+    // Explicit custom gap and padding
+    expect(findCurrentPageIndex(0, 800, pageSizes, 1, 16, 16)).toBe(0);
+    expect(findCurrentPageIndex(816, 800, pageSizes, 1, 16, 16)).toBe(1);
 
     // Empty page sizes fallback
-    expect(findCurrentPageIndex(500, 800, [], 1, 16)).toBe(0);
+    expect(findCurrentPageIndex(500, 800, [], 1)).toBe(0);
   });
 });

@@ -81,16 +81,20 @@ type PdfReaderProps = ReaderDocument & {
 };
 
 
+export const DEFAULT_PAGE_GAP = 24;
+export const DEFAULT_STAGE_PADDING = 24;
+
 export function findCurrentPageIndex(
   scrollTop: number,
   viewportHeight: number,
   basePageSizes: readonly PageSize[],
   scale: number,
-  gap = 16,
+  gap = DEFAULT_PAGE_GAP,
+  paddingTop = DEFAULT_STAGE_PADDING,
 ): number {
   if (basePageSizes.length === 0) return 0;
   const targetOffset = scrollTop + viewportHeight / 2;
-  let accumulated = 0;
+  let accumulated = paddingTop;
   for (let i = 0; i < basePageSizes.length; i++) {
     const pageHeight = (basePageSizes[i]?.height ?? FALLBACK_PAGE_SIZE.height) * scale;
     const pageBottom = accumulated + pageHeight + gap;
@@ -456,7 +460,9 @@ export function PdfReader({
       if (target === null) return;
       const rootBounds = root.getBoundingClientRect();
       const targetBounds = target.getBoundingClientRect();
-      const top = Math.max(0, root.scrollTop + targetBounds.top - rootBounds.top - 16);
+      const style = window.getComputedStyle(root);
+      const paddingTop = Number.parseFloat(style.paddingTop) || DEFAULT_STAGE_PADDING;
+      const top = Math.max(0, root.scrollTop + targetBounds.top - rootBounds.top - paddingTop);
       if (typeof root.scrollTo === "function") {
         root.scrollTo({ behavior, left: root.scrollLeft, top });
       } else {
@@ -482,12 +488,19 @@ export function PdfReader({
     if (viewportHeight <= 0) return;
 
     if (basePageSizes.length > 0) {
+      const style = window.getComputedStyle(root);
+      const parsedGap = Number.parseFloat(style.rowGap || style.gap);
+      const gap = Number.isFinite(parsedGap) ? parsedGap : DEFAULT_PAGE_GAP;
+      const parsedPaddingTop = Number.parseFloat(style.paddingTop);
+      const paddingTop = Number.isFinite(parsedPaddingTop) ? parsedPaddingTop : DEFAULT_STAGE_PADDING;
+
       const calculatedIndex = findCurrentPageIndex(
         root.scrollTop,
         viewportHeight,
         basePageSizes,
         scale,
-        16,
+        gap,
+        paddingTop,
       );
       setPageIndex((current) => current === calculatedIndex ? current : calculatedIndex);
       return;
