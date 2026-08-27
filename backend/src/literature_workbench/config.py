@@ -12,6 +12,15 @@ class AppSettings(BaseModel):
     host: Literal["127.0.0.1"] = "127.0.0.1"
     allowed_hosts: tuple[str, ...] = ("127.0.0.1", "localhost")
     data_root: Path = Path(r"D:\LiteratureWorkbenchData")
+    qwen_exe: Path = Path(r"D:\Qwen\apps\llama.cpp-b9564-cuda12.4\llama-server.exe")
+    qwen_model: Path = Path(
+        r"D:\Qwen\models\qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive"
+        r"\Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf"
+    )
+    qwen_mmproj: Path = Path(
+        r"D:\Qwen\models\qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive"
+        r"\mmproj-Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-f16.gguf"
+    )
 
     @property
     def database_path(self) -> Path:

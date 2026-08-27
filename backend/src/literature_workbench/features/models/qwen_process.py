@@ -155,6 +155,9 @@ class QwenProcessManager:
         self,
         runtime_dir: Path,
         *,
+        exe_path: Path = QWEN_EXE,
+        model_path: Path = QWEN_MODEL,
+        mmproj_path: Path = QWEN_MMPROJ,
         transport: httpx.BaseTransport | None = None,
         launcher: Launcher = _launch_hidden,
         identity_lookup: IdentityLookup = _lookup_identity,
@@ -164,7 +167,9 @@ class QwenProcessManager:
         probe_timeout_seconds: float = PROBE_TIMEOUT_SECONDS,
     ) -> None:
         self.runtime_dir = runtime_dir
-        self.mmproj = QWEN_MMPROJ
+        self.exe_path = exe_path
+        self.model_path = model_path
+        self.mmproj = mmproj_path
         self._transport = transport
         self._launcher = launcher
         self._identity_lookup = identity_lookup
@@ -268,8 +273,8 @@ class QwenProcessManager:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError, OSError):
             raise QwenProcessError("qwen_owned_process_record_invalid") from None
 
-        if not self._same_path(exe, str(QWEN_EXE)) or not self._same_path(
-            model, str(QWEN_MODEL)
+        if not self._same_path(exe, str(self.exe_path)) or not self._same_path(
+            model, str(self.model_path)
         ):
             raise QwenProcessError("qwen_owned_process_mismatch")
         try:
@@ -369,8 +374,11 @@ class QwenProcessManager:
         return any(isinstance(item, dict) and item.get("id") == QWEN_ALIAS for item in data)
 
     @staticmethod
-    def _same_path(left: str, right: str) -> bool:
-        return str(Path(left)).casefold() == str(Path(right)).casefold()
+    def _same_path(first: str, second: str) -> bool:
+        try:
+            return Path(first).resolve() == Path(second).resolve()
+        except (ValueError, OSError):
+            return first.casefold() == second.casefold()
 
     def _matches_fixed_process(self, identity: ProcessIdentity) -> bool:
         expected = self._fixed_args()
@@ -380,7 +388,7 @@ class QwenProcessManager:
             expected.index("--mmproj") + 1,
         }
         return (
-            self._same_path(identity.exe, str(QWEN_EXE))
+            self._same_path(identity.exe, str(self.exe_path))
             and len(identity.cmdline) == len(expected)
             and all(
                 self._same_path(actual, wanted)
@@ -428,26 +436,25 @@ class QwenProcessManager:
         payload = {
             "pid": identity.pid,
             "create_time": identity.create_time,
-            "exe": str(QWEN_EXE),
-            "model": str(QWEN_MODEL),
+            "exe": str(self.exe_path),
+            "model": str(self.model_path),
         }
         path = self.runtime_dir / _OWNERSHIP_FILE
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
         temporary.replace(path)
 
-    @staticmethod
-    def _fixed_args() -> tuple[str, ...]:
+    def _fixed_args(self) -> tuple[str, ...]:
         return (
-            str(QWEN_EXE),
+            str(self.exe_path),
             "--host",
             QWEN_HOST,
             "--port",
             str(QWEN_PORT),
             "--model",
-            str(QWEN_MODEL),
+            str(self.model_path),
             "--mmproj",
-            str(QWEN_MMPROJ),
+            str(self.mmproj),
             "--alias",
             QWEN_ALIAS,
             "--ctx-size",

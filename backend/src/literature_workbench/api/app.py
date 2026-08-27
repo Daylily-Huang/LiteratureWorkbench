@@ -128,7 +128,12 @@ def create_app(
                 deepseek_gateway,
             )
             qwen_local_client = QwenLocalClient()
-            qwen_process_manager = QwenProcessManager(resolved.qwen_runtime_dir)
+            qwen_process_manager = QwenProcessManager(
+                resolved.qwen_runtime_dir,
+                exe_path=resolved.qwen_exe,
+                model_path=resolved.qwen_model,
+                mmproj_path=resolved.qwen_mmproj,
+            )
             app.state.qwen_process_manager = qwen_process_manager
             app.state.translation_service = TranslationService(
                 TranslationRepository(database, queue_clock),
