@@ -497,7 +497,7 @@ def test_supervisor_manifests_real_worker_and_cleans_real_then_shim(
         "_stop_exact_process",
         lambda process, identity: cleanup.append(("shim", identity)),
     )
-    monkeypatch.setattr(launcher_module, "_stop_owned_qwen", lambda _: None)
+    monkeypatch.setattr(launcher_module, "_stop_owned_qwen", lambda *args, **kwargs: None)
 
     with pytest.raises(RuntimeError, match="worker_exited"):
         launcher_module.run_supervisor(
@@ -695,7 +695,7 @@ def test_owned_qwen_cleanup_failure_is_propagated(
     monkeypatch.setattr(
         launcher_module,
         "QwenProcessManager",
-        lambda _: FailingQwenManager(),
+        lambda *args, **kwargs: FailingQwenManager(),
     )
 
     with pytest.raises(RuntimeError) as caught:

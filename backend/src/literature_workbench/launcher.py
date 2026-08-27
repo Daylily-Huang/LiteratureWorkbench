@@ -797,9 +797,20 @@ def _wait_until_healthy(port: int, thread: Thread, timeout_seconds: float = 15.0
     raise RuntimeError("loopback_server_not_ready")
 
 
-def _stop_owned_qwen(runtime_dir: Path) -> None:
+def _stop_owned_qwen(
+    runtime_dir: Path,
+    *,
+    exe_path: Path | None = None,
+    model_path: Path | None = None,
+    mmproj_path: Path | None = None,
+) -> None:
     try:
-        QwenProcessManager(runtime_dir).stop_owned()
+        QwenProcessManager(
+            runtime_dir,
+            exe_path=exe_path,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+        ).stop_owned()
     except QwenProcessError:
         raise RuntimeError("owned_qwen_cleanup_failed") from None
 
@@ -893,7 +904,12 @@ def run_supervisor(
             _stop_exact_process(worker, worker_launcher_identity)
         qwen_cleanup_failed = False
         try:
-            _stop_owned_qwen(settings.qwen_runtime_dir)
+            _stop_owned_qwen(
+                settings.qwen_runtime_dir,
+                exe_path=settings.qwen_exe,
+                model_path=settings.qwen_model,
+                mmproj_path=settings.qwen_mmproj,
+            )
         except RuntimeError:
             qwen_cleanup_failed = True
         bootstrap_path.unlink(missing_ok=True)
@@ -942,7 +958,12 @@ def run_bound_worker(
             print(f"literature-workbench: failed {orphaned_runs} orphaned parse run(s)")
         inspector = SafeWindowsFileInspector()
         trusted_root = TrustedImportRoot.create(settings.data_root)
-        qwen_process = QwenProcessManager(settings.qwen_runtime_dir)
+        qwen_process = QwenProcessManager(
+            settings.qwen_runtime_dir,
+            exe_path=settings.qwen_exe,
+            model_path=settings.qwen_model,
+            mmproj_path=settings.qwen_mmproj,
+        )
         library_repository = LibraryRepository(database, queue)
         scanner = LibraryScanner(
             database,
