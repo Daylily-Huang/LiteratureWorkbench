@@ -10,6 +10,7 @@ from typing import Protocol, cast
 
 import httpx
 import psutil  # type: ignore[import-untyped]
+from filelock import FileLock
 
 from literature_workbench.features.models.qwen_http import MonotonicResponseDeadline
 
@@ -155,9 +156,9 @@ class QwenProcessManager:
         self,
         runtime_dir: Path,
         *,
-        exe_path: Path = QWEN_EXE,
-        model_path: Path = QWEN_MODEL,
-        mmproj_path: Path = QWEN_MMPROJ,
+        exe_path: Path | None = None,
+        model_path: Path | None = None,
+        mmproj_path: Path | None = None,
         transport: httpx.BaseTransport | None = None,
         launcher: Launcher = _launch_hidden,
         identity_lookup: IdentityLookup = _lookup_identity,
@@ -167,9 +168,9 @@ class QwenProcessManager:
         probe_timeout_seconds: float = PROBE_TIMEOUT_SECONDS,
     ) -> None:
         self.runtime_dir = runtime_dir
-        self.exe_path = exe_path
-        self.model_path = model_path
-        self.mmproj = mmproj_path
+        self.exe_path = exe_path or QWEN_EXE
+        self.model_path = model_path or QWEN_MODEL
+        self.mmproj = mmproj_path or QWEN_MMPROJ
         self._transport = transport
         self._launcher = launcher
         self._identity_lookup = identity_lookup
@@ -180,17 +181,19 @@ class QwenProcessManager:
         self._startup_lock = threading.Lock()
 
     def ensure_running(self) -> QwenLease:
-        with self._startup_lock:
+        try:
+            self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            raise QwenProcessError("qwen_runtime_failed") from None
+
+        file_lock = FileLock(self.runtime_dir / "startup.lock", timeout=STARTUP_TIMEOUT_SECONDS)
+        with self._startup_lock, file_lock:
             if self._probe_expected_service(prelaunch=True):
                 owner = self._listener_owner(QWEN_HOST, QWEN_PORT)
                 if owner is None or not self._matches_fixed_process(owner):
                     raise QwenProcessError("qwen_port_identity_mismatch")
                 return QwenLease(borrowed=True, pid=None)
 
-            try:
-                self.runtime_dir.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                raise QwenProcessError("qwen_runtime_failed") from None
             args = self._fixed_args()
             log_path = self.runtime_dir / "llama-server.log"
             try:
@@ -215,7 +218,7 @@ class QwenProcessManager:
                 try:
                     if self._probe_expected_service(prelaunch=False):
                         listener = self._listener_owner(QWEN_HOST, QWEN_PORT)
-                        if listener is not None and not self._same_process_instance(
+                        if listener is None or not self._same_process_instance(
                             identity, listener
                         ):
                             self._cleanup_launched(identity)
