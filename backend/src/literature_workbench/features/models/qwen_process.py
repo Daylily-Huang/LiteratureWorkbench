@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -171,49 +172,57 @@ class QwenProcessManager:
         self._stopper = stopper
         self._clock = clock or _SystemClock()
         self._probe_timeout_seconds = probe_timeout_seconds
+        self._startup_lock = threading.Lock()
 
     def ensure_running(self) -> QwenLease:
-        if self._probe_expected_service(prelaunch=True):
-            owner = self._listener_owner(QWEN_HOST, QWEN_PORT)
-            if owner is None or not self._matches_fixed_process(owner):
-                raise QwenProcessError("qwen_port_identity_mismatch")
-            return QwenLease(borrowed=True, pid=None)
+        with self._startup_lock:
+            if self._probe_expected_service(prelaunch=True):
+                owner = self._listener_owner(QWEN_HOST, QWEN_PORT)
+                if owner is None or not self._matches_fixed_process(owner):
+                    raise QwenProcessError("qwen_port_identity_mismatch")
+                return QwenLease(borrowed=True, pid=None)
 
-        try:
-            self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            raise QwenProcessError("qwen_runtime_failed") from None
-        args = self._fixed_args()
-        log_path = self.runtime_dir / "llama-server.log"
-        try:
-            pid = self._launcher(args, log_path)
-        except (OSError, subprocess.SubprocessError):
-            raise QwenProcessError("qwen_start_failed") from None
-
-        try:
-            identity = self._identity_lookup(pid)
-        except (psutil.Error, OSError):
-            raise QwenProcessError("qwen_process_inspection_failed") from None
-        if identity is None or not self._matches_fixed_process(identity):
-            raise QwenProcessError("qwen_started_process_mismatch")
-        try:
-            self._write_ownership(identity)
-        except OSError:
-            self._cleanup_launched(identity)
-            raise QwenProcessError("qwen_ownership_persist_failed") from None
-
-        deadline = self._clock.monotonic() + STARTUP_TIMEOUT_SECONDS
-        while True:
             try:
-                if self._probe_expected_service(prelaunch=False):
-                    return QwenLease(borrowed=False, pid=pid)
-            except QwenProcessError:
+                self.runtime_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                raise QwenProcessError("qwen_runtime_failed") from None
+            args = self._fixed_args()
+            log_path = self.runtime_dir / "llama-server.log"
+            try:
+                pid = self._launcher(args, log_path)
+            except (OSError, subprocess.SubprocessError):
+                raise QwenProcessError("qwen_start_failed") from None
+
+            try:
+                identity = self._identity_lookup(pid)
+            except (psutil.Error, OSError):
+                raise QwenProcessError("qwen_process_inspection_failed") from None
+            if identity is None or not self._matches_fixed_process(identity):
+                raise QwenProcessError("qwen_started_process_mismatch")
+            try:
+                self._write_ownership(identity)
+            except OSError:
                 self._cleanup_launched(identity)
-                raise
-            if self._clock.monotonic() >= deadline:
-                self._cleanup_launched(identity)
-                raise QwenProcessError("qwen_start_timeout")
-            self._clock.sleep(1.0)
+                raise QwenProcessError("qwen_ownership_persist_failed") from None
+
+            deadline = self._clock.monotonic() + STARTUP_TIMEOUT_SECONDS
+            while True:
+                try:
+                    if self._probe_expected_service(prelaunch=False):
+                        listener = self._listener_owner(QWEN_HOST, QWEN_PORT)
+                        if listener is not None and not self._same_process_instance(
+                            identity, listener
+                        ):
+                            self._cleanup_launched(identity)
+                            raise QwenProcessError("qwen_port_identity_mismatch")
+                        return QwenLease(borrowed=False, pid=pid)
+                except QwenProcessError:
+                    self._cleanup_launched(identity)
+                    raise
+                if self._clock.monotonic() >= deadline:
+                    self._cleanup_launched(identity)
+                    raise QwenProcessError("qwen_start_timeout")
+                self._clock.sleep(1.0)
 
     def stop_owned(self) -> bool:
         identity = self.owned_identity()

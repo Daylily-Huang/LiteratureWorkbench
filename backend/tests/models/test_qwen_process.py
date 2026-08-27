@@ -661,3 +661,51 @@ def test_startup_cleanup_keeps_evidence_when_exact_launched_process_survives(
         manager._cleanup_launched(identity)
 
     assert (runtime / "owned-process.json").exists()
+
+
+def test_ensure_running_serializes_concurrent_callers(tmp_path: Path) -> None:
+    import concurrent.futures
+
+    runtime = tmp_path / "qwen"
+    runtime.mkdir(parents=True)
+    launch_count = 0
+    launched_pid = 777
+    is_running = False
+
+    def fake_launcher(args: tuple[str, ...], log_path: Path) -> int:
+        nonlocal launch_count, is_running
+        time.sleep(0.05)
+        launch_count += 1
+        is_running = True
+        return launched_pid
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if not is_running:
+            raise httpx.ConnectError("not running", request=request)
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+        if request.url.path == "/v1/models":
+            return httpx.Response(
+                200, json={"data": [{"id": EXPECTED_ALIAS}]}, request=request
+            )
+        raise AssertionError(request.url)
+
+    manager = QwenProcessManager(
+        runtime,
+        transport=httpx.MockTransport(handler),
+        launcher=fake_launcher,
+        identity_lookup=lambda pid: expected_identity(pid),
+        listener_owner=lambda host, port: (
+            expected_identity(launched_pid) if is_running else None
+        ),
+    )
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(manager.ensure_running) for _ in range(5)]
+        for f in concurrent.futures.as_completed(futures):
+            results.append(f.result())
+
+    assert launch_count == 1
+    assert len(results) == 5
+    assert all(r.pid in (777, None) for r in results)

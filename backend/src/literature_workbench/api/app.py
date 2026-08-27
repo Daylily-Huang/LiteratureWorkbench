@@ -127,13 +127,16 @@ def create_app(
                 resolved_secret_store,
                 deepseek_gateway,
             )
+            qwen_local_client = QwenLocalClient()
+            qwen_process_manager = QwenProcessManager(resolved.qwen_runtime_dir)
+            app.state.qwen_process_manager = qwen_process_manager
             app.state.translation_service = TranslationService(
                 TranslationRepository(database, queue_clock),
                 SettingsRepository(database),
                 task_queue,
                 deepseek_gateway,
-                QwenLocalClient(),
-                QwenProcessManager(resolved.qwen_runtime_dir),
+                qwen_local_client,
+                qwen_process_manager,
             )
             rag_chunk_repository = RagChunkRepository(database)
             app.state.research_service = ResearchService(
@@ -142,8 +145,8 @@ def create_app(
                 RagRetriever(rag_chunk_repository),
                 SettingsRepository(database),
                 deepseek_gateway,
-                QwenLocalClient(),
-                QwenProcessManager(resolved.qwen_runtime_dir),
+                qwen_local_client,
+                qwen_process_manager,
             )
             library_repository = LibraryRepository(database, task_queue)
             app.state.library_repository = library_repository
