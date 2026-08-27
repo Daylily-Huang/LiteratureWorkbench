@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { AnnotationPanel } from "../features/annotations/AnnotationPanel";
 import {
@@ -165,28 +165,54 @@ export function Workbench() {
     return () => controller.abort();
   }, [document]);
 
+  const activeDocumentIdRef = useRef<string | null>(location.documentId);
+  activeDocumentIdRef.current = location.documentId;
+  const annotationMutationGenerationRef = useRef(0);
+
   async function runMutation(action: () => Promise<{
     current_document_version_id: string;
     content_id: string;
     document_id: string;
   }>) {
     if (document === null) return;
+    const targetDocId = document.documentId;
+    const currentGen = ++annotationMutationGenerationRef.current;
     setAnnotationBusy(true);
     setAnnotationError(null);
     try {
       const identity = await action();
+      if (
+        activeDocumentIdRef.current !== targetDocId ||
+        annotationMutationGenerationRef.current !== currentGen
+      ) {
+        return;
+      }
       const next = mergeDocumentIdentity(document, identity);
       setDocument(next);
-      setAnnotations(await listAnnotations(next.documentId));
+      const annotationsState = await listAnnotations(next.documentId);
+      if (
+        activeDocumentIdRef.current !== targetDocId ||
+        annotationMutationGenerationRef.current !== currentGen
+      ) {
+        return;
+      }
+      setAnnotations(annotationsState);
       setTranslationSelection((current) => (
         current?.documentId === identity.document_id
           ? mergeSelectionIdentity(current, identity)
           : null
       ));
     } catch (reason: unknown) {
-      setAnnotationError(reason instanceof Error ? reason.message : "annotation_mutation_failed");
+      if (
+        activeDocumentIdRef.current === targetDocId &&
+        annotationMutationGenerationRef.current === currentGen
+      ) {
+        setAnnotationError(reason instanceof Error ? reason.message : "annotation_mutation_failed");
+      }
     } finally {
-      setAnnotationBusy(false);
+      if (annotationMutationGenerationRef.current === currentGen) {
+        setAnnotationBusy(false);
+      }
     }
   }
 

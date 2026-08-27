@@ -257,6 +257,16 @@ export function AssistantPanel({
     };
   }, []);
 
+  function handleScopeChange(nextScope: Scope) {
+    if (nextScope !== scope) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      requestIdRef.current++;
+      setBusy(false);
+      setScope(nextScope);
+    }
+  }
+
   // No document open: only the library scope is meaningful, so it wins.
   const effectiveScope: Scope = readerDocument === null ? "library" : scope;
   const trimmed = question.trim();
@@ -396,7 +406,7 @@ export function AssistantPanel({
           aria-pressed={effectiveScope === "document"}
           className={`assistant-scope__option${effectiveScope === "document" ? " assistant-scope__option--active" : ""}`}
           disabled={readerDocument === null}
-          onClick={() => setScope("document")}
+          onClick={() => handleScopeChange("document")}
           title={readerDocument === null ? "打开一篇文献后可就单篇提问" : "仅基于当前文献回答"}
           type="button"
         >
@@ -405,7 +415,7 @@ export function AssistantPanel({
         <button
           aria-pressed={effectiveScope === "library"}
           className={`assistant-scope__option${effectiveScope === "library" ? " assistant-scope__option--active" : ""}`}
-          onClick={() => setScope("library")}
+          onClick={() => handleScopeChange("library")}
           title="跨整个文献库检索回答"
           type="button"
         >

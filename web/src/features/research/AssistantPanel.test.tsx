@@ -295,4 +295,30 @@ describe("AssistantPanel", () => {
       expect(screen.queryByText("Alpha is the first letter [p1].")).not.toBeInTheDocument();
     });
   });
+
+  it("cancels in-flight request and resets busy on scope switch", async () => {
+    let abortSignal: AbortSignal | undefined;
+    const fetcher = vi.fn().mockImplementation((url, init) => {
+      abortSignal = init?.signal;
+      return new Promise(() => {
+        // never resolves to simulate pending request
+      });
+    });
+
+    render(
+      <AssistantPanel document={DOCUMENT} fetcher={fetcher} onJumpToCitation={() => undefined} />,
+    );
+    const input = screen.getByLabelText("向当前文献提问");
+    fireEvent.change(input, { target: { value: "What is alpha?" } });
+    fireEvent.click(screen.getByRole("button", { name: "提问" }));
+
+    expect(screen.getByRole("button", { name: "回答中…" })).toBeDisabled();
+
+    // Switch scope to library
+    fireEvent.click(screen.getByRole("button", { name: "整个文献库" }));
+
+    // In-flight request was aborted and button is no longer busy
+    expect(abortSignal?.aborted).toBe(true);
+    expect(screen.getByRole("button", { name: "提问" })).not.toBeDisabled();
+  });
 });
