@@ -94,7 +94,7 @@ export function DashboardHome({
         <section className="dashboard-card">
           <div className="dashboard-card__header">
             <h3>继续阅读</h3>
-            <span className="dashboard-card__link">最近访问</span>
+            <span className="dashboard-card__tag">最近文献</span>
           </div>
           <div className="dashboard-reading-list">
             {recentDocuments.length > 0 ? (
@@ -108,72 +108,69 @@ export function DashboardHome({
                   <span className="dashboard-reading-item__icon">PDF</span>
                   <div className="dashboard-reading-item__info">
                     <h4>{doc.filename}</h4>
-                    <p>{doc.relative_folder || "未分类"}</p>
-                    <div className="dashboard-progress">
-                      <div className="dashboard-progress__bar" style={{ width: "65%" }} />
-                    </div>
+                    <p>{doc.relative_folder || "默认文件夹"}</p>
                   </div>
-                  <span className="dashboard-reading-item__percent">65%</span>
+                  <span className="dashboard-card__link">阅读 →</span>
                 </button>
               ))
             ) : (
               <div className="dashboard-empty-card">
                 <p>暂无正在阅读的文献</p>
-                <small>导入文献后将在此处追踪阅读进度</small>
+                <small>导入文献后可在此处快速恢复阅读</small>
               </div>
             )}
           </div>
         </section>
 
-        {/* Weekly Reading Goal */}
+        {/* Library Overview */}
         <section className="dashboard-card">
           <div className="dashboard-card__header">
-            <h3>本周阅读目标</h3>
-            <span className="dashboard-card__tag">8 / 12 篇</span>
+            <h3>文献库概览</h3>
+            <span className="dashboard-card__tag">真实统计</span>
           </div>
           <div className="dashboard-goal">
             <div className="dashboard-goal__stat">
-              <span className="dashboard-goal__number">8</span>
+              <span className="dashboard-goal__number">{documents.length}</span>
               <span className="dashboard-goal__divider">/</span>
-              <span className="dashboard-goal__total">12 篇精读</span>
+              <span className="dashboard-goal__total">篇已收录文献</span>
             </div>
-            <div className="dashboard-progress dashboard-progress--lg">
-              <div className="dashboard-progress__bar" style={{ width: "67%" }} />
-            </div>
-            <p className="dashboard-goal__hint">距离本周目标还差 4 篇，保持专注！</p>
-            <div className="dashboard-days">
-              {["一", "二", "三", "四", "五", "六", "日"].map((day, idx) => (
-                <div
-                  key={day}
-                  className={`dashboard-day ${idx < 4 ? "dashboard-day--done" : idx === 4 ? "dashboard-day--current" : ""}`}
-                >
-                  <span className="dashboard-day__name">{day}</span>
-                  <span className="dashboard-day__dot">{idx < 4 ? "✓" : "·"}</span>
-                </div>
-              ))}
-            </div>
+            <p className="dashboard-goal__hint">
+              {documents.length > 0
+                ? "文献库运行正常，支持单篇精读与跨文献 RAG 检索"
+                : "文献库当前为空，点击下方按钮或拖入 PDF 开始阅读"}
+            </p>
+            {onTriggerImport && (
+              <button
+                className="dashboard-card__button"
+                onClick={onTriggerImport}
+                type="button"
+                style={{ alignSelf: "flex-start", marginTop: "auto" }}
+              >
+                + 导入新文献
+              </button>
+            )}
           </div>
         </section>
 
-        {/* Recent Notes */}
+        {/* Academic Workflow Guidance */}
         <section className="dashboard-card">
           <div className="dashboard-card__header">
-            <h3>研究与思考笔记</h3>
-            <span className="dashboard-card__tag">最新思考</span>
+            <h3>科研工作流</h3>
+            <span className="dashboard-card__tag">功能指引</span>
           </div>
           <div className="dashboard-notes-list">
             <div className="dashboard-note-item">
               <span className="dashboard-note-item__bullet">•</span>
               <div className="dashboard-note-item__content">
-                <p>“作者关于多模态融合的注意力机制证明了跨模态对齐的鲁棒性……”</p>
-                <time>今天 10:24 · 来自《Multimodal-LLM-Survey.pdf》</time>
+                <p><strong>PDF 精读与划选翻译</strong>：支持双语平行翻译与批注高亮</p>
+                <time>深度阅读模式</time>
               </div>
             </div>
             <div className="dashboard-note-item">
               <span className="dashboard-note-item__bullet">•</span>
               <div className="dashboard-note-item__content">
-                <p>“实验部分的数据集消融实验值得在我们的下一阶段研究中借鉴。”</p>
-                <time>昨天 16:45 · 来自《Deep-Learning-Basics.pdf》</time>
+                <p><strong>证据溯源与问答</strong>：单篇与跨文献 RAG，点击页码标签精准高亮定位</p>
+                <time>可信科研助手</time>
               </div>
             </div>
           </div>
