@@ -111,6 +111,7 @@ class ResearchDeepSeekClient(Protocol):
 
 
 class ResearchQwenClient(Protocol):
+    def complete(self, user_prompt: str, system_prompt: str | None = None) -> str: ...
     def translate(self, prompt: str) -> str: ...
 
 
@@ -355,10 +356,12 @@ class ResearchService:
         indexed_documents: int,
         fallback_reason: str | None,
     ) -> LibraryAnswer:
-        combined = f"System: {system_prompt}\n\n{user_prompt}"
         try:
             self._qwen_process.ensure_running()
-            answer = self._qwen.translate(combined)
+            if hasattr(self._qwen, "complete"):
+                answer = self._qwen.complete(user_prompt, system_prompt=system_prompt)
+            else:
+                answer = self._qwen.translate(f"System: {system_prompt}\n\n{user_prompt}")
         except (QwenProcessError, QwenLocalError) as error:
             raise ResearchError(str(error) or "qwen_failed") from None
         except (OSError, RuntimeError):
@@ -479,10 +482,12 @@ class ResearchService:
         hits: list[RetrievalHit],
         fallback_reason: str | None,
     ) -> ResearchAnswer:
-        combined = f"System: {system_prompt}\n\n{user_prompt}"
         try:
             self._qwen_process.ensure_running()
-            answer = self._qwen.translate(combined)
+            if hasattr(self._qwen, "complete"):
+                answer = self._qwen.complete(user_prompt, system_prompt=system_prompt)
+            else:
+                answer = self._qwen.translate(f"System: {system_prompt}\n\n{user_prompt}")
         except (QwenProcessError, QwenLocalError) as error:
             raise ResearchError(str(error) or "qwen_failed") from None
         except (OSError, RuntimeError):
