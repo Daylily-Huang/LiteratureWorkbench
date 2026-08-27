@@ -90,11 +90,11 @@ export function DashboardHome({
 
       {/* Main Grid: Row 1 */}
       <div className="dashboard-grid dashboard-grid--three">
-        {/* Continue Reading */}
+        {/* Quick Access */}
         <section className="dashboard-card">
           <div className="dashboard-card__header">
-            <h3>继续阅读</h3>
-            <span className="dashboard-card__tag">最近文献</span>
+            <h3>文献快捷入口</h3>
+            <span className="dashboard-card__tag">快速打开</span>
           </div>
           <div className="dashboard-reading-list">
             {recentDocuments.length > 0 ? (
