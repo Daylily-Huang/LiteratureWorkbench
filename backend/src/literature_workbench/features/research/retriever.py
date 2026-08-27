@@ -213,15 +213,12 @@ class RagRetriever:
         limit: int = DEFAULT_LIBRARY_HIT_LIMIT,
         per_document: int = DEFAULT_PER_DOCUMENT_LIMIT,
     ) -> list[LibraryRetrievalHit]:
-        rows = self._repository.search_all(
-            match_query, limit=max(limit * _LIBRARY_FETCH_MULTIPLIER, 20)
-        )
+        fetch_limit = max(limit * _LIBRARY_FETCH_MULTIPLIER, 20)
+        rows = self._repository.search_all(match_query, limit=fetch_limit)
         hits: list[LibraryRetrievalHit] = []
         seen_chunks: set[str] = set()
         per_document_count: dict[str, int] = {}
         for row in rows:
-            # The JOIN multiplies a chunk by every document hard-linking its
-            # content; keep any single registration per chunk.
             chunk_id = str(row["chunk_id"])
             if chunk_id in seen_chunks:
                 continue
@@ -243,4 +240,32 @@ class RagRetriever:
             )
             if len(hits) >= limit:
                 break
+
+        # If hits limit wasn't reached because candidate pool was saturated by single docs,
+        # perform an expanded secondary fetch.
+        if len(hits) < limit and len(rows) >= fetch_limit:
+            expanded_rows = self._repository.search_all(match_query, limit=100)
+            for row in expanded_rows[fetch_limit:]:
+                chunk_id = str(row["chunk_id"])
+                if chunk_id in seen_chunks:
+                    continue
+                document_id = str(row["document_id"])
+                if per_document_count.get(document_id, 0) >= per_document:
+                    continue
+                seen_chunks.add(chunk_id)
+                per_document_count[document_id] = per_document_count.get(document_id, 0) + 1
+                hits.append(
+                    LibraryRetrievalHit(
+                        chunk_id=chunk_id,
+                        document_id=document_id,
+                        display_name=str(row["display_name"]),
+                        physical_page=int(row["physical_page"]),
+                        text=str(row["text"]),
+                        score=float(row["score"]),
+                        rects=rects_from_json(row["rects_json"]),
+                    )
+                )
+                if len(hits) >= limit:
+                    break
+
         return hits

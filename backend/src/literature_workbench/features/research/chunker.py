@@ -36,18 +36,19 @@ class RagChunk:
 def chunk_pages(
     pages: list[ParsedPage],
     *,
-    target_chars: int = DEFAULT_TARGET_CHARS,
+    target_chars: int | None = None,
     max_chars: int = DEFAULT_MAX_CHARS,
     overlap_chars: int = DEFAULT_OVERLAP_CHARS,
 ) -> list[RagChunk]:
-    if not 0 < target_chars <= max_chars:
+    resolved_target = DEFAULT_TARGET_CHARS if target_chars is None else target_chars
+    if not 0 < resolved_target <= max_chars:
         raise ValueError("rag_chunk_size_invalid")
-    if not 0 <= overlap_chars < target_chars:
+    if not 0 <= overlap_chars < resolved_target:
         raise ValueError("rag_chunk_overlap_invalid")
     chunks: list[RagChunk] = []
     for page in pages:
         for text, bbox in _page_segments(page, max_chars=max_chars, overlap_chars=overlap_chars):
-            _append_segment(chunks, page.physical_page, text, bbox, max_chars)
+            _append_segment(chunks, page.physical_page, text, bbox, resolved_target, max_chars)
     return chunks
 
 
@@ -81,15 +82,21 @@ def _page_segments(
 
 
 def _append_segment(
-    chunks: list[RagChunk], physical_page: int, segment: str, bbox: BBox, max_chars: int
+    chunks: list[RagChunk],
+    physical_page: int,
+    segment: str,
+    bbox: BBox,
+    target_chars: int,
+    max_chars: int,
 ) -> None:
     if chunks and chunks[-1].physical_page == physical_page:
         previous = chunks[-1]
-        combined = f"{previous.text} {segment}"
-        if len(combined) <= max_chars:
-            rects = previous.rects
-            if not rects or rects[-1] != bbox:
-                rects = (*rects, bbox)
-            chunks[-1] = RagChunk(physical_page, previous.chunk_index, combined, rects)
-            return
+        if len(previous.text) < target_chars:
+            combined = f"{previous.text} {segment}"
+            if len(combined) <= max_chars:
+                rects = previous.rects
+                if not rects or rects[-1] != bbox:
+                    rects = (*rects, bbox)
+                chunks[-1] = RagChunk(physical_page, previous.chunk_index, combined, rects)
+                return
     chunks.append(RagChunk(physical_page, len(chunks), segment, (bbox,)))
