@@ -61,4 +61,20 @@ describe("CitationHighlight", () => {
 
     expect(first).not.toBe(second);
   });
+
+  it("validates pdf rects strictly within 0-1000 coordinate bounds", async () => {
+    const { isValidPdfRect } = await import("./CitationHighlight");
+    expect(isValidPdfRect([0, 0, 1000, 1000])).toBe(true);
+    expect(isValidPdfRect([10, 20, 300, 80])).toBe(true);
+
+    expect(isValidPdfRect([-1, 20, 300, 80])).toBe(false);
+    expect(isValidPdfRect([10, 20, 1001, 80])).toBe(false);
+    expect(isValidPdfRect([10, 20, 300, 1001])).toBe(false);
+    expect(isValidPdfRect([300, 20, 100, 80])).toBe(false);
+    expect(isValidPdfRect([10, 80, 300, 20])).toBe(false);
+    expect(isValidPdfRect([10, 20, Number.NaN, 80])).toBe(false);
+    expect(isValidPdfRect([10, 20, Number.POSITIVE_INFINITY, 80])).toBe(false);
+    expect(isValidPdfRect("not a rect")).toBe(false);
+    expect(isValidPdfRect([1, 2, 3])).toBe(false);
+  });
 });

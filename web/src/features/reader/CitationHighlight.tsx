@@ -22,7 +22,9 @@ export function isValidPdfRect(val: unknown): val is PdfRect {
     x0 >= 0 &&
     y0 >= 0 &&
     x1 > x0 &&
-    y1 > y0
+    y1 > y0 &&
+    x1 <= 1000 &&
+    y1 <= 1000
   );
 }
 

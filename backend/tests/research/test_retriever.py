@@ -52,6 +52,11 @@ def test_rects_from_json_defends_against_malformed_data() -> None:
     assert rects_from_json("[[10, 20, NaN, 50]]") == ()
     # Inverted box coordinates x1 <= x0 or y1 <= y0 are dropped
     assert rects_from_json("[[50, 50, 10, 10]]") == ()
+    # Negative or out of bounds (> 1000) coordinates are dropped
+    assert rects_from_json("[[-5, 20, 300, 80]]") == ()
+    assert rects_from_json("[[10, 20, 1050, 80]]") == ()
+    assert rects_from_json("[[10, 20, 300, 1200]]") == ()
+    assert rects_from_json("[[10, 20, Infinity, 80]]") == ()
     # Valid box is parsed accurately
     assert rects_from_json("[[10, 20, 300, 80]]") == ((10, 20, 300, 80),)
 

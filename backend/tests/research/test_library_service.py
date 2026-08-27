@@ -201,6 +201,35 @@ def test_library_citations_drop_bogus_marks_and_do_not_fall_back() -> None:
     assert "Second fragment" in valid_citations[0].excerpt
 
 
+def test_library_citations_ignore_ambiguous_legacy_citation_when_doc_page_has_multiple_hits() -> None:
+    hits = [
+        _library_hit("doc-a", "a.pdf", 1, "First fragment text on page 1"),
+        _library_hit("doc-a", "a.pdf", 1, "Second fragment text on page 1"),
+    ]
+    _, hits_by_ref = _build_library_prompt("q", hits)
+
+    # Model uses legacy ambiguous [d1 p1] when doc 1 page 1 has two chunks
+    citations, status = _library_citations_for("参考了 [d1 p1]", hits_by_ref)
+
+    assert citations == []
+    assert status == "missing"
+
+
+def test_library_citations_accept_unique_legacy_citation() -> None:
+    hits = [
+        _library_hit("doc-a", "a.pdf", 1, "Unique fragment on page 1"),
+        _library_hit("doc-b", "b.pdf", 3, "Unique fragment on page 3"),
+    ]
+    _, hits_by_ref = _build_library_prompt("q", hits)
+
+    # Model uses legacy [d1 p1] and [d2 p3] where each page is unique
+    citations, status = _library_citations_for("参考了 [d1 p1] 和 [d2 p3]", hits_by_ref)
+
+    assert len(citations) == 2
+    assert status == "verified"
+    assert [c.document_id for c in citations] == ["doc-a", "doc-b"]
+
+
 def test_library_citations_distinguishes_multiple_chunks_same_doc_and_page() -> None:
     hits = [
         _library_hit("doc-a", "a.pdf", 7, "Chunk 1 on page seven", rects=((10, 10, 50, 50),)),

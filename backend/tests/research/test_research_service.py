@@ -206,6 +206,48 @@ def test_ask_returns_empty_citations_when_model_does_not_cite(research_db: Datab
     assert answer.citation_status == "missing"
 
 
+def test_ask_ignores_ambiguous_legacy_citation_when_page_has_multiple_hits(
+    research_db: Database,
+) -> None:
+    long_para_1 = "Alpha discovery details: " + ("scientific background " * 75)
+    long_para_2 = "Alpha conclusion summary: " + ("verified experimentally " * 75)
+    document_id = _seed_document(
+        research_db,
+        content_id="a1" * 32,
+        page_texts=[[long_para_1, long_para_2]],
+    )
+    # Model returns legacy ambiguous [p1] when page 1 contains two distinct hits
+    deepseek = FakeDeepSeek(result="Alpha was discovered in the study [p1].")
+
+    answer = _service(research_db, deepseek).ask(
+        document_id=document_id, question="What is alpha?"
+    )
+
+    # Must be treated as ambiguous and NOT guessed
+    assert answer.citations == []
+    assert answer.citation_status == "missing"
+
+
+def test_ask_accepts_unique_legacy_citation_when_page_has_single_hit(
+    research_db: Database,
+) -> None:
+    document_id = _seed_document(
+        research_db,
+        content_id="a2" * 32,
+        page_texts=[["Alpha discovery unique single paragraph on page one."]],
+    )
+    # Model returns legacy [p1] when page 1 only has a single hit
+    deepseek = FakeDeepSeek(result="Alpha is described in [p1].")
+
+    answer = _service(research_db, deepseek).ask(
+        document_id=document_id, question="What is alpha?"
+    )
+
+    assert len(answer.citations) == 1
+    assert answer.citation_status == "verified"
+    assert answer.citations[0].physical_page == 1
+
+
 def test_ask_rejects_missing_or_inactive_document(research_db: Database) -> None:
     missing_doc = _seed_document(
         research_db,

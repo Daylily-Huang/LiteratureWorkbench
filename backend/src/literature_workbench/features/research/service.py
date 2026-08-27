@@ -500,13 +500,9 @@ def _citations_for(
         elif legacy_page_group is not None:
             page = int(legacy_page_group)
             # If [p7] was used and exactly one hit exists on page 7, map it.
+            # If >= 2 hits exist on that page, it is ambiguous and MUST be ignored.
             matching_hits = page_to_hits.get(page, [])
             if len(matching_hits) == 1:
-                hit = matching_hits[0]
-                if hit not in cited:
-                    cited.append(hit)
-            elif len(matching_hits) > 1:
-                # If ambiguous, take the highest ranking hit on that page
                 hit = matching_hits[0]
                 if hit not in cited:
                     cited.append(hit)
@@ -606,7 +602,7 @@ def _library_citations_for(
         elif legacy_page_group is not None:
             page = int(legacy_page_group)
             matching = doc_page_to_hits.get((doc_num, page), [])
-            if matching:
+            if len(matching) == 1:
                 hit = matching[0]
                 if hit not in cited:
                     cited.append(hit)

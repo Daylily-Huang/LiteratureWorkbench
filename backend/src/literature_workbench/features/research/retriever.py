@@ -131,7 +131,7 @@ def rects_from_json(raw: str | None) -> tuple[BBox, ...]:
             y1 = int(round(y1_f))
         except (ValueError, TypeError, OverflowError):
             continue
-        if x0 < 0 or y0 < 0 or x1 <= x0 or y1 <= y0:
+        if x0 < 0 or y0 < 0 or x1 <= x0 or y1 <= y0 or x1 > 1000 or y1 > 1000:
             continue
         rects.append((x0, y0, x1, y1))
     return tuple(rects)
