@@ -27,6 +27,7 @@ class FakeDeepSeek:
     error_sequence: list[str | None] | None = None
     result_sequence: list[str] | None = None
     calls: list[str] = field(default_factory=list)
+    system_prompts: list[str | None] = field(default_factory=list)
     purposes: list[str] = field(default_factory=list)
 
     def answer_question(
@@ -38,9 +39,11 @@ class FakeDeepSeek:
         display_file_name: str | None,
         model: str,
         prompt: str,
+        system_prompt: str | None = None,
         purpose: str = "research_question",
     ) -> str:
         self.calls.append(prompt)
+        self.system_prompts.append(system_prompt)
         self.purposes.append(purpose)
         if self.error_sequence:
             outcome = self.error_sequence.pop(0)
@@ -186,7 +189,7 @@ def test_library_citations_drop_bogus_marks_and_do_not_fall_back() -> None:
         _library_hit("doc-a", "a.pdf", 1, "First fragment text"),
         _library_hit("doc-b", "b.pdf", 2, "Second fragment text"),
     ]
-    _, hits_by_ref = _build_library_prompt("q", hits)
+    *_, hits_by_ref = _build_library_prompt("q", hits)
 
     citations, status = _library_citations_for("答非所引 [d9 r1 p1] 还有 [d1 r9 p1]", hits_by_ref)
 
@@ -206,7 +209,7 @@ def test_library_citations_ignore_ambiguous_legacy_citation_when_doc_page_has_mu
         _library_hit("doc-a", "a.pdf", 1, "First fragment text on page 1"),
         _library_hit("doc-a", "a.pdf", 1, "Second fragment text on page 1"),
     ]
-    _, hits_by_ref = _build_library_prompt("q", hits)
+    *_, hits_by_ref = _build_library_prompt("q", hits)
 
     # Model uses legacy ambiguous [d1 p1] when doc 1 page 1 has two chunks
     citations, status = _library_citations_for("参考了 [d1 p1]", hits_by_ref)
@@ -220,7 +223,7 @@ def test_library_citations_accept_unique_legacy_citation() -> None:
         _library_hit("doc-a", "a.pdf", 1, "Unique fragment on page 1"),
         _library_hit("doc-b", "b.pdf", 3, "Unique fragment on page 3"),
     ]
-    _, hits_by_ref = _build_library_prompt("q", hits)
+    *_, hits_by_ref = _build_library_prompt("q", hits)
 
     # Model uses legacy [d1 p1] and [d2 p3] where each page is unique
     citations, status = _library_citations_for("参考了 [d1 p1] 和 [d2 p3]", hits_by_ref)
@@ -235,7 +238,7 @@ def test_library_citations_distinguishes_multiple_chunks_same_doc_and_page() -> 
         _library_hit("doc-a", "a.pdf", 7, "Chunk 1 on page seven", rects=((10, 10, 50, 50),)),
         _library_hit("doc-a", "a.pdf", 7, "Chunk 2 on page seven", rects=((100, 100, 200, 200),)),
     ]
-    _, hits_by_ref = _build_library_prompt("q", hits)
+    *_, hits_by_ref = _build_library_prompt("q", hits)
 
     # Model cites only the second fragment on page 7: [d1 r2 p7]
     citations, status = _library_citations_for("Only chunk 2 cited [d1 r2 p7]", hits_by_ref)

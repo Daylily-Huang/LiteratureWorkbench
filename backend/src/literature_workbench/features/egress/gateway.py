@@ -107,6 +107,7 @@ class DeepSeekGateway:
         display_file_name: str | None,
         model: str,
         prompt: str,
+        system_prompt: str | None = None,
         purpose: str = "research_question",
     ) -> str:
         """Answer a research question over retrieved fragments.
@@ -118,7 +119,7 @@ class DeepSeekGateway:
         Document context is optional because library-wide calls have no
         single source document.
         """
-        body = self._serialize(model, prompt)
+        body = self._serialize(model, prompt, system_prompt=system_prompt)
         attempt = self._audit.start(
             task_id=task_id,
             authorization_type="registered_library",
@@ -270,9 +271,17 @@ class DeepSeekGateway:
             raise EgressRejected("selection_text_mismatch")
         return str(row["display_name"])
 
-    def _serialize(self, model: str, prompt: str) -> bytes:
+    def _serialize(
+        self,
+        model: str,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+    ) -> bytes:
         try:
-            payload = self._adapter.build_request(model=model, prompt=prompt)
+            payload = self._adapter.build_request(
+                model=model, prompt=prompt, system_prompt=system_prompt
+            )
         except InvalidDeepSeekModel:
             raise EgressRejected("invalid_deepseek_model") from None
         body = json.dumps(
