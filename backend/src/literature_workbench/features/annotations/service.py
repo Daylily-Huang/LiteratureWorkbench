@@ -225,17 +225,21 @@ class PdfAnnotationService:
             backup = Path(str(row["backup_path"]))
             if not backup.is_file():
                 raise AnnotationError("annotation_backup_missing")
-            shutil.copy2(backup, state.path)
-            restored_hash = self._hash_file(state.path)
-            if restored_hash != str(row["pre_content_sha256"]):
-                raise AnnotationError("annotation_restore_failed")
-            identity = self._record_new_version(state)
-            with self._database.transaction() as connection:
-                connection.execute(
-                    "UPDATE pdf_annotation_mutations SET undone_at = ? WHERE id = ?",
-                    (datetime.now(UTC).isoformat(), str(row["id"])),
-                )
-            return identity
+
+            journal = self._write_journal(state, current_hash, backup)
+            try:
+                shutil.copy2(backup, state.path)
+                restored_hash = self._hash_file(state.path)
+                if restored_hash != str(row["pre_content_sha256"]):
+                    raise AnnotationError("annotation_restore_failed")
+                identity = self._record_undo_version(state, str(row["id"]))
+                self._clear_journal(journal)
+                return identity
+            except BaseException:
+                if self._hash_file(state.path) != current_hash and backup.is_file():
+                    shutil.copy2(backup, state.path)
+                self._clear_journal(journal)
+                raise
 
     def restore_baseline(self, document_id: UUID, *, confirm_filename: str) -> dict[str, object]:
         with self._locks.acquire(document_id):
@@ -255,21 +259,27 @@ class PdfAnnotationService:
                 raise AnnotationError("annotation_backup_missing")
             pre_hash = self._hash_file(state.path)
             backup = self._create_snapshot(state, pre_hash)
-            shutil.copy2(baseline, state.path)
-            post_hash = self._hash_file(state.path)
-            if post_hash != str(row["content_sha256"]):
-                shutil.copy2(backup, state.path)
-                raise AnnotationError("annotation_restore_failed")
-            identity = self._record_new_version(state)
-            self._record_mutation(
-                state,
-                operation="restore",
-                annotation_id=None,
-                pre_hash=pre_hash,
-                post_hash=post_hash,
-                backup=backup,
-            )
-            return identity
+            journal = self._write_journal(state, pre_hash, backup)
+            try:
+                shutil.copy2(baseline, state.path)
+                post_hash = self._hash_file(state.path)
+                if post_hash != str(row["content_sha256"]):
+                    raise AnnotationError("annotation_restore_failed")
+                identity = self._record_version_and_mutation(
+                    state,
+                    operation="restore",
+                    annotation_id=None,
+                    pre_hash=pre_hash,
+                    post_hash=post_hash,
+                    backup=backup,
+                )
+                self._clear_journal(journal)
+                return identity
+            except BaseException:
+                if self._hash_file(state.path) != pre_hash:
+                    shutil.copy2(backup, state.path)
+                self._clear_journal(journal)
+                raise
 
     def _mutate(
         self,
@@ -300,8 +310,7 @@ class PdfAnnotationService:
                 post_hash = self._hash_file(state.path)
                 if post_hash == pre_hash:
                     raise AnnotationError("annotation_write_not_persisted")
-                identity = self._record_new_version(state)
-                self._record_mutation(
+                identity = self._record_version_and_mutation(
                     state,
                     operation=operation,
                     annotation_id=annotation_id,
@@ -321,6 +330,7 @@ class PdfAnnotationService:
     def _write_journal(self, state: DocumentState, pre_hash: str, backup: Path) -> Path:
         self._backup_root.mkdir(parents=True, exist_ok=True)
         journal_path = self._backup_root / f"journal-{state.document_id}.json"
+        temp_path = self._backup_root / f"journal-{state.document_id}.tmp"
         record = {
             "document_id": str(state.document_id),
             "path": str(state.path),
@@ -328,7 +338,8 @@ class PdfAnnotationService:
             "backup_path": str(backup),
             "created_at": datetime.now(UTC).isoformat(),
         }
-        journal_path.write_text(json.dumps(record), encoding="utf-8")
+        temp_path.write_text(json.dumps(record), encoding="utf-8")
+        temp_path.replace(journal_path)
         return journal_path
 
     def _clear_journal(self, journal_path: Path) -> None:
@@ -360,7 +371,11 @@ class PdfAnnotationService:
                             shutil.copy2(backup_path, target_path)
                 journal_file.unlink(missing_ok=True)
             except Exception:
-                pass
+                try:
+                    corrupted = journal_file.with_suffix(".corrupted")
+                    journal_file.replace(corrupted)
+                except OSError:
+                    pass
 
     def _load_state(self, document_id: UUID) -> DocumentState:
         with self._database.connect() as connection:
@@ -460,7 +475,16 @@ class PdfAnnotationService:
             raise AnnotationError("annotation_backup_failed")
         return path
 
-    def _record_new_version(self, previous: DocumentState) -> dict[str, object]:
+    def _record_version_and_mutation(
+        self,
+        previous: DocumentState,
+        *,
+        operation: str,
+        annotation_id: str | None,
+        pre_hash: str,
+        post_hash: str,
+        backup: Path,
+    ) -> dict[str, object]:
         stat_result = previous.path.stat()
         content_id = self._hash_file(previous.path)
         version_id = uuid4()
@@ -503,23 +527,6 @@ class PdfAnnotationService:
                     previous.file_id, previous.hard_link_count, now,
                 ),
             )
-        return {
-            "document_id": str(previous.document_id),
-            "current_document_version_id": str(version_id),
-            "content_id": content_id,
-        }
-
-    def _record_mutation(
-        self,
-        state: DocumentState,
-        *,
-        operation: str,
-        annotation_id: str | None,
-        pre_hash: str,
-        post_hash: str,
-        backup: Path,
-    ) -> None:
-        with self._database.transaction() as connection:
             connection.execute(
                 """
                 INSERT INTO pdf_annotation_mutations (
@@ -528,10 +535,72 @@ class PdfAnnotationService:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
                 """,
                 (
-                    str(uuid4()), str(state.document_id), annotation_id, operation,
-                    pre_hash, post_hash, str(backup), datetime.now(UTC).isoformat(),
+                    str(uuid4()), str(previous.document_id), annotation_id, operation,
+                    pre_hash, post_hash, str(backup), now,
                 ),
             )
+        return {
+            "document_id": str(previous.document_id),
+            "current_document_version_id": str(version_id),
+            "content_id": content_id,
+        }
+
+    def _record_undo_version(
+        self,
+        previous: DocumentState,
+        mutation_id: str,
+    ) -> dict[str, object]:
+        stat_result = previous.path.stat()
+        content_id = self._hash_file(previous.path)
+        version_id = uuid4()
+        now = datetime.now(UTC).isoformat()
+        with self._database.transaction() as connection:
+            inserted = connection.execute(
+                """
+                INSERT OR IGNORE INTO contents (
+                  sha256, size_bytes, mime_type, page_count, current_parse_run_id,
+                  title, authors_json, status, created_at, updated_at
+                ) VALUES (?, ?, 'application/pdf', NULL, NULL, NULL, NULL,
+                          'candidate_pdf', ?, ?)
+                """,
+                (content_id, stat_result.st_size, now, now),
+            )
+            if inserted.rowcount == 1:
+                self._queue.enqueue_in_transaction(
+                    connection,
+                    "parse_pdf",
+                    f"parse_pdf:{content_id}",
+                    {"content_id": content_id},
+                )
+            connection.execute(
+                """
+                UPDATE documents SET content_sha256 = ?, size_bytes = ?, mtime_ns = ?,
+                  status = 'candidate_pdf', updated_at = ? WHERE id = ?
+                """,
+                (content_id, stat_result.st_size, stat_result.st_mtime_ns, now, str(previous.document_id)),
+            )
+            connection.execute(
+                """
+                INSERT INTO document_versions (
+                  id, document_id, content_sha256, size_bytes, mtime_ns,
+                  volume_id, file_id, hard_link_count, observed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(version_id), str(previous.document_id), content_id,
+                    stat_result.st_size, stat_result.st_mtime_ns, previous.volume_id,
+                    previous.file_id, previous.hard_link_count, now,
+                ),
+            )
+            connection.execute(
+                "UPDATE pdf_annotation_mutations SET undone_at = ? WHERE id = ?",
+                (now, mutation_id),
+            )
+        return {
+            "document_id": str(previous.document_id),
+            "current_document_version_id": str(version_id),
+            "content_id": content_id,
+        }
 
     def _prune_snapshots(self, document_id: UUID) -> None:
         directory = self._document_backup_dir(document_id) / "snapshots"

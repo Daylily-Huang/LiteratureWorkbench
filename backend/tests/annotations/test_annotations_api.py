@@ -4,8 +4,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from uuid import UUID
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 
 from literature_workbench.api.app import create_app
@@ -254,5 +256,33 @@ def test_annotation_crash_journal_recovery(tmp_path: Path) -> None:
         # Target file restored to pre-mutation hash and journal cleaned up
         assert _hash(source) == original_hash
         assert not journal_file.exists()
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_atomic_mutation_rollback_on_db_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, session, source, document_id = _registered_client(tmp_path)
+    try:
+        original_hash = _hash(source)
+        detail = client.get(f"/api/documents/{document_id}").json()
+
+        service = client.app.state.annotation_service
+        def failing_record(*args: object, **kwargs: object) -> dict[str, object]:
+            raise RuntimeError("simulated_db_crash")
+        monkeypatch.setattr(service, "_record_version_and_mutation", failing_record)
+
+        with pytest.raises(RuntimeError, match="simulated_db_crash"):
+            service.create(
+                UUID(str(detail["document_id"])),
+                document_version_id=UUID(str(detail["current_document_version_id"])),
+                content_id=str(detail["content_id"]),
+                page_number=1,
+                annotation_type="highlight",
+                quads=[[72, 410, 260, 410, 72, 428, 260, 428]],
+                color="yellow",
+                comment="",
+            )
+
+        assert _hash(source) == original_hash
     finally:
         client.__exit__(None, None, None)
