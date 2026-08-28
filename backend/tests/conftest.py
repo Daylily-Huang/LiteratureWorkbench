@@ -67,7 +67,12 @@ def client(
 ) -> Iterator[TestClient]:
     settings = AppSettings(data_root=tmp_path, allowed_hosts=("testserver",))
     with TestClient(
-        create_app(settings, local_session=session, secret_store=secret_store),
+        create_app(
+            settings,
+            local_session=session,
+            secret_store=secret_store,
+            register_initial_library=False,
+        ),
         base_url="http://testserver",
     ) as test_client:
         yield test_client

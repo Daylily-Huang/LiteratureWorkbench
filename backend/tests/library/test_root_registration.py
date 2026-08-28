@@ -373,8 +373,22 @@ def test_initial_approved_root_is_fixed_and_environment_override_is_ignored(
     library = service.register_initial_approved_library()
 
     assert inspector.inspected == [INITIAL_APPROVED_LIBRARY]
+    assert library is not None
     assert library.canonical_path == INITIAL_APPROVED_LIBRARY
     assert library.authorization_source == "initial_user_approved"
+
+
+def test_initial_approved_root_missing_fails_safely(tmp_path: Path) -> None:
+    database = Database.open(tmp_path / "library.db")
+    run_migrations(database)
+    inspector = FakeInspector(FileNotFoundError("not found"))
+    service = LibraryRootService(
+        LibraryRepository(database),
+        inspector,
+        private_data_root=tmp_path / "private-data",
+    )
+
+    assert service.register_initial_approved_library() is None
 
 
 def test_select_root_requires_central_session_and_csrf_policy(tmp_path: Path) -> None:
