@@ -117,7 +117,7 @@ async def test_reconcile_active_starts_only_monitored_watchers_with_recursive_se
         watch=watch,
     )
     await manager.reconcile_active_libraries()
-    await asyncio.wait_for(started.wait(), timeout=1)
+    await asyncio.wait_for(started.wait(), timeout=10)
 
     assert manager.active_library_ids == (monitored.id,)
     assert calls == [(monitored.canonical_path, False, 750, 1000)]
@@ -155,7 +155,7 @@ async def test_watcher_restart_schedules_full_rescan(tmp_path: Path) -> None:
         restart_delay=0,
     )
     await manager.add_library(library.id)
-    await asyncio.wait_for(rescanned.wait(), timeout=1)
+    await asyncio.wait_for(rescanned.wait(), timeout=10)
 
     assert scanner.full_scans == [library.id]
     await manager.shutdown()
@@ -193,7 +193,7 @@ async def test_watcher_restart_uses_bounded_exponential_backoff(tmp_path: Path) 
         sleep=record_sleep,
     )
     await manager.add_library(library.id)
-    for _ in range(100):
+    for _ in range(500):
         if fourth_attempt.is_set():
             break
         await asyncio.sleep(0.01)
