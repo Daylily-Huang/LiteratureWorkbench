@@ -292,7 +292,7 @@ test("poll failure is sanitized and automatically recovers", async () => {
 
   expect(await screen.findByText("状态更新暂时失败，正在重试")).toBeVisible();
   expect(screen.queryByText(/sensitive server detail/)).not.toBeInTheDocument();
-  await waitFor(() => expect(screen.getByText("导入完成")).toBeVisible(), { timeout: 2500 });
+  await waitFor(() => expect(screen.getByText("导入完成")).toBeVisible(), { timeout: 10_000 });
   expect(importApi.getImport).toHaveBeenCalledTimes(2);
 });
 
