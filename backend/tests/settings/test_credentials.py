@@ -64,10 +64,17 @@ def test_production_factory_ignores_environment_selected_backend(monkeypatch: py
         "keyring.get_keyring",
         lambda: pytest.fail("environment-selected keyring must not be queried"),
     )
+    class FakeAvailableWinVault:
+        priority = 1
+
+    monkeypatch.setattr(
+        "literature_workbench.platform.windows.credentials.WinVaultKeyring",
+        FakeAvailableWinVault,
+    )
 
     store = create_windows_secret_store()
 
-    assert "WinVaultKeyring" in repr(store)
+    assert "FakeAvailableWinVault" in repr(store)
     assert os.environ["PYTHON_KEYRING_BACKEND"] == "hostile.plaintext.Backend"
 
 
