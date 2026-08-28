@@ -4,6 +4,8 @@ backend/.mypy_cache/
 backend/.ruff_cache/
 backend/**/__pycache__/
 backend/.coverage
+backend/uv.lock
+*.egg-info/
 web/node_modules/
 web/dist/
 web/playwright-report/
