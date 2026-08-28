@@ -46,7 +46,14 @@ jobs:
       - name: Run Pytest Suite
         working-directory: backend
         run: |
-          python -m pytest
+          python -m pytest -v --tb=short -ra --junitxml=pytest-results.xml
+
+      - name: Upload Pytest Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: backend/pytest-results.xml
 
   frontend:
     name: Frontend Typecheck, Test & Build
