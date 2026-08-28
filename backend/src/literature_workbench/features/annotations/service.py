@@ -222,22 +222,24 @@ class PdfAnnotationService:
                 raise AnnotationError("annotation_undo_unavailable")
             if current_hash != str(row["post_content_sha256"]):
                 raise AnnotationError("annotation_external_change")
-            backup = Path(str(row["backup_path"]))
-            if not backup.is_file():
+            history_target = Path(str(row["backup_path"]))
+            if not history_target.is_file():
                 raise AnnotationError("annotation_backup_missing")
 
-            journal = self._write_journal(state, current_hash, backup)
+            safety_backup = self._create_snapshot(state, current_hash)
+            journal = self._write_journal(state, current_hash, safety_backup)
             try:
-                shutil.copy2(backup, state.path)
+                shutil.copy2(history_target, state.path)
                 restored_hash = self._hash_file(state.path)
                 if restored_hash != str(row["pre_content_sha256"]):
                     raise AnnotationError("annotation_restore_failed")
                 identity = self._record_undo_version(state, str(row["id"]))
+                self._prune_snapshots(state.document_id)
                 self._clear_journal(journal)
                 return identity
             except BaseException:
-                if self._hash_file(state.path) != current_hash and backup.is_file():
-                    shutil.copy2(backup, state.path)
+                if self._hash_file(state.path) != current_hash and safety_backup.is_file():
+                    shutil.copy2(safety_backup, state.path)
                 self._clear_journal(journal)
                 raise
 

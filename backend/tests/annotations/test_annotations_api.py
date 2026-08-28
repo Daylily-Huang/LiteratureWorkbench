@@ -286,3 +286,39 @@ def test_atomic_mutation_rollback_on_db_error(tmp_path: Path, monkeypatch: pytes
         assert _hash(source) == original_hash
     finally:
         client.__exit__(None, None, None)
+
+
+def test_undo_rollback_on_db_error_preserves_current_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, session, source, document_id = _registered_client(tmp_path)
+    try:
+        detail = client.get(f"/api/documents/{document_id}").json()
+        service = client.app.state.annotation_service
+
+        # Perform mutation A -> B
+        service.create(
+            UUID(str(detail["document_id"])),
+            document_version_id=UUID(str(detail["current_document_version_id"])),
+            content_id=str(detail["content_id"]),
+            page_number=1,
+            annotation_type="highlight",
+            quads=[[72, 410, 260, 410, 72, 428, 260, 428]],
+            color="yellow",
+            comment="",
+        )
+        state_b_hash = _hash(source)
+
+        # Simulate failure during undo DB record
+        def failing_undo_record(*args: object, **kwargs: object) -> dict[str, object]:
+            raise RuntimeError("simulated_undo_db_crash")
+
+        monkeypatch.setattr(service, "_record_undo_version", failing_undo_record)
+
+        with pytest.raises(RuntimeError, match="simulated_undo_db_crash"):
+            service.undo(UUID(str(detail["document_id"])))
+
+        # Crucial invariant: if undo fails mid-way, source PDF must remain at State B
+        assert _hash(source) == state_b_hash
+    finally:
+        client.__exit__(None, None, None)
