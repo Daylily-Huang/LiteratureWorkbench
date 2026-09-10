@@ -132,11 +132,34 @@ class RagChunkRepository:
         ]
 
     def indexed_content_count(self) -> int:
-        """Distinct contents with a chunk index — the coverage figure shown
-        in the UI for library-wide answers."""
+        """Distinct active, valid contents with a chunk index matching current parse run."""
         with self._database.connect() as connection:
             row = connection.execute(
-                "SELECT count(DISTINCT content_sha256) FROM rag_chunks"
+                """
+                SELECT count(DISTINCT d.content_sha256)
+                FROM rag_chunks AS c
+                LEFT JOIN contents AS co ON co.sha256 = c.content_sha256
+                JOIN documents AS d ON d.content_sha256 = c.content_sha256
+                JOIN libraries AS l ON l.id = d.library_id AND l.status = 'active'
+                WHERE d.status IN ('candidate_pdf', 'valid_pdf') AND d.format = 'pdf'
+                  AND (co.current_parse_run_id IS NULL OR co.current_parse_run_id = c.parse_run_id)
+                """
+            ).fetchone()
+        return int(row[0])
+
+    def indexed_document_count(self) -> int:
+        """Distinct active, valid documents with a chunk index matching current parse run."""
+        with self._database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT count(DISTINCT d.id)
+                FROM rag_chunks AS c
+                LEFT JOIN contents AS co ON co.sha256 = c.content_sha256
+                JOIN documents AS d ON d.content_sha256 = c.content_sha256
+                JOIN libraries AS l ON l.id = d.library_id AND l.status = 'active'
+                WHERE d.status IN ('candidate_pdf', 'valid_pdf') AND d.format = 'pdf'
+                  AND (co.current_parse_run_id IS NULL OR co.current_parse_run_id = c.parse_run_id)
+                """
             ).fetchone()
         return int(row[0])
 
@@ -160,10 +183,12 @@ class RagChunkRepository:
                        bm25(rag_chunks_fts) AS score
                 FROM rag_chunks_fts
                 JOIN rag_chunks AS c ON c.id=rag_chunks_fts.chunk_id
+                LEFT JOIN contents AS co ON co.sha256=c.content_sha256
                 JOIN documents AS d ON d.content_sha256=c.content_sha256
-                  AND d.status IN ('candidate_pdf','valid_pdf')
+                  AND d.status IN ('candidate_pdf','valid_pdf') AND d.format='pdf'
                 JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
                 WHERE rag_chunks_fts MATCH ?
+                  AND (co.current_parse_run_id IS NULL OR co.current_parse_run_id = c.parse_run_id)
                 ORDER BY score
                 LIMIT ?
                 """,

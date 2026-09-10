@@ -251,7 +251,7 @@ class ResearchService:
         if len(question) > _MAX_QUESTION_CHARS:
             raise ResearchError("question_too_long")
         self._ensure_library_index()
-        indexed_documents = self._repository.indexed_content_count()
+        indexed_documents = self._repository.indexed_document_count()
         settings = self._settings.read()
         hits = self._retriever.search_library(question)
         if (

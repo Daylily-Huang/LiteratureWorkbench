@@ -388,3 +388,97 @@ def test_ask_library_empty_library_reports_zero_coverage(
     assert answer.indexed_documents == 0
     assert answer.citation_status == "missing"
     assert deepseek.calls == []
+
+
+def test_indexed_coverage_filters_missing_and_disabled_libraries(
+    research_db: Database,
+) -> None:
+    _seed_document(
+        research_db,
+        content_id="9" * 64,
+        display_name="paper.pdf",
+        page_texts=[["Alpha beta gamma"]],
+    )
+    repository = RagChunkRepository(research_db)
+    service = _service(research_db, FakeDeepSeek())
+
+    # Initial ask populates index: 1 active document
+    answer = service.ask_library(question="What is alpha?")
+    assert answer.indexed_documents == 1
+    assert repository.indexed_content_count() == 1
+    assert repository.indexed_document_count() == 1
+    assert len(repository.search_all('"alpha"', limit=10)) == 1
+
+    # Mark document missing
+    with research_db.transaction() as conn:
+        conn.execute("UPDATE documents SET status = 'missing'")
+
+    answer_missing = service.ask_library(question="What is alpha?")
+    assert answer_missing.indexed_documents == 0
+    assert repository.indexed_content_count() == 0
+    assert repository.indexed_document_count() == 0
+    assert len(repository.search_all('"alpha"', limit=10)) == 0
+
+    # Restore document, but disable library
+    with research_db.transaction() as conn:
+        conn.execute("UPDATE documents SET status = 'valid_pdf'")
+        conn.execute("UPDATE libraries SET status = 'disabled'")
+
+    answer_disabled = service.ask_library(question="What is alpha?")
+    assert answer_disabled.indexed_documents == 0
+    assert repository.indexed_content_count() == 0
+    assert repository.indexed_document_count() == 0
+    assert len(repository.search_all('"alpha"', limit=10)) == 0
+
+
+def test_indexed_coverage_multi_path_same_content(
+    research_db: Database,
+) -> None:
+    # Two documents pointing to the SAME content_sha256
+    shared_content = "a" * 64
+    _seed_document(
+        research_db,
+        content_id=shared_content,
+        display_name="doc1.pdf",
+        page_texts=[["Machine learning and neural networks"]],
+    )
+    _seed_document(
+        research_db,
+        content_id=shared_content,
+        display_name="doc2_copy.pdf",
+        page_texts=[["Machine learning and neural networks"]],
+    )
+    repository = RagChunkRepository(research_db)
+    service = _service(research_db, FakeDeepSeek())
+
+    answer = service.ask_library(question="What is machine learning?")
+    # 2 documents in library, 1 distinct content
+    assert answer.indexed_documents == 2
+    assert repository.indexed_document_count() == 2
+    assert repository.indexed_content_count() == 1
+
+
+def test_indexed_coverage_stale_parse_run_excluded(
+    research_db: Database,
+) -> None:
+    content_id = "b" * 64
+    _seed_document(
+        research_db,
+        content_id=content_id,
+        display_name="stale_test.pdf",
+        page_texts=[["Genomics and transcriptomics analysis"]],
+    )
+    repository = RagChunkRepository(research_db)
+    service = _service(research_db, FakeDeepSeek())
+
+    service.ask_library(question="What is genomics?")
+    assert repository.indexed_document_count() == 1
+    assert repository.indexed_content_count() == 1
+
+    # Simulate new parse run completed for content, leaving old chunks in rag_chunks
+    publish_pages(research_db, content_id, [make_page(1, ["Genomics update"])])
+
+    # Before index rebuild, old chunks belong to outdated parse run -> excluded from active counts and search
+    assert repository.indexed_document_count() == 0
+    assert repository.indexed_content_count() == 0
+    assert len(repository.search_all('"genomics"', limit=10)) == 0
