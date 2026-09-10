@@ -226,6 +226,7 @@ export function AssistantPanel({
 
   const requestIdRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const inFlightScopeRef = useRef<Scope | null>(null);
   const prevDocumentIdRef = useRef<string | null>(readerDocument?.documentId ?? null);
 
   // Sync draft question from parent (e.g. Dashboard)
@@ -236,17 +237,20 @@ export function AssistantPanel({
     }
   }, [draftQuestion, onDraftQuestionConsumed]);
 
-  // Cancel in-flight requests and clear state on document switch
+  // Cancel in-flight document requests and clear single-document state on document switch
   useEffect(() => {
     const currentDocId = readerDocument?.documentId ?? null;
     if (prevDocumentIdRef.current !== currentDocId) {
       prevDocumentIdRef.current = currentDocId;
-      abortRef.current?.abort();
-      abortRef.current = null;
-      requestIdRef.current++;
-      setBusy(false);
-      setAnswer(null);
-      setErrorCode(null);
+      if (inFlightScopeRef.current === "document") {
+        abortRef.current?.abort();
+        abortRef.current = null;
+        inFlightScopeRef.current = null;
+        requestIdRef.current++;
+        setBusy(false);
+        setErrorCode(null);
+      }
+      setAnswer((prev) => (prev?.scope === "library" ? prev : null));
     }
   }, [readerDocument?.documentId]);
 
@@ -261,6 +265,7 @@ export function AssistantPanel({
     if (nextScope !== scope) {
       abortRef.current?.abort();
       abortRef.current = null;
+      inFlightScopeRef.current = null;
       requestIdRef.current++;
       setBusy(false);
       setScope(nextScope);
@@ -281,6 +286,7 @@ export function AssistantPanel({
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    inFlightScopeRef.current = effectiveScope;
 
     setBusy(true);
     setErrorCode(null);
@@ -340,6 +346,7 @@ export function AssistantPanel({
     } finally {
       if (requestId === requestIdRef.current) {
         setBusy(false);
+        inFlightScopeRef.current = null;
       }
     }
   }

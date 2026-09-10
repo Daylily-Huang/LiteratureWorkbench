@@ -114,6 +114,8 @@ export function Workbench() {
     setAnnotationError(null);
     setActiveAnnotationId(null);
     setRequestedPage(undefined);
+    setCitationHighlight(null);
+    setPendingCitation((prev) => (prev?.documentId === location.documentId ? prev : null));
 
     if (location.documentId === null) return undefined;
     const controller = new AbortController();
@@ -237,7 +239,9 @@ export function Workbench() {
   }
 
   function jumpToCitation(citation: ResearchCitation) {
+    if (document === null) return;
     setCitationHighlight({
+      documentId: document.documentId,
       page: citation.physical_page,
       rects: citation.rects,
       nonce: Date.now(),
@@ -268,6 +272,7 @@ export function Workbench() {
     if (document === null || pendingCitation === null) return;
     if (pendingCitation.documentId !== document.documentId) return;
     setCitationHighlight({
+      documentId: document.documentId,
       page: pendingCitation.page,
       rects: pendingCitation.rects,
       nonce: Date.now(),

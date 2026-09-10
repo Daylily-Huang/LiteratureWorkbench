@@ -56,6 +56,7 @@ export type ReaderDocument = {
 };
 
 export type CitationJump = {
+  documentId?: string;
   page: number;
   rects: readonly PdfRect[] | number[][];
   nonce: number;
@@ -725,7 +726,12 @@ export function PdfReader({
               activeAnnotationId={activeAnnotationId}
               annotationBusy={annotationBusy}
               annotations={annotationsByPage.get(index + 1) ?? []}
-              citationHighlight={citationHighlight?.page === index + 1 ? citationHighlight : null}
+              citationHighlight={
+                citationHighlight?.page === index + 1 &&
+                (!citationHighlight.documentId || citationHighlight.documentId === documentId)
+                  ? citationHighlight
+                  : null
+              }
               onAnnotateSelection={onAnnotateSelection}
               onCancelSelection={() => {
                 setSelected(null);
