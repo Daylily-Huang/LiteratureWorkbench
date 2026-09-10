@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import shutil
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -19,6 +20,7 @@ from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.platform.windows.filesystem import SafeFileInspector, UnsafePath
 
 
+LOGGER = logging.getLogger("literature_workbench.annotations")
 APP_TITLE = "Literature Workbench"
 APP_SUBJECT_PREFIX = "lw:"
 ANNOTATION_COLORS: dict[str, tuple[float, float, float]] = {
@@ -228,20 +230,23 @@ class PdfAnnotationService:
 
             safety_backup = self._create_snapshot(state, current_hash)
             journal = self._write_journal(state, current_hash, safety_backup)
+            committed = False
             try:
                 shutil.copy2(history_target, state.path)
                 restored_hash = self._hash_file(state.path)
                 if restored_hash != str(row["pre_content_sha256"]):
                     raise AnnotationError("annotation_restore_failed")
                 identity = self._record_undo_version(state, str(row["id"]))
-                self._prune_snapshots(state.document_id)
+                committed = True
                 self._clear_journal(journal)
-                return identity
             except BaseException:
-                if self._hash_file(state.path) != current_hash and safety_backup.is_file():
-                    shutil.copy2(safety_backup, state.path)
-                self._clear_journal(journal)
+                if not committed:
+                    if self._hash_file(state.path) != current_hash and safety_backup.is_file():
+                        shutil.copy2(safety_backup, state.path)
+                    self._clear_journal(journal)
                 raise
+            self._safe_prune_snapshots(state.document_id)
+            return identity
 
     def restore_baseline(self, document_id: UUID, *, confirm_filename: str) -> dict[str, object]:
         with self._locks.acquire(document_id):
@@ -262,6 +267,7 @@ class PdfAnnotationService:
             pre_hash = self._hash_file(state.path)
             backup = self._create_snapshot(state, pre_hash)
             journal = self._write_journal(state, pre_hash, backup)
+            committed = False
             try:
                 shutil.copy2(baseline, state.path)
                 post_hash = self._hash_file(state.path)
@@ -275,13 +281,16 @@ class PdfAnnotationService:
                     post_hash=post_hash,
                     backup=backup,
                 )
+                committed = True
                 self._clear_journal(journal)
-                return identity
             except BaseException:
-                if self._hash_file(state.path) != pre_hash:
-                    shutil.copy2(backup, state.path)
-                self._clear_journal(journal)
+                if not committed:
+                    if self._hash_file(state.path) != pre_hash:
+                        shutil.copy2(backup, state.path)
+                    self._clear_journal(journal)
                 raise
+            self._safe_prune_snapshots(state.document_id)
+            return identity
 
     def _mutate(
         self,
@@ -300,6 +309,7 @@ class PdfAnnotationService:
             self._ensure_baseline(state, pre_hash)
             backup = self._create_snapshot(state, pre_hash)
             journal = self._write_journal(state, pre_hash, backup)
+            committed = False
             try:
                 with fitz.open(state.path) as document:
                     if document.is_encrypted or not document.can_save_incrementally():
@@ -320,14 +330,16 @@ class PdfAnnotationService:
                     post_hash=post_hash,
                     backup=backup,
                 )
-                self._prune_snapshots(state.document_id)
+                committed = True
                 self._clear_journal(journal)
-                return {"annotation_id": annotation_id, **identity}
             except BaseException:
-                if self._hash_file(state.path) != pre_hash:
-                    shutil.copy2(backup, state.path)
-                self._clear_journal(journal)
+                if not committed:
+                    if self._hash_file(state.path) != pre_hash:
+                        shutil.copy2(backup, state.path)
+                    self._clear_journal(journal)
                 raise
+            self._safe_prune_snapshots(state.document_id)
+            return {"annotation_id": annotation_id, **identity}
 
     def _write_journal(self, state: DocumentState, pre_hash: str, backup: Path) -> Path:
         self._backup_root.mkdir(parents=True, exist_ok=True)
@@ -335,9 +347,13 @@ class PdfAnnotationService:
         temp_path = self._backup_root / f"journal-{state.document_id}.tmp"
         record = {
             "document_id": str(state.document_id),
+            "library_id": str(state.library_id),
             "path": str(state.path),
             "pre_hash": pre_hash,
             "backup_path": str(backup),
+            "volume_id": state.volume_id,
+            "file_id": state.file_id,
+            "hard_link_count": state.hard_link_count,
             "created_at": datetime.now(UTC).isoformat(),
         }
         temp_path.write_text(json.dumps(record), encoding="utf-8")
@@ -356,22 +372,131 @@ class PdfAnnotationService:
         for journal_file in self._backup_root.glob("journal-*.json"):
             try:
                 record = json.loads(journal_file.read_text(encoding="utf-8"))
-                doc_id = record["document_id"]
-                target_path = Path(record["path"])
-                pre_hash = record["pre_hash"]
-                backup_path = Path(record["backup_path"])
+                doc_id = str(record["document_id"])
+                target_path = Path(str(record["path"]))
+                pre_hash = str(record["pre_hash"])
+                backup_path = Path(str(record["backup_path"]))
 
                 with self._database.connect() as connection:
                     row = connection.execute(
-                        "SELECT content_sha256 FROM documents WHERE id = ?",
+                        """
+                        SELECT library_id, content_sha256, status, volume_id, file_id, hard_link_count
+                        FROM documents WHERE id = ?
+                        """,
                         (doc_id,),
                     ).fetchone()
-                if row is not None and row["content_sha256"] == pre_hash:
-                    if target_path.exists() and backup_path.is_file():
-                        current_hash = self._hash_file(target_path)
-                        if current_hash != pre_hash:
-                            shutil.copy2(backup_path, target_path)
-                journal_file.unlink(missing_ok=True)
+                if row is None:
+                    journal_file.unlink(missing_ok=True)
+                    continue
+                if row["content_sha256"] != pre_hash:
+                    # DB was already committed prior to crash; no recovery needed.
+                    journal_file.unlink(missing_ok=True)
+                    continue
+
+                # Document DB record is still at pre_hash. Check if recovery is required and safe.
+                if not target_path.exists():
+                    LOGGER.warning(
+                        "Crash recovery conflict for document %s: target file %s does not exist. "
+                        "Preserving backup and journal.",
+                        doc_id,
+                        target_path,
+                    )
+                    continue
+
+                if not backup_path.is_file() or self._hash_file(backup_path) != pre_hash:
+                    LOGGER.warning(
+                        "Crash recovery conflict for document %s: backup file %s is missing or corrupted. "
+                        "Preserving target file, backup, and journal.",
+                        doc_id,
+                        backup_path,
+                    )
+                    continue
+
+                raw_library_id = record.get("library_id") or row["library_id"]
+                try:
+                    library_id = UUID(str(raw_library_id))
+                    library = self._library_repository.get(library_id)
+                except (KeyError, ValueError):
+                    LOGGER.warning(
+                        "Crash recovery conflict for document %s: library %s not found. "
+                        "Preserving target file, backup, and journal.",
+                        doc_id,
+                        raw_library_id,
+                    )
+                    continue
+
+                if library.status != "active":
+                    LOGGER.warning(
+                        "Crash recovery conflict for document %s: library %s is %s. "
+                        "Preserving target file, backup, and journal.",
+                        doc_id,
+                        library_id,
+                        library.status,
+                    )
+                    continue
+
+                try:
+                    identity = self._file_inspector.inspect_under_root(target_path, library)
+                except (KeyError, OSError, UnsafePath) as inspect_err:
+                    LOGGER.warning(
+                        "Crash recovery conflict for document %s: target path %s unsafe or invalid: %s. "
+                        "Preserving target file, backup, and journal.",
+                        doc_id,
+                        target_path,
+                        inspect_err,
+                    )
+                    continue
+
+                expected_volume_id = str(record.get("volume_id") or row["volume_id"])
+                expected_file_id = str(record.get("file_id") or row["file_id"])
+                expected_hard_links = int(record.get("hard_link_count") or row["hard_link_count"])
+
+                if (
+                    identity.volume_id != expected_volume_id
+                    or identity.file_id != expected_file_id
+                    or identity.hard_link_count != expected_hard_links
+                    or identity.hard_link_count != 1
+                ):
+                    LOGGER.warning(
+                        "Crash recovery conflict for document %s: file identity mismatch on %s "
+                        "(expected volume=%s file=%s links=%s; observed volume=%s file=%s links=%s). "
+                        "Preserving target file, backup, and journal.",
+                        doc_id,
+                        target_path,
+                        expected_volume_id,
+                        expected_file_id,
+                        expected_hard_links,
+                        identity.volume_id,
+                        identity.file_id,
+                        identity.hard_link_count,
+                    )
+                    continue
+
+                current_hash = self._hash_file(target_path)
+                if current_hash == pre_hash:
+                    # File on disk is already clean.
+                    journal_file.unlink(missing_ok=True)
+                else:
+                    # Normal half-written mutation: safely restore from verified backup.
+                    try:
+                        shutil.copy2(backup_path, target_path)
+                        restored_hash = self._hash_file(target_path)
+                        if restored_hash != pre_hash:
+                            LOGGER.error(
+                                "Crash recovery failed for document %s: restored hash mismatch. "
+                                "Preserving journal.",
+                                doc_id,
+                            )
+                            continue
+                        journal_file.unlink(missing_ok=True)
+                    except OSError as copy_err:
+                        LOGGER.error(
+                            "Crash recovery copy failed for document %s: %s. Preserving journal.",
+                            doc_id,
+                            copy_err,
+                            exc_info=True,
+                        )
+                        continue
             except Exception:
                 try:
                     corrupted = journal_file.with_suffix(".corrupted")
@@ -603,6 +728,16 @@ class PdfAnnotationService:
             "current_document_version_id": str(version_id),
             "content_id": content_id,
         }
+
+    def _safe_prune_snapshots(self, document_id: UUID) -> None:
+        try:
+            self._prune_snapshots(document_id)
+        except Exception:
+            LOGGER.warning(
+                "Failed to prune snapshots for document %s",
+                document_id,
+                exc_info=True,
+            )
 
     def _prune_snapshots(self, document_id: UUID) -> None:
         directory = self._document_backup_dir(document_id) / "snapshots"

@@ -322,3 +322,156 @@ def test_undo_rollback_on_db_error_preserves_current_state(
         assert _hash(source) == state_b_hash
     finally:
         client.__exit__(None, None, None)
+
+
+def test_postcommit_pruning_failure_preserves_pdf_and_db_consistency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, session, source, doc_id = _registered_client(tmp_path)
+    try:
+        detail = client.get(f"/api/documents/{doc_id}").json()
+        service = client.app.state.annotation_service
+        original_hash = _hash(source)
+
+        def failing_prune(*args: object, **kwargs: object) -> None:
+            raise PermissionError("simulated locked old snapshot")
+
+        monkeypatch.setattr(service, "_prune_snapshots", failing_prune)
+
+        # Mutation must succeed even if pruning old snapshots encounters a lock/permission error
+        result = service.create(
+            UUID(doc_id),
+            document_version_id=UUID(detail["current_document_version_id"]),
+            content_id=detail["content_id"],
+            page_number=1,
+            annotation_type="highlight",
+            quads=[[72, 410, 260, 410, 72, 428, 260, 428]],
+            color="yellow",
+            comment="",
+        )
+        assert result["content_id"] != original_hash
+        assert _hash(source) == result["content_id"]
+
+        after = client.get(f"/api/documents/{doc_id}").json()
+        assert after["content_id"] == result["content_id"]
+
+        # Annotations read must return 200 without version conflict
+        annotations_resp = client.get(f"/api/documents/{doc_id}/annotations")
+        assert annotations_resp.status_code == 200
+        assert len(annotations_resp.json()["items"]) == 2
+
+        # Crash recovery journal must be clean
+        backup_root = tmp_path / "data" / ".annotation-backups"
+        assert not (backup_root / f"journal-{doc_id}.json").exists()
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_crash_recovery_preserves_externally_replaced_file(tmp_path: Path) -> None:
+    client, session, source, doc_id = _registered_client(tmp_path)
+    try:
+        service = client.app.state.annotation_service
+        backup_root = tmp_path / "data" / ".annotation-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        backup = backup_root / "snapshot.pdf"
+        backup.write_bytes(source.read_bytes())
+        before_hash = _hash(source)
+
+        # External editor replaces the file with a new file
+        replacement = source.with_name("replacement.pdf")
+        _source_pdf(replacement)
+        with fitz.open(replacement) as pdf:
+            pdf[0].insert_text((72, 150), "External edit that must survive")
+            pdf.saveIncr()
+        replacement.replace(source)
+        external_hash = _hash(source)
+        assert external_hash != before_hash
+
+        journal = backup_root / f"journal-{doc_id}.json"
+        journal.write_text(
+            json.dumps({
+                "document_id": doc_id,
+                "path": str(source),
+                "pre_hash": before_hash,
+                "backup_path": str(backup),
+            }),
+            encoding="utf-8",
+        )
+
+        service.reconcile_crashed_mutations()
+
+        # External replacement must NOT be overwritten!
+        assert _hash(source) == external_hash
+        assert backup.exists()
+        assert journal.exists()
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_crash_recovery_corrupted_backup_preserves_target_and_journal(tmp_path: Path) -> None:
+    client, session, source, doc_id = _registered_client(tmp_path)
+    try:
+        service = client.app.state.annotation_service
+        backup_root = tmp_path / "data" / ".annotation-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        backup = backup_root / "snapshot.pdf"
+        backup.write_bytes(b"%PDF-corrupted-snapshot-bytes")
+        before_hash = _hash(source)
+
+        # Corrupt file on disk
+        source.write_bytes(b"%PDF-half-written-on-disk")
+
+        journal = backup_root / f"journal-{doc_id}.json"
+        journal.write_text(
+            json.dumps({
+                "document_id": doc_id,
+                "path": str(source),
+                "pre_hash": before_hash,
+                "backup_path": str(backup),
+            }),
+            encoding="utf-8",
+        )
+
+        service.reconcile_crashed_mutations()
+
+        # Because backup hash != pre_hash, recovery must fail-closed and preserve journal
+        assert journal.exists()
+        assert source.read_bytes() == b"%PDF-half-written-on-disk"
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_crash_recovery_inactive_library_preserves_target_and_journal(tmp_path: Path) -> None:
+    client, session, source, doc_id = _registered_client(tmp_path)
+    try:
+        service = client.app.state.annotation_service
+        backup_root = tmp_path / "data" / ".annotation-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        backup = backup_root / "snapshot.pdf"
+        backup.write_bytes(source.read_bytes())
+        before_hash = _hash(source)
+
+        source.write_bytes(b"%PDF-half-written")
+
+        # Deactivate library in DB
+        with client.app.state.database.transaction() as conn:
+            conn.execute("UPDATE libraries SET status = 'disabled'")
+
+        journal = backup_root / f"journal-{doc_id}.json"
+        journal.write_text(
+            json.dumps({
+                "document_id": doc_id,
+                "path": str(source),
+                "pre_hash": before_hash,
+                "backup_path": str(backup),
+            }),
+            encoding="utf-8",
+        )
+
+        service.reconcile_crashed_mutations()
+
+        # Inactive library: cannot recover or overwrite
+        assert journal.exists()
+        assert source.read_bytes() == b"%PDF-half-written"
+    finally:
+        client.__exit__(None, None, None)
