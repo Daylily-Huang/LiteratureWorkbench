@@ -613,7 +613,7 @@ def create_desktop_app(
 
     @app.get("/", include_in_schema=False)
     def spa_root() -> FileResponse:
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": "no-store"})
 
     @app.get("/{requested_path:path}", include_in_schema=False)
     def spa_fallback(requested_path: str) -> FileResponse:
@@ -626,7 +626,7 @@ def create_desktop_app(
             raise HTTPException(status_code=404) from None
         if candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": "no-store"})
 
     return app
 

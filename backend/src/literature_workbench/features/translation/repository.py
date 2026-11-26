@@ -143,11 +143,33 @@ def align_selection_to_candidate(candidate: str, selection: str) -> tuple[str, i
         candidate_positions.append(index)
     compact_candidate = "".join(compact_candidate_characters)
     compact_position = compact_candidate.find(compact_selection)
-    if compact_position < 0:
+    if compact_position >= 0:
+        last_compact_position = compact_position + len(compact_selection) - 1
+        start = candidate_positions[compact_position]
+        end = candidate_positions[last_compact_position] + 1
+        return candidate[start:end], start
+    # NFKC fallback handles PDF ligatures (e.g. 'ﬁ' <-> 'fi', 'ﬂ' <-> 'fl') even for mid-word drags
+    nfkc_selection = "".join(
+        ch for ch in unicodedata.normalize("NFKC", selection) if not ch.isspace()
+    )
+    if not nfkc_selection:
         return None
-    last_compact_position = compact_position + len(compact_selection) - 1
-    start = candidate_positions[compact_position]
-    end = candidate_positions[last_compact_position] + 1
+    nfkc_chars: list[str] = []
+    nfkc_positions: list[int] = []
+    for index, character in enumerate(candidate):
+        if character.isspace():
+            continue
+        for expanded in unicodedata.normalize("NFKC", character):
+            if expanded.isspace():
+                continue
+            nfkc_chars.append(expanded)
+            nfkc_positions.append(index)
+    nfkc_candidate = "".join(nfkc_chars)
+    nfkc_pos = nfkc_candidate.find(nfkc_selection)
+    if nfkc_pos < 0:
+        return None
+    start = nfkc_positions[nfkc_pos]
+    end = nfkc_positions[nfkc_pos + len(nfkc_selection) - 1] + 1
     return candidate[start:end], start
 
 

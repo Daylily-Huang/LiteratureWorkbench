@@ -811,3 +811,16 @@ def test_queued_translation_rejects_changed_parse_before_cache_hit(translation_d
     queued = subject.submit("session", request(ids))
     _page_text(database, "Changed page containing selected words")
     assert subject.process_task(queued.id).status == "failed"
+
+
+
+def test_mid_word_selection_with_pdf_ligatures_aligns_cleanly() -> None:
+    from literature_workbench.features.translation.repository import align_selection_to_candidate
+
+    candidate = "The low template threshold decides whether a DNA pro\ufb01le is uploaded as aF."
+    selection = "he low template threshold decides whether a DNA profile is uploaded as a"
+    aligned = align_selection_to_candidate(candidate, selection)
+    assert aligned is not None
+    matched_text, pos = aligned
+    assert pos == 1
+    assert "pro\ufb01le" in matched_text

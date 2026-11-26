@@ -7,7 +7,7 @@ import {
 } from "./selection";
 
 
-const MAX_VISIBLE_RECTS = 200;
+const MAX_VISIBLE_RECTS = 1000;
 const MAX_CONTEXT_CODE_POINTS = 500;
 const SELECTION_HINT = "请在同一栏选择一句或一段";
 // Same-line spans listed far apart in the content stream are column neighbours,
@@ -342,10 +342,12 @@ function mergeRects(rects: DOMRect[]): DOMRect[] {
   for (const rect of ordered) {
     const previous = merged[merged.length - 1];
     if (previous !== undefined) {
+      const minHeight = Math.max(1, Math.min(previous.height, rect.height));
       const verticalOverlap = overlap(previous.top, previous.bottom, rect.top, rect.bottom);
-      const sameLine = verticalOverlap >= Math.min(previous.height, rect.height) * 0.6;
+      const sameLine = verticalOverlap >= minHeight * 0.55;
       const gap = rect.left - previous.right;
-      if (sameLine && gap >= -1 && gap <= 2) {
+      const maxWordGap = Math.max(24, minHeight * 1.8);
+      if (sameLine && gap >= -minHeight * 0.6 && gap <= maxWordGap) {
         const left = Math.min(previous.left, rect.left);
         const top = Math.min(previous.top, rect.top);
         const right = Math.max(previous.right, rect.right);
@@ -652,12 +654,28 @@ function hitsAtPoint(
   ));
   for (const fragment of ordered) {
     const distance = rectDistance(fragment.bounds, x, y);
-    const maximumDistance = strict ? Math.max(6, fragment.bounds.height * 0.5) : 24;
+    const maximumDistance = strict ? Math.max(6, fragment.bounds.height * 0.5) : 48;
     if (distance > maximumDistance) continue;
     if (hits.some((hit) => hit.node === fragment.node)) continue;
     hits.push({
       node: fragment.node,
       offset: measuredOffset(fragment, x, y),
+      clientX: x,
+      clientY: y,
+    });
+  }
+  if (!strict && hits.length === 0 && ordered.length > 0) {
+    const byLine = [...index.fragments].sort((first, second) => {
+      const dy1 = Math.max(first.bounds.top - y, 0, y - first.bounds.bottom);
+      const dy2 = Math.max(second.bounds.top - y, 0, y - second.bounds.bottom);
+      const dx1 = Math.max(first.bounds.left - x, 0, x - first.bounds.right);
+      const dx2 = Math.max(second.bounds.left - x, 0, x - second.bounds.right);
+      return (dy1 * 8 + dx1) - (dy2 * 8 + dx2);
+    });
+    const nearest = byLine[0]!;
+    hits.push({
+      node: nearest.node,
+      offset: measuredOffset(nearest, x, y),
       clientX: x,
       clientY: y,
     });

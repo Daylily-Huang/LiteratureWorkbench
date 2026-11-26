@@ -556,18 +556,49 @@ export function Workbench() {
   return (
     <div className="workbench-shell" data-theme={resolvedTheme}>
       <header className="topbar">
-        <button
-          aria-label="返回文献工作台首页"
-          className="topbar__brand-button"
-          onClick={goHome}
-          type="button"
-        >
-          <span aria-hidden="true" className="topbar__mark">📖</span>
-          <div className="topbar__title-wrap">
+        <div className="topbar__left">
+          <button
+            aria-label="返回文献工作台首页"
+            className="topbar__brand-button"
+            onClick={goHome}
+            type="button"
+          >
+            <span aria-hidden="true" className="topbar__mark">📖</span>
             <strong>Literature Workbench</strong>
-            <span className="topbar__subtitle">文献工作台</span>
-          </div>
-        </button>
+          </button>
+          <nav className="topbar__nav" aria-label="工作区导航">
+            <button
+              type="button"
+              className={`topbar__nav-btn${!deskOpen ? " topbar__nav-btn--active" : ""}`}
+              aria-pressed={!deskOpen}
+              onClick={() => { if (deskOpen && location.documentId) setDeskOpen(false); else if (!location.documentId) goHome(); }}
+            >
+              {location.documentId ? "阅读" : "首页"}
+            </button>
+            <button
+              type="button"
+              className={`topbar__nav-btn${deskOpen ? " topbar__nav-btn--active" : ""}`}
+              aria-pressed={deskOpen}
+              onClick={showLiteratureDesk}
+            >
+              文献总览
+            </button>
+            <button
+              type="button"
+              className="topbar__nav-btn"
+              onClick={() => setNotebook({})}
+            >
+              研究记录
+            </button>
+            <button
+              type="button"
+              className="topbar__nav-btn"
+              onClick={() => setStudioIds(selectedIds.length ? selectedIds : location.documentId ? [location.documentId] : [])}
+            >
+              联读与图谱
+            </button>
+          </nav>
+        </div>
 
         <div className="topbar__document" title={currentDocument?.filename ?? "尚未选择文献"}>
           {currentDocument ? (
@@ -576,16 +607,14 @@ export function Workbench() {
               <span className="topbar__doc-name">{currentDocument.filename}</span>
               <button className="favorite-button" type="button" aria-label={readingRecords[currentDocument.documentId]?.favorite ? "取消收藏当前文献" : "收藏当前文献"} aria-pressed={readingRecords[currentDocument.documentId]?.favorite ?? false} onClick={() => toggleFavorite(currentDocument.documentId)}>{readingRecords[currentDocument.documentId]?.favorite ? "★" : "☆"}</button>
             </div>
-          ) : (
-            <span className="topbar__motto">专注当下，积累复利。你正在构建自己的学术知识体系。</span>
-          )}
+          ) : null}
         </div>
 
         <div className="topbar__actions">
-          <button className="topbar__button" type="button" aria-label="快速打开文献与功能" title="快速打开（Ctrl / ⌘ K）" onClick={() => setQuickOpen(true)}>⌕<span className="topbar__data-label"> 快速打开 <kbd>Ctrl K</kbd></span></button>
+          <button className="topbar__button topbar__search-btn" type="button" aria-label="快速打开文献与功能" title="快速打开（Ctrl / ⌘ K）" onClick={() => setQuickOpen(true)}>⌕<kbd>Ctrl K</kbd></button>
           <button
             aria-expanded={compact ? mobilePanel === "library" : libraryVisible}
-            className="topbar__button"
+            className="topbar__button mobile-only"
             onClick={() => {
               setFocusMode(false);
               if (compact) setMobilePanel(value => value === "library" ? null : "library");
@@ -598,7 +627,7 @@ export function Workbench() {
           <button
             aria-expanded={compact ? mobilePanel === "assistant" : assistantVisible}
             aria-label="助手与笔记"
-            className="topbar__button"
+            className="topbar__button mobile-only"
             onClick={() => {
               setFocusMode(false);
               if (compact) setMobilePanel(value => value === "assistant" ? null : "assistant");
@@ -606,7 +635,7 @@ export function Workbench() {
             }}
             type="button"
           >
-            <span className="topbar__full-label">助手与笔记</span><span className="topbar__compact-label">助手</span>
+            助手
           </button>
           <DeepSeekBilling />
           <button
@@ -616,7 +645,7 @@ export function Workbench() {
             onClick={() => setFocusMode((value) => !value)}
             type="button"
           >
-            <span className="topbar__full-label">{focusMode ? "退出专注" : "专注阅读"}</span><span className="topbar__compact-label">{focusMode ? "退出专注" : "专注"}</span>
+            {focusMode ? "退出专注" : "专注"}
           </button>
           <button
             aria-label={`切换为${resolvedTheme === "dark" ? "浅色" : "深色"}主题`}
@@ -635,12 +664,11 @@ export function Workbench() {
             aria-label="打开设置"
             className="icon-button"
             onClick={() => setSettingsOpen(true)}
-            title="设置"
+            title="设置、术语表与数据备份"
             type="button"
           >
             ⚙
           </button>
-          <button className="topbar__button topbar__data-button" type="button" aria-label="数据与备份" title="数据与备份" onClick={() => setDataCenterOpen(true)}><span aria-hidden="true">▣</span><span className="topbar__data-label"> 数据与备份</span></button>
         </div>
       </header>
 
@@ -673,37 +701,43 @@ export function Workbench() {
         <main inert={compact && mobilePanel !== null} aria-label="PDF 阅读器" className="workbench__reader">
           {recoveredWorkspace && <div className="recovery-workspace-banner" role="status" title={recoveredWorkspace}>恢复工作台 · 当前编辑保存在独立副本中 <button type="button" onClick={() => setDataCenterOpen(true)}>查看位置</button></div>}
           {launchAddress && addressNotice(launchAddress) && <div className="launch-address-notice" role="note"><span>{addressNotice(launchAddress)}</span><button type="button" onClick={() => setDataCenterOpen(true)}>查看地址</button></div>}
-          <nav className="workspace-nav" aria-label="工作区导航">
-            <button type="button" aria-pressed={!deskOpen && location.documentId === null} onClick={goHome}>继续阅读</button>
-            <button type="button" aria-pressed={deskOpen} onClick={showLiteratureDesk}>文献总览</button>
-            <button type="button" onClick={() => setNotebook({})}>研究记录</button>
-            <button type="button" onClick={() => setStudioIds(selectedIds.length ? selectedIds : location.documentId ? [location.documentId] : [])}>联读与图谱</button>
-            {location.documentId && deskOpen && <button type="button" onClick={() => setDeskOpen(false)}>返回原文</button>}
-            {readingDocument && <button type="button" aria-pressed={splitReading} onClick={() => {
-              if (splitReading) { keepCurrentPage(); setSplitReading(false); activatePane("left"); }
-              else compareOnRight();
-            }}>{splitReading ? "退出并排" : "左右并排"}</button>}
-            {readingDocument && (
-              <button
-                type="button"
-                aria-pressed={autoTranslate}
-                className={`workspace-nav__switch${autoTranslate ? " workspace-nav__switch--on" : ""}`}
-                onClick={toggleAutoTranslate}
-                title="开启后，在 PDF 中选中文本会自动弹出语境学术翻译卡片"
-              >
-                <span>划词即译</span>
-                <span aria-hidden="true" className="workspace-nav__switch-track"><span className="workspace-nav__switch-thumb" /></span>
-              </button>
-            )}
-          </nav>
-          <ReaderTabs tabs={readerTabs} activeId={deskOpen ? null : location.documentId} pages={readingRecords}
-            onCompare={readingDocument ? compareOnRight : undefined}
-            canReopen={closedTab !== null} onOpen={openDocument} onClose={closeReaderTab} onAdd={showLiteratureDesk}
-            onReopen={() => {
-              if (!closedTab) return;
-              setReaderTabs(current => current.some(tab => tab.documentId === closedTab.documentId) ? current : [...current, closedTab]);
-              openDocument(closedTab.documentId); setClosedTab(null);
-            }} />
+          {(readerTabs.length > 0 || readingDocument) && (
+            <div className="reader-bar">
+              <ReaderTabs tabs={readerTabs} activeId={deskOpen ? null : location.documentId} pages={readingRecords}
+                onCompare={readingDocument ? compareOnRight : undefined}
+                canReopen={closedTab !== null} onOpen={openDocument} onClose={closeReaderTab} onAdd={showLiteratureDesk}
+                onReopen={() => {
+                  if (!closedTab) return;
+                  setReaderTabs(current => current.some(tab => tab.documentId === closedTab.documentId) ? current : [...current, closedTab]);
+                  openDocument(closedTab.documentId); setClosedTab(null);
+                }} />
+              {readingDocument && (
+                <div className="reader-bar__tools">
+                  <button
+                    type="button"
+                    aria-pressed={autoTranslate}
+                    className={`workspace-nav__switch${autoTranslate ? " workspace-nav__switch--on" : ""}`}
+                    onClick={toggleAutoTranslate}
+                    title="开启后，在 PDF 中选中文本会自动弹出语境学术翻译卡片"
+                  >
+                    <span>划词即译</span>
+                    <span aria-hidden="true" className="workspace-nav__switch-track"><span className="workspace-nav__switch-thumb" /></span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`reader-bar__split-btn${splitReading ? " reader-bar__split-btn--active" : ""}`}
+                    aria-pressed={splitReading}
+                    onClick={() => {
+                      if (splitReading) { keepCurrentPage(); setSplitReading(false); activatePane("left"); }
+                      else compareOnRight();
+                    }}
+                  >
+                    {splitReading ? "退出并排" : "并排"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="reader-tab-panel" id="reader-tab-panel" role={!deskOpen && location.documentId ? "tabpanel" : undefined}
             aria-labelledby={!deskOpen && location.documentId ? `reader-tab-${location.documentId}` : undefined}>
             {splitReading && readingDocument ? <ResizableReadingSplit
@@ -815,7 +849,7 @@ export function Workbench() {
         setStudioIds(null); setStudyReview(null); setResearchIds(ids); setSelectedIds(ids); setSelectionRequest(n => n + 1); setDraftQuestion(question); setFocusMode(false); setAssistantExpanded(true); setMobilePanel("assistant");
       }} />}
       {notebook && <ResearchNotebook initialEntryId={notebook.entryId} initialQuery={notebook.query} onClose={() => setNotebook(null)} onJump={jumpToLibraryCitation} />}
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} onOpenDataCenter={() => setDataCenterOpen(true)} />}
       {confirmation?.kind === "delete" && (
         <ConfirmDialog
           confirmLabel="删除批注"

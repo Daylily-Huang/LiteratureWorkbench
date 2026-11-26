@@ -622,13 +622,18 @@ export function AssistantPanel({
             </div>
           </div>
           {docReadingMode === "full_text" && (
-            <>
-              <p className="assistant-panel__hint">通读当前文献全部解析页（不再只看前两页）；先检查全文，命中缓存不计费。</p>
-              <label className="assistant-panel__hint"><input type="checkbox" disabled={busy || forceRefresh} checked={reuseAnalysis} onChange={e => setReuseAnalysis(e.target.checked)} /> 优先复用已有全文分析</label>
-              <label className="assistant-panel__hint"><input type="checkbox" disabled={busy} checked={forceRefresh} onChange={e => setForceRefresh(e.target.checked)} /> 跳过缓存，重新读全文（会调用 API）</label>
-              <button type="button" className="button button--secondary" disabled={busy || !trimmed} onClick={() => void checkFullText()}>检查全文</button>
+            <div className="assistant-fulltext-compact-body">
+              <div className="assistant-fulltext-action-row">
+                <span className="assistant-panel__hint">通读全部页面 · 命中缓存不计费</span>
+                <button type="button" className="button button--secondary assistant-check-btn" disabled={busy || !trimmed} onClick={() => void checkFullText()}>检查全文</button>
+              </div>
+              <details className="assistant-advanced">
+                <summary>缓存选项</summary>
+                <label className="assistant-panel__hint"><input type="checkbox" disabled={busy || forceRefresh} checked={reuseAnalysis} onChange={e => setReuseAnalysis(e.target.checked)} /> 优先复用已有全文分析</label>
+                <label className="assistant-panel__hint"><input type="checkbox" disabled={busy} checked={forceRefresh} onChange={e => setForceRefresh(e.target.checked)} /> 跳过缓存，重新读全文（会调用 API）</label>
+              </details>
               {preparation && <StudyCoverage study={preparation} />}
-            </>
+            </div>
           )}
         </section>
       )}

@@ -14,6 +14,7 @@ type PublicSettings = {
 
 type SettingsDialogProps = {
   onClose(): void;
+  onOpenDataCenter?(): void;
   fetcher?: Fetcher;
 };
 
@@ -25,7 +26,7 @@ async function csrf(fetcher: Fetcher): Promise<string> {
 }
 
 
-export function SettingsDialog({ onClose, fetcher = fetch }: SettingsDialogProps) {
+export function SettingsDialog({ onClose, onOpenDataCenter, fetcher = fetch }: SettingsDialogProps) {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [key, setKey] = useState("");
   const [model, setModel] = useState("");
@@ -133,6 +134,18 @@ export function SettingsDialog({ onClose, fetcher = fetch }: SettingsDialogProps
             保存术语表
           </button>
           <p className="settings-dialog__privacy">PDF 仅在已登记文献库范围内按需云处理；API Key 不会发送到浏览器。</p>
+          {onOpenDataCenter && (
+            <div className="settings-dialog__data-row">
+              <span>本地数据位置、快照备份与恢复</span>
+              <button
+                className="button button--ghost"
+                onClick={() => { onClose(); onOpenDataCenter(); }}
+                type="button"
+              >
+                数据与备份
+              </button>
+            </div>
+          )}
         </>}
       </section>
     </ModalDialog>

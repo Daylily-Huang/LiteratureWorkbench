@@ -360,7 +360,7 @@ describe("visual PDF text selection", () => {
     expect(captured.selected?.text).toContain(
       "data of the 25.2 hm² Wanglang forest dynamics plot in western Sichuan.",
     );
-    expect(captured.selected?.rects).toHaveLength(6);
+    expect(captured.selected?.rects).toHaveLength(5);
   });
 
   it("isolates the overlapping two-column geometry observed in the PNAS fixture", () => {
@@ -749,5 +749,51 @@ describe("visual PDF text selection", () => {
     expect(rightCapture.selected?.text).toContain("and Borissenko");
     expect(rightCapture.selected?.text).toContain("called for follow-up surveys");
     expect(rightCapture.selected?.text).not.toContain("Snaring");
+  });
+});
+
+
+describe("long multi-line selections with word-spaced PDF.js spans", () => {
+  it("merges same-line word spans into single line rects so 25-line abstracts never get cut off", () => {
+    const fragments: VisualFragmentSeed[] = [];
+    for (let row = 0; row < 25; row += 1) {
+      for (let col = 0; col < 12; col += 1) {
+        // 12 word spans per line, 6px spaces between words (300 total spans > old 200 rect cap!)
+        fragments.push(seed(`word${row}_${col}`, rect(40 + col * 48, 60 + row * 18, 42, 14), 5));
+      }
+    }
+    const index = createVisualTextIndex(fragments);
+    const first = fragments[0]!;
+    const last = fragments[fragments.length - 1]!;
+    const captured = resolveVisualSelection(
+      index,
+      { node: first.node, offset: 0, clientX: 40, clientY: 67 },
+      { node: last.node, offset: last.node.data.length, clientX: 610, clientY: 60 + 24 * 18 + 7 },
+      { metadata, page: 1, pageBounds: rect(0, 0, 700, 800), transform: [1, 0, 0, -1, 0, 800], scale: 1 },
+    );
+    expect(captured.hint).toBeNull();
+    expect(captured.selected).not.toBeNull();
+    expect(captured.selected?.rects.length).toBe(25);
+    expect(captured.selected?.text).toContain("word0_0");
+    expect(captured.selected?.text).toContain("word24_11");
+  });
+
+  it("keeps the selection alive when dragging slightly into the page margin", () => {
+    const lines = [
+      seed("First line of abstract text", rect(40, 100, 300, 16)),
+      seed("Second line of abstract text", rect(40, 120, 290, 16)),
+    ];
+    const index = createVisualTextIndex(lines);
+    const gesture: VisualSelectionGesture = {
+      index,
+      start: { node: lines[0]!.node, offset: 0, clientX: 40, clientY: 108 },
+      startCandidates: [{ node: lines[0]!.node, offset: 0, clientX: 40, clientY: 108 }],
+      ownerDocument: document,
+      options: { metadata, page: 1, pageBounds: rect(0, 0, 700, 800), transform: [1, 0, 0, -1, 0, 800], scale: 1 },
+    };
+    // Cursor drifts 80px into the right margin while dragging down
+    const captured = captureVisualSelection(gesture, 420, 128, false);
+    expect(captured.hint).toBeNull();
+    expect(captured.selected?.text).toBe("First line of abstract text Second line of abstract text");
   });
 });

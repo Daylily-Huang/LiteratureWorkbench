@@ -29,7 +29,7 @@ export type SelectionCapture = {
 
 
 export const MAX_TRANSLATION_CODE_POINTS = 8000;
-const MAX_VISIBLE_RECTS = 200;
+const MAX_VISIBLE_RECTS = 1000;
 const MAX_CONTEXT_CODE_POINTS = 500;
 const SELECTION_HINT = "请在同一栏选择一句或一段";
 

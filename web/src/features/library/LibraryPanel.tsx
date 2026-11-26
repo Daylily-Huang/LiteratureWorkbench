@@ -260,21 +260,13 @@ export function LibraryPanel({
         choose(event.dataTransfer.files.item(0) ?? undefined);
       }}
     >
-      <div className="library-panel__header">
-        <div>
-          <span className="eyebrow">本地同步</span>
-          <h1>文献库</h1>
-        </div>
-        <span className="count-badge">{documents.length}</span>
-      </div>
-
       <label className="library-search">
         <span aria-hidden="true" className="library-search__icon">⌕</span>
         <span className="sr-only">搜索文献</span>
         <input
           aria-label="搜索文献"
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索文件名或文件夹"
+          placeholder={`搜索 ${documents.length} 篇文献或文件夹…`}
           type="search"
           value={query}
         />
@@ -290,42 +282,48 @@ export function LibraryPanel({
         )}
       </label>
 
-      {/* Quick Category Views */}
-      <div aria-label="文献分类" className="library-categories" role="group">
+      {/* Compact single-row filter pills */}
+      <div aria-label="文献分类" className="library-filter-pills" role="group">
         <button
           aria-pressed={category === "all"}
-          className={`library-category-item ${category === "all" ? "library-category-item--active" : ""}`}
+          className={`library-filter-pill${category === "all" ? " library-filter-pill--active" : ""}`}
           onClick={() => setCategory("all")}
           type="button"
         >
-          <span className="library-category-item__icon">📚</span>
-          <span className="library-category-item__label">全部文献</span>
-          <span className="library-category-item__count">{documents.length}</span>
+          全部 {documents.length}
+        </button>
+        <button
+          aria-pressed={category === "recent"}
+          className={`library-filter-pill${category === "recent" ? " library-filter-pill--active" : ""}`}
+          onClick={() => setCategory(category === "recent" ? "all" : "recent")}
+          type="button"
+        >
+          最近
+        </button>
+        <button
+          aria-pressed={category === "favorites"}
+          className={`library-filter-pill${category === "favorites" ? " library-filter-pill--active" : ""}`}
+          onClick={() => setCategory(category === "favorites" ? "all" : "favorites")}
+          type="button"
+        >
+          ★ 收藏
         </button>
         <button
           aria-pressed={category === "unclassified"}
-          className={`library-category-item ${category === "unclassified" ? "library-category-item--active" : ""}`}
-          onClick={() => setCategory("unclassified")}
+          className={`library-filter-pill${category === "unclassified" ? " library-filter-pill--active" : ""}`}
+          onClick={() => setCategory(category === "unclassified" ? "all" : "unclassified")}
           type="button"
         >
-          <span className="library-category-item__icon">📁</span>
-          <span className="library-category-item__label">未分类</span>
-          <span className="library-category-item__count">
-            {documents.filter((d) => d.relative_folder === "" || d.authorization_source === "confirmed_import").length}
-          </span>
+          未分类
         </button>
       </div>
 
-      <div className="library-quick-filters" role="group" aria-label="阅读视图">
-        <button type="button" aria-pressed={category === "recent"} onClick={() => setCategory(category === "recent" ? "all" : "recent")}>最近阅读</button>
-        <button type="button" aria-pressed={category === "favorites"} onClick={() => setCategory(category === "favorites" ? "all" : "favorites")}>★ 我的收藏</button>
-      </div>
-      <div className="library-sources">
-        <button className="button button--ghost" type="button" onClick={() => setFolderManagerOpen(true)}>管理文件夹</button>
+      <div className="library-sources library-sources--compact">
         <select aria-label="筛选来源文件夹" value={source} onChange={event => setSource(event.target.value)}>
           <option value="">所有来源</option>
           {[...new Map(documents.filter(doc => doc.library_id).map(doc => [doc.library_id!, doc])).values()].map(doc => <option key={doc.library_id} value={doc.library_id}>{doc.authorization_source === "confirmed_import" ? "直接导入" : doc.library_name ?? "本地文件夹"}</option>)}
         </select>
+        <button className="library-sources__manage" type="button" onClick={() => setFolderManagerOpen(true)}>管理目录</button>
       </div>
       <div className="library-panel__tree-container">
         <div className="library-panel__tree-header">
@@ -347,19 +345,16 @@ export function LibraryPanel({
       {query.trim() === "" && filteredDocuments.length === 0 && !documentsFailed && <p className="empty-copy">{category === "favorites" ? "点击文献旁的星标，收藏常用文献。" : category === "recent" ? "打开一篇文献后，这里会显示阅读记录。" : "这里还没有文献，可以在下方导入 PDF。"}</p>}
       {documentsFailed && <div role="alert"><p>文献列表暂时无法读取</p><button className="button button--ghost" type="button" onClick={() => void refreshDocuments()}>重试加载列表</button></div>}
 
-      {/* Import & Storage Footer */}
-      <div className="library-panel__footer">
+      {/* Compact Import Footer */}
+      <div className="library-panel__footer library-panel__footer--compact">
         <button
           aria-label="打开文件选择器"
-          className="library-drop"
+          className="library-import-slim"
           onClick={() => input.current?.click()}
           type="button"
         >
-          <div className="library-drop__icon">＋</div>
-          <div className="library-drop__text">
-            <strong>导入文献</strong>
-            <span>点击选择或拖入 PDF</span>
-          </div>
+          <span>＋ 导入 PDF</span>
+          <small>{documents.length} 篇已同步</small>
         </button>
         <input
           aria-hidden="true"
@@ -370,13 +365,6 @@ export function LibraryPanel({
           type="file"
           onChange={(event) => choose(event.target.files?.[0])}
         />
-
-        <div className="library-storage-info">
-          <div className="library-storage-info__header">
-            <span title="进度与收藏保存在当前浏览器">本地文献库 · 自动记住页码</span>
-            <span>{documents.length} 篇已同步</span>
-          </div>
-        </div>
       </div>
 
       {unsupported && <p>首版暂不导入；以后可在单次明确授权后用于云处理</p>}
