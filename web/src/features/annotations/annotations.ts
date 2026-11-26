@@ -42,6 +42,7 @@ type IdentityResponse = {
   document_id: string;
   current_document_version_id: string;
   content_id: string;
+  duplicate?: boolean;
 };
 
 

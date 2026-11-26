@@ -21,7 +21,7 @@ describe("DashboardHome", () => {
     );
 
     expect(getByText("0")).toBeInTheDocument();
-    expect(getByText("暂无正在阅读的文献")).toBeInTheDocument();
+    expect(getByText("还没有阅读记录")).toBeInTheDocument();
     expect(getByText("文献库当前为空，点击下方按钮或拖入 PDF 开始阅读")).toBeInTheDocument();
 
     // Verify fabricated stats and fake notes do not exist
@@ -75,12 +75,24 @@ describe("DashboardHome", () => {
     expect(onOpenDocument).toHaveBeenCalledWith("doc-1");
 
     // Click prompt question
-    const firstPrompt = getByText("这篇文献的核心研究问题与主要贡献是什么？");
+    const firstPrompt = getByText("文献库中有哪些主要研究问题与代表性成果？");
     fireEvent.click(firstPrompt);
-    expect(onAskQuestion).toHaveBeenCalledWith("这篇文献的核心研究问题与主要贡献是什么？");
+    expect(onAskQuestion).toHaveBeenCalledWith("文献库中有哪些主要研究问题与代表性成果？");
 
     // Switch question set
     fireEvent.click(getByText("换一批"));
-    expect(getByText("论文的核心论点与理论假设是什么？")).toBeInTheDocument();
+    expect(getByText("比较文献库中不同研究的核心论点与理论假设。")).toBeInTheDocument();
   });
+});
+
+it("resumes the most recently opened paper instead of the first inventory item", () => {
+  const open = vi.fn();
+  const view = render(<DashboardHome documents={[
+    {document_id:"first",filename:"first.pdf",relative_folder:"",authorization_source:"manual"},
+    {document_id:"recent",filename:"recent.pdf",relative_folder:"",authorization_source:"manual"},
+  ]} readingRecords={{recent:{page:12,totalPages:24,lastOpened:100,favorite:true}}} onOpenDocument={open} />);
+  fireEvent.click(view.getByRole("button",{name:"继续阅读"}));
+  expect(open).toHaveBeenCalledWith("recent");
+  expect(view.getByText("recent.pdf · 上次读到第 12 页")).toBeVisible();
+  view.unmount();
 });

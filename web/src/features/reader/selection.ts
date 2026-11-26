@@ -1,9 +1,13 @@
+import { cleanPdfCopyText } from "./copyText";
+
 export type SelectedText = {
   documentId: string;
   documentVersionId: string;
   contentId: string;
   pdfPage: number;
   text: string;
+  rawText?: string;
+  copyText?: string;
   contextBefore: string;
   contextAfter: string;
   rects: Array<{ x: number; y: number; width: number; height: number }>;
@@ -198,6 +202,8 @@ export function captureSamePageSelection(
       ...metadata,
       pdfPage,
       text: normalized,
+      rawText: selection.toString(),
+      copyText: cleanPdfCopyText(selection.toString(), startLayer.textContent ?? ""),
       contextBefore: context.before,
       contextAfter: context.after,
       rects,

@@ -49,6 +49,7 @@ class LibraryRetrievalHit:
     text: str
     score: float
     rects: tuple[BBox, ...] = ()
+    content_id: str | None = None
 
 
 def _cjk_windows(run: str) -> list[str]:
@@ -190,6 +191,27 @@ class RagRetriever:
             for row in rows
         ]
 
+    def search_selected(self, question: str, document_ids: list[str], *, match_query: str | None = None) -> list[LibraryRetrievalHit]:
+        query = match_query or build_match_query(question)
+        if query is None:
+            return []
+        groups = [self._repository.search_selected(query, document_ids=[document_id], limit=2)
+                  for document_id in document_ids]
+        # Every matching selected paper gets a turn before its second fragment.
+        hits = []
+        for index in range(2):
+            for rows in groups:
+                if index >= len(rows):
+                    continue
+                row = rows[index]
+                hits.append(LibraryRetrievalHit(
+                    chunk_id=str(row["chunk_id"]), document_id=str(row["document_id"]),
+                    display_name=str(row["display_name"]), physical_page=int(row["physical_page"]),
+                    text=str(row["text"]), score=float(row["score"]),
+                    rects=rects_from_json(row["rects_json"]), content_id=str(row["content_sha256"]),
+                ))
+        return hits
+
     def search_library(
         self,
         question: str,
@@ -232,6 +254,7 @@ class RagRetriever:
                     chunk_id=chunk_id,
                     document_id=document_id,
                     display_name=str(row["display_name"]),
+                    content_id=str(row["content_sha256"]),
                     physical_page=int(row["physical_page"]),
                     text=str(row["text"]),
                     score=float(row["score"]),
@@ -259,6 +282,7 @@ class RagRetriever:
                         chunk_id=chunk_id,
                         document_id=document_id,
                         display_name=str(row["display_name"]),
+                    content_id=str(row["content_sha256"]),
                         physical_page=int(row["physical_page"]),
                         text=str(row["text"]),
                         score=float(row["score"]),

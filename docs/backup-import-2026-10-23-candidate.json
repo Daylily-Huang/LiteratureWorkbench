@@ -1,0 +1,224 @@
+{
+  "implementation_hashes": {
+    "backend/src/literature_workbench/features/backup_validation.py": "6b5b478bbf2c7c5cf73fb2dcf4b3b8b92ddb8bffe79f83cc1f16cad5f8b6646d",
+    "backend/src/literature_workbench/features/backups.py": "7dba79aab12b9c7fa2c81b43f1207f362cd5f0daa05bdb20a06076a761a263d3",
+    "backend/src/literature_workbench/api/backups.py": "4b4637c2339f107b6bb71cce11740a0dc2a44d85249c9d8d26fd8e94af3b7c9f",
+    "web/src/features/settings/BackupImport.tsx": "2a1dea8c416d08c6b97e72800e8498868c57fc96bd02e2ec149a1f1c06e431a5",
+    "web/src/features/settings/DataCenter.tsx": "507f551f5396b8ec81c06f7e5cc89d0c5a13ca1ee3d90fd5e4fd079aa1229897",
+    "web/src/app/App.css": "cea381916c6d6516314a5522b51b3f2f339fd905e676e693be2c7d57bc12a67e",
+    "backend/tests/api/test_backup_import.py": "6660e99bf1b74d12069b85e5535f588a9642880dd9a410eaca7d4cb005880e5e",
+    "web/src/features/settings/BackupImport.test.tsx": "fbe82b44e9f4d9000df99a23340e6da5a6c96aa3cc1eb2c739410b9a8e773d6e",
+    "web/src/features/settings/DataCenter.test.tsx": "5aa86b09dc59d6ae914c3889717e71260a6119f2330fe6ee02c1cfa6b28c26e7"
+  },
+  "manifest_sha256": "f229671b1e58c4fb1fcb63736b182c5c2fd633794599148501101fc38547a276",
+  "review": {
+    "verdict": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "tools": 6,
+    "recheck_tools": 0,
+    "independent_backend_tests": 34,
+    "independent_frontend_tests": 18,
+    "manifest_sha256": "f229671b1e58c4fb1fcb63736b182c5c2fd633794599148501101fc38547a276",
+    "not_independently_rerun": [
+      "complete real-browser interaction",
+      "real 190-PDF HTTP migration",
+      "production installation"
+    ],
+    "scope": "External archive import and isolated workspace recovery; not overall commercial readiness"
+  },
+  "self_tests": {
+    "backend": 799,
+    "backend_deselected": 2,
+    "frontend": 241,
+    "frontend_files": 47,
+    "ruff": "passed",
+    "mypy_source_files": 86,
+    "typescript": "passed",
+    "production_build": "passed"
+  },
+  "browser": {
+    "external_file_choose_and_drop": true,
+    "transfer_progress_and_browser_abort": true,
+    "background_cancel_and_retry": true,
+    "malformed_archive_no_recovery": true,
+    "duplicate_archive_reused": true,
+    "empty_destination_preserved_until_manual_recovery": true,
+    "long_filename_mobile_wrapping": true,
+    "four_pdf_complete_backup": true,
+    "original_source_offline": true,
+    "real_recovery_supervisor_and_worker": true,
+    "browser_auto_open_suppressed_in_test_mirror": true,
+    "original_and_recovery_sessions_coexist": true,
+    "reading_state_and_original_ids": true,
+    "study_cache_evidence_verified_without_model_call": true,
+    "notebook_groups_graph_and_comments": true,
+    "clone_annotation_edit_and_undo_including_pre_recovery_snapshot": true,
+    "original_source_hash_preserved": true,
+    "explicit_stop_and_actual_restart_persistence": true,
+    "mobile_no_horizontal_overflow": true,
+    "controlled_model_calls": 1,
+    "page_errors": []
+  },
+  "real_migration": {
+    "verified_files": 325,
+    "file_count": 325,
+    "verified_at": "2026-10-22T20:05:48.441947+00:00",
+    "include_pdfs": true,
+    "pdf_count": 190,
+    "counts": {
+      "documents": 226,
+      "reading_records": 11,
+      "research_entries": 0,
+      "reading_groups": 0,
+      "document_relations": 0,
+      "relation_candidates": 0,
+      "full_text_study_cache": 0,
+      "full_text_study_documents": 0,
+      "translation_cache": 68,
+      "pdf_annotation_mutations": 14
+    },
+    "source_created_at": "2026-10-22T18:32:09.165538+00:00",
+    "restore_preview": "D:\\_scratch\\2026-10-23-backup-import\\real-archive-holder\\backups\\workspace\\restore-previews\\5aaabc7f-b6d8-4277-8d48-7151cadf39d1",
+    "workspace_root": "D:\\_scratch\\2026-10-23-backup-import\\real-archive-holder\\backups\\workspace\\restore-previews\\5aaabc7f-b6d8-4277-8d48-7151cadf39d1\\data",
+    "recovered_pdfs": 190,
+    "recovery_ready": true,
+    "unavailable_documents": 36,
+    "original_archive_unchanged": true,
+    "archive_sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9",
+    "preserved_table_hashes": {
+      "reading_records": "ffc62427f79bc573d4cb2fdcd03f6b108437fe3528e41cffd85f6de97b896aa2",
+      "research_entries": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "reading_groups": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "document_relations": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "relation_candidates": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "full_text_study_cache": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "full_text_study_documents": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "translation_cache": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0",
+      "pdf_annotation_mutations": "38a759c998cb67d6da85742af51f18674d6c62072d2a3d179a76dd16d1b1dcd2",
+      "translation_memory": "9792d7d36ab0684af6b13dd73a215353ad86cef7c1e95c2cf54b0354549d408a",
+      "pdf_annotation_baselines": "d4f5fd13b886b17446112b7c6e3519dc9c6df3063c6919ce140952c9ff154314"
+    },
+    "translation_cache": 68,
+    "all_190_pdf_range_requests": true,
+    "annotated_documents_checked": 4,
+    "annotations_read": 8,
+    "relative_parser_output_dirs_before": 4,
+    "paid_api_calls": 0,
+    "production_database_replaced": false,
+    "streamed_http_import": true,
+    "import_metadata": {
+      "id": "7c693c5e-3cc2-4355-9c56-ba0d22e025cd",
+      "created_at": "2026-10-22T20:05:33.368316+00:00",
+      "kind": "import",
+      "status": "completed",
+      "stage": "completed",
+      "source_name": "真实190篇文献迁移备份.lwb.zip",
+      "expected_bytes": 552962965,
+      "received_bytes": 552962965,
+      "processed_files": 0,
+      "error": null,
+      "updated_at": "2026-10-22T20:05:44.089735+00:00",
+      "archive_sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9",
+      "size_bytes": 552962965,
+      "verified_files": 325,
+      "file_count": 325,
+      "verified_at": "2026-10-22T20:05:44.074736+00:00",
+      "include_pdfs": true,
+      "pdf_count": 190,
+      "counts": {
+        "documents": 226,
+        "reading_records": 11,
+        "research_entries": 0,
+        "reading_groups": 0,
+        "document_relations": 0,
+        "relation_candidates": 0,
+        "full_text_study_cache": 0,
+        "full_text_study_documents": 0,
+        "translation_cache": 68,
+        "pdf_annotation_mutations": 14
+      },
+      "source_created_at": "2026-10-22T18:32:09.165538+00:00",
+      "verification_status": "passed"
+    },
+    "current_counts_unchanged": true
+  },
+  "installation": {
+    "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-backup-import-20261023-040838.sqlite3",
+    "snapshots": {
+      "research_entries": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_groups": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "document_relations": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_analyses": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_candidates": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "translation_cache": {
+        "count": 68,
+        "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+      },
+      "full_text_study_cache": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "full_text_study_documents": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_records": {
+        "count": 11,
+        "sha256": "ffc62427f79bc573d4cb2fdcd03f6b108437fe3528e41cffd85f6de97b896aa2"
+      },
+      "translation_memory": {
+        "count": 6,
+        "sha256": "9792d7d36ab0684af6b13dd73a215353ad86cef7c1e95c2cf54b0354549d408a"
+      },
+      "pdf_annotation_baselines": {
+        "count": 4,
+        "sha256": "096565e1997824c15cdb571b43c79395344d987dfeebdd79dfeb740091530663"
+      },
+      "pdf_annotation_mutations": {
+        "count": 14,
+        "sha256": "2a02593f7a4a2398fbb15b8f9f9be30a1b1ff5e77f7bec1d2c5b12967d0c844f"
+      }
+    },
+    "candidate_manifest_sha256": "f229671b1e58c4fb1fcb63736b182c5c2fd633794599148501101fc38547a276"
+  },
+  "production": {
+    "url": "http://127.0.0.1:64594",
+    "asset_checks": {
+      "index-jBZWK2df.js": true,
+      "PdfReader-DHXGvmuV.js": true,
+      "index-C_tWIJd3.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200,
+      "/api/libraries/full-text/studies": 200,
+      "/api/data/overview": 200,
+      "/api/data/context": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0015_study_documents",
+    "study_cache_rows": 0,
+    "member_rows": 0,
+    "existing_full_backup_sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9"
+  }
+}

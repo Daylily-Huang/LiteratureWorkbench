@@ -91,6 +91,8 @@ def test_registration_initial_scan_worker_and_inventory_api_do_not_expose_absolu
     assert scan_status.json()["last_scan"]["warnings"] == []
     assert set(item) == {
         "document_id",
+        "library_id",
+        "library_name",
         "current_document_version_id",
         "content_id",
         "etag",

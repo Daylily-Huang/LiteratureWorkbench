@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from literature_workbench.platform.windows.paths import io_path
 from threading import Lock
 from uuid import UUID, uuid4
 
@@ -87,7 +88,7 @@ class PdfAnnotationService:
         file_inspector: SafeFileInspector,
     ) -> None:
         self._database = database
-        self._backup_root = data_root / ".annotation-backups"
+        self._backup_root = io_path(data_root / ".annotation-backups")
         self._queue = queue
         self._library_repository = library_repository
         self._file_inspector = file_inspector
@@ -95,15 +96,17 @@ class PdfAnnotationService:
         self.reconcile_crashed_mutations()
 
     def list_annotations(self, document_id: UUID) -> dict[str, object]:
-        state = self._load_state(document_id)
-        self._verify_current_file(state)
-        with fitz.open(state.path) as document:
-            items = [
-                self._serialize_annotation(page, annotation)
-                for page in document
-                for annotation in (page.annots() or ())
-            ]
-        return {"items": items, **self._current_identity(state.document_id)}
+        # Read the PDF and its identity from the same completed mutation.
+        with self._locks.acquire(document_id):
+            state = self._load_state(document_id)
+            self._verify_current_file(state)
+            with fitz.open(io_path(state.path)) as document:
+                items = [
+                    self._serialize_annotation(page, annotation)
+                    for page in document
+                    for annotation in (page.annots() or ())
+                ]
+            return {"items": items, **self._current_identity(state.document_id)}
 
     def create(
         self,
@@ -141,7 +144,27 @@ class PdfAnnotationService:
                 content=comment if annotation_type == "comment" else "",
             )
             annotation.update(opacity=0.32 if annotation_type != "underline" else 1.0)
-            return self._annotation_id(annotation)
+            return self._annotation_id(page, annotation)
+
+        def existing(document: fitz.Document) -> str | None:
+            if page_number < 1 or page_number > document.page_count:
+                raise AnnotationError("annotation_page_invalid")
+            page = document[page_number - 1]
+            # Validate even on the no-op path; only compare our own annotations.
+            for quad in quads:
+                self._pdf_quad_to_page(page, quad)
+            for annotation in page.annots() or ():
+                if annotation.info.get("title") != APP_TITLE or self._owned_type(annotation) != annotation_type:
+                    continue
+                if annotation_type == "comment" and str(annotation.info.get("content") or "") != comment:
+                    continue
+                saved = self._serialize_annotation(page, annotation)["quads"]
+                if isinstance(saved, list) and len(saved) == len(quads) and all(
+                    len(a) == 8 and all(abs(float(x) - float(y)) <= 0.5 for x, y in zip(a, b, strict=True))
+                    for a, b in zip(saved, quads, strict=True)
+                ):
+                    return self._annotation_id(page, annotation)
+            return None
 
         return self._mutate(
             document_id,
@@ -149,6 +172,7 @@ class PdfAnnotationService:
             content_id=content_id,
             operation="create",
             mutation=mutate,
+            existing=existing,
         )
 
     def update(
@@ -224,7 +248,7 @@ class PdfAnnotationService:
                 raise AnnotationError("annotation_undo_unavailable")
             if current_hash != str(row["post_content_sha256"]):
                 raise AnnotationError("annotation_external_change")
-            history_target = Path(str(row["backup_path"]))
+            history_target = io_path(Path(str(row["backup_path"])))
             if not history_target.is_file():
                 raise AnnotationError("annotation_backup_missing")
 
@@ -232,7 +256,7 @@ class PdfAnnotationService:
             journal = self._write_journal(state, current_hash, safety_backup)
             committed = False
             try:
-                shutil.copy2(history_target, state.path)
+                shutil.copy2(history_target, io_path(state.path))
                 restored_hash = self._hash_file(state.path)
                 if restored_hash != str(row["pre_content_sha256"]):
                     raise AnnotationError("annotation_restore_failed")
@@ -242,7 +266,7 @@ class PdfAnnotationService:
             except BaseException:
                 if not committed:
                     if self._hash_file(state.path) != current_hash and safety_backup.is_file():
-                        shutil.copy2(safety_backup, state.path)
+                        shutil.copy2(safety_backup, io_path(state.path))
                     self._clear_journal(journal)
                 raise
             self._safe_prune_snapshots(state.document_id)
@@ -261,7 +285,7 @@ class PdfAnnotationService:
                 ).fetchone()
             if row is None:
                 raise AnnotationError("annotation_baseline_missing")
-            baseline = Path(str(row["backup_path"]))
+            baseline = io_path(Path(str(row["backup_path"])))
             if not baseline.is_file():
                 raise AnnotationError("annotation_backup_missing")
             pre_hash = self._hash_file(state.path)
@@ -269,7 +293,7 @@ class PdfAnnotationService:
             journal = self._write_journal(state, pre_hash, backup)
             committed = False
             try:
-                shutil.copy2(baseline, state.path)
+                shutil.copy2(baseline, io_path(state.path))
                 post_hash = self._hash_file(state.path)
                 if post_hash != str(row["content_sha256"]):
                     raise AnnotationError("annotation_restore_failed")
@@ -286,7 +310,7 @@ class PdfAnnotationService:
             except BaseException:
                 if not committed:
                     if self._hash_file(state.path) != pre_hash:
-                        shutil.copy2(backup, state.path)
+                        shutil.copy2(backup, io_path(state.path))
                     self._clear_journal(journal)
                 raise
             self._safe_prune_snapshots(state.document_id)
@@ -300,23 +324,29 @@ class PdfAnnotationService:
         content_id: str,
         operation: str,
         mutation: Callable[[fitz.Document], str],
+        existing: Callable[[fitz.Document], str | None] | None = None,
     ) -> dict[str, object]:
         with self._locks.acquire(document_id):
             state = self._load_state(document_id)
             if state.document_version_id != document_version_id or state.content_id != content_id:
                 raise AnnotationError("annotation_document_version_conflict")
             pre_hash = self._verify_current_file(state)
+            if existing is not None:
+                with fitz.open(io_path(state.path)) as document:
+                    found = existing(document)
+                if found is not None:
+                    return {"annotation_id": found, "duplicate": True, **self._current_identity(document_id)}
             self._ensure_baseline(state, pre_hash)
             backup = self._create_snapshot(state, pre_hash)
             journal = self._write_journal(state, pre_hash, backup)
             committed = False
             try:
-                with fitz.open(state.path) as document:
+                with fitz.open(io_path(state.path)) as document:
                     if document.is_encrypted or not document.can_save_incrementally():
                         raise AnnotationError("annotation_pdf_not_incremental")
                     annotation_id = mutation(document)
                     document.saveIncr()
-                with fitz.open(state.path) as verification:
+                with fitz.open(io_path(state.path)) as verification:
                     if operation != "delete":
                         self._find_annotation(verification, annotation_id)
                 post_hash = self._hash_file(state.path)
@@ -335,7 +365,7 @@ class PdfAnnotationService:
             except BaseException:
                 if not committed:
                     if self._hash_file(state.path) != pre_hash:
-                        shutil.copy2(backup, state.path)
+                        shutil.copy2(backup, io_path(state.path))
                     self._clear_journal(journal)
                 raise
             self._safe_prune_snapshots(state.document_id)
@@ -375,7 +405,7 @@ class PdfAnnotationService:
                 doc_id = str(record["document_id"])
                 target_path = Path(str(record["path"]))
                 pre_hash = str(record["pre_hash"])
-                backup_path = Path(str(record["backup_path"]))
+                backup_path = io_path(Path(str(record["backup_path"])))
 
                 with self._database.connect() as connection:
                     row = connection.execute(
@@ -394,7 +424,7 @@ class PdfAnnotationService:
                     continue
 
                 # Document DB record is still at pre_hash. Check if recovery is required and safe.
-                if not target_path.exists():
+                if not io_path(target_path).exists():
                     LOGGER.warning(
                         "Crash recovery conflict for document %s: target file %s does not exist. "
                         "Preserving backup and journal.",
@@ -479,7 +509,7 @@ class PdfAnnotationService:
                 else:
                     # Normal half-written mutation: safely restore from verified backup.
                     try:
-                        shutil.copy2(backup_path, target_path)
+                        shutil.copy2(backup_path, io_path(target_path))
                         restored_hash = self._hash_file(target_path)
                         if restored_hash != pre_hash:
                             LOGGER.error(
@@ -557,7 +587,7 @@ class PdfAnnotationService:
         ):
             raise AnnotationError("annotation_external_change")
         try:
-            metadata = state.path.stat()
+            metadata = io_path(state.path).stat()
         except OSError as error:
             raise AnnotationError("annotation_document_not_writable") from error
         if metadata.st_size != state.size_bytes or metadata.st_mtime_ns != state.mtime_ns:
@@ -579,7 +609,7 @@ class PdfAnnotationService:
         directory.mkdir(parents=True, exist_ok=True)
         baseline = directory / "baseline.pdf"
         if not baseline.exists():
-            shutil.copy2(state.path, baseline)
+            shutil.copy2(io_path(state.path), baseline)
         if self._hash_file(baseline) != content_hash:
             raise AnnotationError("annotation_baseline_conflict")
         with self._database.transaction() as connection:
@@ -596,7 +626,7 @@ class PdfAnnotationService:
         directory = self._document_backup_dir(state.document_id) / "snapshots"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}-{uuid4()}.pdf"
-        shutil.copy2(state.path, path)
+        shutil.copy2(io_path(state.path), path)
         if self._hash_file(path) != content_hash:
             path.unlink(missing_ok=True)
             raise AnnotationError("annotation_backup_failed")
@@ -612,7 +642,7 @@ class PdfAnnotationService:
         post_hash: str,
         backup: Path,
     ) -> dict[str, object]:
-        stat_result = previous.path.stat()
+        stat_result = io_path(previous.path).stat()
         content_id = self._hash_file(previous.path)
         version_id = uuid4()
         now = datetime.now(UTC).isoformat()
@@ -677,7 +707,7 @@ class PdfAnnotationService:
         previous: DocumentState,
         mutation_id: str,
     ) -> dict[str, object]:
-        stat_result = previous.path.stat()
+        stat_result = io_path(previous.path).stat()
         content_id = self._hash_file(previous.path)
         version_id = uuid4()
         now = datetime.now(UTC).isoformat()
@@ -758,7 +788,7 @@ class PdfAnnotationService:
     @staticmethod
     def _hash_file(path: Path) -> str:
         digest = hashlib.sha256()
-        with path.open("rb") as stream:
+        with io_path(path).open("rb") as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(block)
         return digest.hexdigest()
@@ -767,9 +797,15 @@ class PdfAnnotationService:
         return self._backup_root / str(document_id)
 
     @staticmethod
-    def _annotation_id(annotation: fitz.Annot) -> str:
+    def _legacy_annotation_id(annotation: fitz.Annot) -> str:
         value = annotation.info.get("id")
         return str(value) if value else f"xref-{annotation.xref}"
+
+    @staticmethod
+    def _annotation_id(page: fitz.Page, annotation: fitz.Annot) -> str:
+        # PDF /NM values can repeat across pages (including PyMuPDF's fitz-A0).
+        # The page and object reference uniquely identify the current PDF object.
+        return f"page-{page.number + 1}-xref-{annotation.xref}"
 
     @staticmethod
     def _owned_type(annotation: fitz.Annot) -> str:
@@ -787,10 +823,16 @@ class PdfAnnotationService:
     def _find_annotation(
         cls, document: fitz.Document, annotation_id: str
     ) -> tuple[fitz.Page, fitz.Annot]:
+        matches: list[tuple[fitz.Page, fitz.Annot]] = []
         for page in document:
             for annotation in page.annots() or ():
-                if cls._annotation_id(annotation) == annotation_id:
-                    return page, annotation
+                if (cls._annotation_id(page, annotation) == annotation_id
+                        or cls._legacy_annotation_id(annotation) == annotation_id):
+                    matches.append((page, annotation))
+        if len(matches) > 1:
+            raise AnnotationError("annotation_ambiguous_id")
+        if matches:
+            return matches[0]
         raise AnnotationError("annotation_not_found")
 
     @staticmethod
@@ -814,7 +856,7 @@ class PdfAnnotationService:
         owned = annotation.info.get("title") == APP_TITLE and annotation_type != "other"
         stroke = annotation.colors.get("stroke") or []
         return {
-            "annotation_id": cls._annotation_id(annotation),
+            "annotation_id": cls._annotation_id(page, annotation),
             "page": page.number + 1,
             "type": annotation_type if owned else str(annotation.type[1]).lower(),
             "owned": owned,

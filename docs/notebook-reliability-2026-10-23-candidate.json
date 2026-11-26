@@ -1,0 +1,137 @@
+{
+  "implementation_hashes": {
+    "backend/src/literature_workbench/api/workspace.py": "bc294e73efad0cc67a6af0d8f5e62cc8c770188974beff580a00d061d9b9c7c9",
+    "backend/tests/api/test_notebook_workflow.py": "e1e5d5897288712d60524d1cd937f768a145871be5132305693f02ca6a4be022",
+    "web/src/features/research/ResearchNotebook.tsx": "03686eaf6218dcff7e73203c5eb06fdf5d6a222fdb15d187d7f460d604947ff5",
+    "web/src/features/research/NotebookEditor.tsx": "ab3480b4783518f5a2d2477652d128e806393fdcb71d29b82532594688556b99",
+    "web/src/features/research/notebookDrafts.ts": "0a6da4f29f8120118711063b1368d8cf81d97391b33d8e1f792e18e95fc2671e",
+    "web/src/features/research/ResearchNotebook.test.tsx": "04cf8147fc5ecf595d43d2f1b93af61c4c7b1b87a053d4870d9c75ed9f17ed62",
+    "web/src/features/research/notebookDrafts.test.ts": "2b88de4b8ee39b49f3513c5471dd470cd94894fbf6254b1e9238cc6299aeb45a",
+    "web/src/app/App.css": "8c34117fbf2ce7939bd94fefdee525d0cab5cfee97cf25a68f3525682ae2a818"
+  },
+  "manifest_sha256": "d14db85057d20c42da07b2e360bc82d0aced5ed6c81256d4c9a02f50ada694fb",
+  "review": {
+    "verdict": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "tools": 6,
+    "recheck_tools": 0,
+    "independent_backend_tests": 27,
+    "independent_frontend_tests": 13,
+    "manifest_sha256": "d14db85057d20c42da07b2e360bc82d0aced5ed6c81256d4c9a02f50ada694fb",
+    "not_independently_rerun": [
+      "complete 175-record real-browser workflow",
+      "full 803/252 tests",
+      "production installation"
+    ],
+    "scope": "Research notebook automatic-save, draft recovery, pagination and evidence-preserving conflict copies; not overall commercial readiness"
+  },
+  "self_tests": {
+    "backend": 803,
+    "backend_deselected": 2,
+    "frontend": 252,
+    "frontend_files": 48,
+    "ruff": "passed",
+    "mypy_source_files": 86,
+    "typescript": "passed",
+    "production_build": "passed"
+  },
+  "browser": {
+    "long_answer_records": 175,
+    "index_response_bytes": 6972,
+    "paged_summary_and_server_search": true,
+    "no_legacy_whole_notebook_fetch": true,
+    "automatic_save": true,
+    "multi_window_conflict_no_overwrite": true,
+    "copy_preserves_original_answer_and_evidence": true,
+    "lost_creation_ack_no_duplicate": true,
+    "close_before_debounce_and_reload_draft_recovery": true,
+    "actual_browser_offline_close_and_recovery": true,
+    "late_ack_does_not_replace_next_editor": true,
+    "real_pdf_quote_page_navigation": true,
+    "changed_source_retains_historical_evidence": true,
+    "mobile_no_horizontal_overflow": true,
+    "controlled_model_calls": 0,
+    "page_errors": [],
+    "original_answer_snapshot_sha256": "646a510c1d22fc4a8aa0ad04c3a05a7e19c9d486f09c24ef9ce20f312d3e87c9"
+  },
+  "installation": {
+    "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-notebook-reliability-20261023-043720.sqlite3",
+    "snapshots": {
+      "research_entries": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_groups": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "document_relations": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_analyses": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_candidates": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "translation_cache": {
+        "count": 68,
+        "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+      },
+      "full_text_study_cache": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "full_text_study_documents": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_records": {
+        "count": 11,
+        "sha256": "ffc62427f79bc573d4cb2fdcd03f6b108437fe3528e41cffd85f6de97b896aa2"
+      },
+      "translation_memory": {
+        "count": 6,
+        "sha256": "9792d7d36ab0684af6b13dd73a215353ad86cef7c1e95c2cf54b0354549d408a"
+      },
+      "pdf_annotation_baselines": {
+        "count": 4,
+        "sha256": "096565e1997824c15cdb571b43c79395344d987dfeebdd79dfeb740091530663"
+      },
+      "pdf_annotation_mutations": {
+        "count": 14,
+        "sha256": "2a02593f7a4a2398fbb15b8f9f9be30a1b1ff5e77f7bec1d2c5b12967d0c844f"
+      }
+    },
+    "candidate_manifest_sha256": "d14db85057d20c42da07b2e360bc82d0aced5ed6c81256d4c9a02f50ada694fb"
+  },
+  "production": {
+    "url": "http://127.0.0.1:59978",
+    "asset_checks": {
+      "index-BSAYEEMa.js": true,
+      "PdfReader-DZRWKzDK.js": true,
+      "index-C2CgD0GM.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200,
+      "/api/libraries/full-text/studies": 200,
+      "/api/data/overview": 200,
+      "/api/data/context": 200,
+      "/api/workspace/notebook/index": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0015_study_documents",
+    "study_cache_rows": 0,
+    "member_rows": 0,
+    "existing_full_backup_sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9"
+  }
+}

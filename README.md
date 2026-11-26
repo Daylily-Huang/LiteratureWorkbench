@@ -2,6 +2,8 @@
 
 A local-first, privacy-focused desktop literature reading, translation, and AI research workbench for Windows.
 
+个人自用入口与完整流程见[个人科研使用指南](docs/personal-research-guide.md)：全文/增量研读、缓存复用、双栏对照、原文依据审核和知识图谱。
+
 ---
 
 ## 🌟 Features
@@ -67,21 +69,26 @@ LiteratureWorkbench/
 
 - Windows 10/11
 - Python 3.12 (with [uv](https://docs.astral.sh/uv/))
-- Node.js 20+
+- Node.js 24.x (the frontend dependency set requires a newer runtime than Node 20; CI uses Node 24)
+
+For a fresh checkout, run these steps from the repository root. Each setup block returns to that root.
 
 ### 1. Frontend Setup
 
 ```powershell
 cd web
-npm install
+npm ci
 npm run build
+cd ..
 ```
 
 ### 2. Backend Setup
 
 ```powershell
 cd backend
-uv pip install -e ".[dev]"
+uv venv --python 3.12 .venv
+uv pip install --python .venv/Scripts/python.exe --requirement requirements.lock -e ".[dev]"
+cd ..
 ```
 
 ### 3. Launch Application
@@ -139,3 +146,7 @@ npm run build
 ## 📄 License
 
 Internal Research Use.
+
+Third-party components retain their own licenses. Frontend builds copy upstream browser-package licenses to `web/dist/licenses/` and preserve the PDF.js asset notices in `web/dist/pdfjs/`. This does not change the project license above.
+
+The dependency inventory and collected license evidence are recorded in [the dependency audit](docs/dependency-distribution-2026-10-23.md). The snapshot records missing metadata and incomplete notices; it is not commercial release approval.

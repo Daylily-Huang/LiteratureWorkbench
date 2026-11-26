@@ -1,0 +1,64 @@
+{
+  "files": [
+    {
+      "path": "web/src/app/Workbench.tsx",
+      "sha256": "d9bcb18ab84e17d2395d120e5252ee1aa690854f79637d14e89a9dda295507f2"
+    },
+    {
+      "path": "web/src/app/Workbench.test.tsx",
+      "sha256": "fc37a78144292f33467a55d2c13e40b71e225ed57f9e27c4b41ff4b58a9a1ddc"
+    },
+    {
+      "path": "web/src/app/App.css",
+      "sha256": "d552aab22daba4a36df5aebca14012a737c5870d662a16b7199458e8b096b859"
+    },
+    {
+      "path": "web/src/features/reader/useAnnotatedDocument.ts",
+      "sha256": "11c53b8a536ba4719982230a1b08690b682aaf0b8e642f837b0c843897e33531"
+    },
+    {
+      "path": "web/src/features/reader/useAnnotatedDocument.test.tsx",
+      "sha256": "407de89c4c0fb5634bed8b692271ace889cf335de50ced62f031cc5a93efd463"
+    },
+    {
+      "path": "web/src/features/reader/ComparisonPane.tsx",
+      "sha256": "606d4c1fcdbb1066e3a61c2d8dfd54a6678bd46f36529db63e3ae31b129ac176"
+    },
+    {
+      "path": "web/src/features/reader/ComparisonPane.test.tsx",
+      "sha256": "4e759483f6e635bd56e132baa3e0269496c6ed7f3414f7e483c46994abe54b9f"
+    },
+    {
+      "path": "web/src/features/reader/ResizableReadingSplit.tsx",
+      "sha256": "e13b155581fe74f62d330f530cdcc64fb325c683dbd11d346085edf1067af401"
+    },
+    {
+      "path": "web/src/features/reader/PdfReader.tsx",
+      "sha256": "b19c646ef316122fb581bcb199d942d1b7d965329ecac8a0590cfa0e6ef9e0c3"
+    },
+    {
+      "path": "web/src/features/reader/SelectionOverlay.tsx",
+      "sha256": "30943320389580ba18ac60a736ec86796a85db61725b3124a03634192d182048"
+    },
+    {
+      "path": "web/src/features/annotations/AnnotationPanel.tsx",
+      "sha256": "e39e5b27a938e4e103710b4898999e9b4871e6d12702ef2040229e222172d41a"
+    },
+    {
+      "path": "web/src/features/annotations/annotations.ts",
+      "sha256": "785612a19ecfd1fe3d6e649ba1c6216ee9e3fed92104478655d210de9340c4fd"
+    },
+    {
+      "path": "web/src/features/research/AssistantPanel.tsx",
+      "sha256": "600d26e0d2db0fc5d930b86bde75d62709ec567bcc8fa7a52e08ee444a23eebc"
+    },
+    {
+      "path": "backend/src/literature_workbench/features/annotations/service.py",
+      "sha256": "53631265a87578dd9301ca0dcfb87d944f5ad9de8305f689bae8b8e697cf25e0"
+    },
+    {
+      "path": "backend/tests/annotations/test_annotations_api.py",
+      "sha256": "ca91387f622628e594404564b9953f99eba26f22b9542c6a4d319972b92139db"
+    }
+  ]
+}

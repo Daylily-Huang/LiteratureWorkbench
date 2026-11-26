@@ -31,7 +31,7 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: |
-          uv pip install --system -e ".[dev]"
+          uv pip install --system --requirement requirements.lock -e ".[dev]"
 
       - name: Run Ruff Linter
         working-directory: backend
@@ -62,10 +62,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 

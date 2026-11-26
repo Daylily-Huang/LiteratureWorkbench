@@ -775,6 +775,18 @@ class ImportValidator:
             ).fetchone()
             document_id = str(document["id"]) if document else str(uuid4())
             if document is not None:
+                confirmation = connection.execute(
+                    """
+                    SELECT 1 FROM confirmed_imports AS ci
+                    JOIN import_intents AS ii ON ii.id=ci.intent_id
+                    WHERE ci.document_id=? AND ci.content_sha256=?
+                      AND ci.final_path_key=? AND ii.status='completed'
+                      AND ii.content_sha256=ci.content_sha256
+                      AND ii.final_path_key=ci.final_path_key
+                    LIMIT 1
+                    """,
+                    (document_id, digest, final_key),
+                ).fetchone()
                 version = connection.execute(
                     """
                     SELECT * FROM document_versions WHERE document_id=?
@@ -793,7 +805,7 @@ class ImportValidator:
                     or str(document["file_id"]) != metadata.file_id
                     or int(document["hard_link_count"]) != metadata.hard_link_count
                     or str(document["authorization_source"]) != "confirmed_import"
-                    or int(document["auto_cloud_eligible"]) != 1
+                    or confirmation is None
                     or version is None
                     or str(version["content_sha256"]) != digest
                     or int(version["size_bytes"]) != metadata.size
@@ -802,6 +814,12 @@ class ImportValidator:
                     or int(version["hard_link_count"]) != metadata.hard_link_count
                 ):
                     raise ValueError("document_binding_conflict")
+                # A fresh confirmed import revalidates the file and its binding.
+                # Repair eligibility lost by older parser versions only after that proof.
+                connection.execute(
+                    "UPDATE documents SET auto_cloud_eligible=1,updated_at=? WHERE id=?",
+                    (now, document_id),
+                )
             else:
                 connection.execute(
                     """

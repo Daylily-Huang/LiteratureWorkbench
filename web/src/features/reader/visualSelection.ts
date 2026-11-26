@@ -1,3 +1,4 @@
+import { cleanPdfCopyText } from "./copyText";
 import {
   MAX_TRANSLATION_CODE_POINTS,
   viewportPointToPdfPoint,
@@ -310,6 +311,26 @@ function joinSlices(
   return normalizeWhitespace(value);
 }
 
+function clipboardSlices(fragments: VisualFragment[], slices: string[]): string {
+  let value = "";
+  let previous: VisualFragment | undefined;
+  for (let i = 0; i < fragments.length; i += 1) {
+    const current = fragments[i]!;
+    const slice = slices[i] ?? "";
+    if (!slice) continue;
+    if (previous) {
+      if (previous.region !== current.region) value += "\n\n";
+      else if (previous.line !== current.line) {
+        const gap = current.bounds.top - previous.bounds.bottom;
+        value += gap > Math.max(previous.bounds.height, current.bounds.height) * .8 ? "\n\n" : "\n";
+      } else value += separator(previous, current);
+    }
+    value += slice;
+    previous = current;
+  }
+  return value.trim();
+}
+
 
 function mergeRects(rects: DOMRect[]): DOMRect[] {
   const ordered = [...rects].sort((first, second) => (
@@ -474,6 +495,7 @@ export function resolveVisualSelection(
     measured.push(...fragment.measure(from, to).filter((rect) => rect.width > 0 && rect.height > 0));
   }
   const selectedText = joinSlices(chosen, slices);
+  const rawText = clipboardSlices(chosen, slices);
   const clientRects = mergeRects(measured);
   if (selectedText === "" || clientRects.length === 0 || clientRects.length > MAX_VISIBLE_RECTS) {
     return { selected: null, hint: SELECTION_HINT };
@@ -518,6 +540,8 @@ export function resolveVisualSelection(
       ...options.metadata,
       pdfPage: options.page,
       text: selectedText,
+      rawText,
+      copyText: cleanPdfCopyText(rawText, ordered.map(fragment => fragment.node.data).join("\n")),
       contextBefore,
       contextAfter,
       rects,

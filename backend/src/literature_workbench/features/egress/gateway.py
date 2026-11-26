@@ -31,7 +31,12 @@ from literature_workbench.features.models.deepseek import (
     InvalidDeepSeekModel,
     InvalidDeepSeekResponse,
 )
+from literature_workbench.features.settings.repository import SettingsRepository
+from literature_workbench.features.translation.prompt import (
+    build_academic_translation_prompt,
+)
 from literature_workbench.features.translation.repository import (
+    MAX_CONTEXT_CODE_POINTS,
     current_page_text_candidates,
     match_selection_to_candidates,
     normalize_selection,
@@ -42,6 +47,7 @@ from literature_workbench.platform.windows.credentials import SecretStore
 DEEPSEEK_CHAT_COMPLETIONS_URL = "https://api.deepseek.com/chat/completions"
 DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance"
 MAX_REQUEST_BYTES = 64 * 1024
+MAX_FULL_TEXT_REQUEST_BYTES = 256 * 1024
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_BALANCE_RESPONSE_BYTES = 64 * 1024
 TOTAL_REQUEST_TIMEOUT_SECONDS = 30.0
@@ -77,11 +83,18 @@ class DeepSeekGateway:
         self._balance_last_error: str | None = None
 
     def translate_selection(self, proof: VerifiedSelectionProof) -> str:
-        display_name = self._verify_selection(proof)
-        prompt = (
-            "Translate the following server-verified PDF selection to "
-            f"{proof.target_language}. Return only the translation.\n\n"
-            f"<selection>\n{proof.verified_text}\n</selection>"
+        display_name, paper_title, paper_opening, context_before, context_after = (
+            self._verify_selection(proof)
+        )
+        glossary = SettingsRepository(self._database).read().translation_glossary
+        prompt = build_academic_translation_prompt(
+            selected_text=proof.verified_text,
+            target_language=proof.target_language,
+            paper_title=paper_title,
+            paper_opening=paper_opening,
+            context_before=context_before,
+            context_after=context_after,
+            glossary=glossary,
         )
         body = self._serialize(proof.model, prompt)
         attempt = self._audit.start(
@@ -119,7 +132,9 @@ class DeepSeekGateway:
         Document context is optional because library-wide calls have no
         single source document.
         """
-        body = self._serialize(model, prompt, system_prompt=system_prompt)
+        body = self._serialize(model, prompt, system_prompt=system_prompt,
+                               max_bytes=MAX_FULL_TEXT_REQUEST_BYTES if purpose in {"research_full_text", "research_comparison"} else MAX_REQUEST_BYTES,
+                               bounded_comparison=purpose == "research_comparison")
         attempt = self._audit.start(
             task_id=task_id,
             authorization_type="registered_library",
@@ -223,11 +238,14 @@ class DeepSeekGateway:
             error_code=error_code,
         )
 
-    def _verify_selection(self, proof: VerifiedSelectionProof) -> str:
+    def _verify_selection(
+        self, proof: VerifiedSelectionProof
+    ) -> tuple[str, str, str, str, str]:
         with self._database.connect() as connection:
             row = connection.execute(
                 """
-                SELECT d.display_name,p.normalized_text,p.raw_text,p.blocks_json
+                SELECT d.display_name,c.title,c.current_parse_run_id,
+                       p.normalized_text,p.raw_text,p.blocks_json
                 FROM documents AS d
                 JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
                 JOIN document_versions AS v
@@ -259,17 +277,42 @@ class DeepSeekGateway:
                     proof.content_sha256,
                 ),
             ).fetchone()
-        if row is None:
-            raise EgressRejected("selection_not_current")
-        normalized_selection = normalize_selection(proof.verified_text)
-        if (
-            match_selection_to_candidates(
+            if row is None:
+                raise EgressRejected("selection_not_current")
+            normalized_selection = normalize_selection(proof.verified_text)
+            matched = match_selection_to_candidates(
                 current_page_text_candidates(row), normalized_selection
             )
-            is None
-        ):
-            raise EgressRejected("selection_text_mismatch")
-        return str(row["display_name"])
+            if matched is None:
+                raise EgressRejected("selection_text_mismatch")
+            matching_text, (aligned_selection, position) = matched
+            before = matching_text[:position].rstrip()
+            after = matching_text[position + len(aligned_selection) :].lstrip()
+            context_before = "".join(list(before)[-MAX_CONTEXT_CODE_POINTS:])
+            context_after = "".join(list(after)[:MAX_CONTEXT_CODE_POINTS])
+            display_name = str(row["display_name"])
+            paper_title = str(row["title"] or "").strip()
+            if not paper_title:
+                paper_title = (
+                    display_name[:-4]
+                    if display_name.lower().endswith(".pdf")
+                    else display_name
+                )
+            paper_opening = ""
+            if proof.physical_page > 1 and row["current_parse_run_id"]:
+                first_page = connection.execute(
+                    """
+                    SELECT normalized_text,raw_text
+                    FROM pages
+                    WHERE parse_run_id=? AND content_sha256=? AND physical_page=1
+                    """,
+                    (str(row["current_parse_run_id"]), proof.content_sha256),
+                ).fetchone()
+                if first_page is not None:
+                    paper_opening = str(
+                        first_page["normalized_text"] or first_page["raw_text"] or ""
+                    )
+        return display_name, paper_title, paper_opening, context_before, context_after
 
     def _serialize(
         self,
@@ -277,6 +320,8 @@ class DeepSeekGateway:
         prompt: str,
         *,
         system_prompt: str | None = None,
+        max_bytes: int = MAX_REQUEST_BYTES,
+        bounded_comparison: bool = False,
     ) -> bytes:
         try:
             payload = self._adapter.build_request(
@@ -284,12 +329,14 @@ class DeepSeekGateway:
             )
         except InvalidDeepSeekModel:
             raise EgressRejected("invalid_deepseek_model") from None
+        if bounded_comparison:
+            payload.update(max_tokens=6000, thinking={"type": "disabled"}, response_format={"type": "json_object"})
         body = json.dumps(
             payload,
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
-        if len(body) > MAX_REQUEST_BYTES:
+        if len(body) > max_bytes:
             raise EgressRejected("deepseek_request_too_large")
         return body
 
@@ -301,7 +348,8 @@ class DeepSeekGateway:
         expected_response: str | None = None,
     ) -> str:
         started = self._monotonic()
-        deadline = started + TOTAL_REQUEST_TIMEOUT_SECONDS
+        timeout = 120.0 if attempt.purpose in {"research_full_text", "research_comparison"} else TOTAL_REQUEST_TIMEOUT_SECONDS
+        deadline = started + timeout
         try:
             secret = self._secret_store.get_deepseek_key()
         except (OSError, RuntimeError):
@@ -314,7 +362,7 @@ class DeepSeekGateway:
                 transport=self._transport,
                 trust_env=False,
                 follow_redirects=False,
-                timeout=httpx.Timeout(30.0, connect=5.0),
+                timeout=httpx.Timeout(timeout, connect=5.0),
             ) as client:
                 with client.stream(
                     "POST",
@@ -361,7 +409,7 @@ class DeepSeekGateway:
             charge=(
                 unknown_usage_charge()
                 if result.usage is None
-                else price_usage(attempt.model, result.usage)
+                else price_usage(attempt.model, result.usage, purpose=attempt.purpose)
             ),
         )
         return expected_response if expected_response is not None else result.content

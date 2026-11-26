@@ -1,0 +1,171 @@
+{
+  "implementation_hashes": {
+    "backend/src/literature_workbench/features/research/study_cache.py": "bc70357dc8c79fa712029d480f3852304d4cc4465a56c30ce8f8d5ee1950b357",
+    "backend/tests/research/test_ordered_study.py": "d62787afcf473931f2d87b0061f56b8f1e14b6e8f396acbe2fa0b96687c31c6e",
+    "backend/tests/research/test_library_service.py": "c79e6c2ae7fb5e095338ecedd6d9954262a488b6cf72d647ee8b8b2732237a74",
+    "web/src/features/research/AssistantPanel.tsx": "bdc82c5f3cf9900e24838ee38b5e50a3895e276b43e1d27cb07ab5def41a87e9",
+    "web/src/features/research/StudyHistory.tsx": "b47ea6d3849d3aa801e894a614a17bfff53557543c6a2f1ec796cc7901cb6b08",
+    "web/src/features/research/StudyHistory.test.tsx": "818c17cffbc77e44761b15acf225ae6fc11a44cb694662ff7ed9e8a528583b49",
+    "web/src/features/research/fullTextStudy.test.tsx": "a43d56f77ad7fe70da029e5290b1573ba9f1f7f62f60b6ba59d9bbe181f76e0f"
+  },
+  "manifest_sha256": "3b5ac73aba1e7b4c91e35fcf271292d24cfecfb0f0d08f826ab951241f6fec4a",
+  "self_tests": {
+    "backend": 834,
+    "backend_deselected": 2,
+    "backend_related": 57,
+    "frontend": 270,
+    "frontend_files": 50,
+    "frontend_related": 29,
+    "ruff": "passed",
+    "mypy_source_files": 89,
+    "typescript": "passed",
+    "build": "passed"
+  },
+  "browser": {
+    "real_pdf_documents": 3,
+    "ordered_answers_distinct": true,
+    "repeats_free_for_both_orders": true,
+    "reversed_old_claims_not_reused": true,
+    "new_paper_only_full_text": true,
+    "scope_numbers_correct": true,
+    "history_original_numbers_correct": true,
+    "real_pdf_page_navigation": true,
+    "no_automatic_scientific_graph_relations": true,
+    "mobile_no_overflow": true,
+    "controlled_calls": 3,
+    "paid_api_calls": 0,
+    "page_errors": []
+  },
+  "review": {
+    "verdict": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "agent": "/root/verify_ordered_study",
+    "manifest_sha256": "3b5ac73aba1e7b4c91e35fcf271292d24cfecfb0f0d08f826ab951241f6fec4a",
+    "independent_backend_tests": 57,
+    "independent_frontend_tests": 29,
+    "first_review_tool_calls": 6,
+    "targeted_rereview_tool_calls": 0,
+    "scope": "Ordered full-text cache semantics, same-order legacy compatibility, quote-only reuse on changed selection, numbered UI and free-plan guard.",
+    "inherited": [
+      "author full834 backend/full270 frontend",
+      "static checks/types/build",
+      "real PDF/SQLite/Chrome controlled-model verification"
+    ],
+    "not_verified": [
+      "real paid-provider quality",
+      "long duration",
+      "independent installed artifact or visual layout"
+    ],
+    "environment_note": "First backend setup failed because reviewer temporary parent directory did not exist; created directory and reran57 passed. No product failure."
+  },
+  "installation": {
+    "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-ordered-study-20261023-102033.sqlite3",
+    "snapshots": {
+      "research_entries": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_groups": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "document_relations": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_analyses": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_candidates": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "translation_cache": {
+        "count": 68,
+        "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+      },
+      "full_text_study_cache": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "full_text_study_documents": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_records": {
+        "count": 13,
+        "sha256": "54316b6736fc0dd825046938a1414b7c3b765f8075ea67c3dce40c0645b4fdc1"
+      },
+      "translation_memory": {
+        "count": 6,
+        "sha256": "9792d7d36ab0684af6b13dd73a215353ad86cef7c1e95c2cf54b0354549d408a"
+      },
+      "pdf_annotation_baselines": {
+        "count": 4,
+        "sha256": "096565e1997824c15cdb571b43c79395344d987dfeebdd79dfeb740091530663"
+      },
+      "pdf_annotation_mutations": {
+        "count": 14,
+        "sha256": "2a02593f7a4a2398fbb15b8f9f9be30a1b1ff5e77f7bec1d2c5b12967d0c844f"
+      }
+    },
+    "candidate_manifest_sha256": "3b5ac73aba1e7b4c91e35fcf271292d24cfecfb0f0d08f826ab951241f6fec4a",
+    "status": "installed"
+  },
+  "scope": "Personal local research; ordered exact full-text answers and safe quote reuse across changed selection. No scientific graph mutation or paid API in tests.",
+  "review_window": {
+    "start_utc": "2026-10-23 02:18:06 UTC",
+    "deadline_utc": "2026-10-23 02:28:06 UTC",
+    "policy_first_review_limit": 6,
+    "policy_targeted_rereview_limit": 4,
+    "scope": "New ordered full-text cache task; prior completed relation-request repair history is separate and retained.",
+    "finished_utc": "2026-10-23 02:23:04 UTC",
+    "elapsed_seconds": 298.0,
+    "within_ten_minutes": true
+  },
+  "production": {
+    "url": "http://127.0.0.1:59978",
+    "asset_checks": {
+      "index-CYrGYK0O.js": true,
+      "PdfReader-nUzmwGkp.js": true,
+      "index-Cx33FXM8.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200,
+      "/api/libraries/full-text/studies": 200,
+      "/api/data/overview": 200,
+      "/api/data/context": 200,
+      "/api/workspace/notebook/index": 200,
+      "analysis_history": 200,
+      "unknown_analysis_request": 404,
+      "scoped_evidence": 200,
+      "readonly_evidence_export": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0015_study_documents",
+    "study_cache_rows": 0,
+    "member_rows": 0,
+    "existing_full_backup_sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9"
+  },
+  "production_browser": {
+    "actual_installed_website": true,
+    "selected_real_documents": 2,
+    "selected_scope_order_correct": true,
+    "model_requests": 0,
+    "blocked_business_write_requests": 0,
+    "page_errors": [],
+    "scope": "GET-only UI check; analysis not submitted and non-GET page business requests blocked."
+  },
+  "cleanup": {
+    "temporary_directory": "D:/_scratch/2026-10-23-ordered-study",
+    "removed": true,
+    "fixture_stopped": true
+  }
+}

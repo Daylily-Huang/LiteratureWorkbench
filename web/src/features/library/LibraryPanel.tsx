@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
+import type { ReadingRecords } from "./readingRecords";
+import { documentMatches } from "./documentSearch";
 import { ImportConfirmDialog } from "./ImportConfirmDialog";
+import { FolderManager } from "./FolderManager";
 import { DocumentTree } from "./DocumentTree";
 import {
   browserDocumentApi,
@@ -16,7 +19,10 @@ import {
 } from "./dropFiles";
 
 type Props = {
+  readingRecords?: ReadingRecords;
+  onToggleFavorite?(id: string): void;
   activeDocumentId?: string | null;
+  fileInputRef?: RefObject<HTMLInputElement | null>;
   documentApi?: DocumentApi;
   documentRefreshMs?: number;
   importApi?: ImportApi;
@@ -24,7 +30,7 @@ type Props = {
   onDocumentsLoaded?: (documents: DocumentListItem[]) => void;
 };
 
-type LibraryCategory = "all" | "unclassified";
+type LibraryCategory = "all" | "unclassified" | "recent" | "favorites";
 
 function sameDocuments(left: DocumentListItem[], right: DocumentListItem[]): boolean {
   return left.length === right.length && left.every((item, index) => {
@@ -33,12 +39,17 @@ function sameDocuments(left: DocumentListItem[], right: DocumentListItem[]): boo
       && item.document_id === other.document_id
       && item.filename === other.filename
       && item.relative_folder === other.relative_folder
+      && item.library_id === other.library_id
+      && item.library_name === other.library_name
       && item.authorization_source === other.authorization_source;
   });
 }
 
 export function LibraryPanel({
+  readingRecords = {},
+  onToggleFavorite,
   activeDocumentId = null,
+  fileInputRef,
   documentApi = browserDocumentApi,
   documentRefreshMs = 3000,
   importApi = browserImportApi,
@@ -52,8 +63,11 @@ export function LibraryPanel({
   const [documentsFailed, setDocumentsFailed] = useState(false);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<LibraryCategory>("all");
+  const [folderManagerOpen, setFolderManagerOpen] = useState(false);
+  const [source, setSource] = useState("");
   const [pollFailures, setPollFailures] = useState<Set<string>>(new Set());
-  const input = useRef<HTMLInputElement>(null);
+  const internalInput = useRef<HTMLInputElement>(null);
+  const input = fileInputRef ?? internalInput;
   const confirming = useRef(false);
 
   function putDocuments(next: DocumentListItem[]) {
@@ -225,11 +239,11 @@ export function LibraryPanel({
   }
 
   const filteredDocuments = documents.filter((item) => {
-    const needle = query.trim().toLocaleLowerCase("zh-CN");
-    const matchesQuery =
-      needle === "" ||
-      `${item.relative_folder}/${item.filename}`.toLocaleLowerCase("zh-CN").includes(needle);
+    if (source && item.library_id !== source) return false;
+    const matchesQuery = documentMatches(item, readingRecords, query);
     if (!matchesQuery) return false;
+    if (category === "favorites") return readingRecords[item.document_id]?.favorite === true;
+    if (category === "recent") return (readingRecords[item.document_id]?.lastOpened ?? 0) > 0;
     if (category === "unclassified") {
       return item.relative_folder === "" || item.authorization_source === "confirmed_import";
     }
@@ -302,21 +316,36 @@ export function LibraryPanel({
         </button>
       </div>
 
+      <div className="library-quick-filters" role="group" aria-label="阅读视图">
+        <button type="button" aria-pressed={category === "recent"} onClick={() => setCategory(category === "recent" ? "all" : "recent")}>最近阅读</button>
+        <button type="button" aria-pressed={category === "favorites"} onClick={() => setCategory(category === "favorites" ? "all" : "favorites")}>★ 我的收藏</button>
+      </div>
+      <div className="library-sources">
+        <button className="button button--ghost" type="button" onClick={() => setFolderManagerOpen(true)}>管理文件夹</button>
+        <select aria-label="筛选来源文件夹" value={source} onChange={event => setSource(event.target.value)}>
+          <option value="">所有来源</option>
+          {[...new Map(documents.filter(doc => doc.library_id).map(doc => [doc.library_id!, doc])).values()].map(doc => <option key={doc.library_id} value={doc.library_id}>{doc.authorization_source === "confirmed_import" ? "直接导入" : doc.library_name ?? "本地文件夹"}</option>)}
+        </select>
+      </div>
       <div className="library-panel__tree-container">
         <div className="library-panel__tree-header">
           <span>文件目录</span>
         </div>
-        <DocumentTree
+        {category === "recent" ? <div className="document-list" aria-label="最近阅读列表">{[...filteredDocuments].sort((a, b) => (readingRecords[b.document_id]?.lastOpened ?? 0) - (readingRecords[a.document_id]?.lastOpened ?? 0)).map(doc => <button type="button" className="document-list__item" key={doc.document_id} onClick={() => onOpenDocument(doc.document_id)} title={doc.filename}><span>{doc.filename}<small>第 {readingRecords[doc.document_id]?.page} 页</small></span></button>)}</div> : <DocumentTree
+          expandAll={query.trim() !== "" || category === "favorites"}
+          readingRecords={readingRecords}
+          onToggleFavorite={onToggleFavorite}
           activeDocumentId={activeDocumentId}
           documents={filteredDocuments}
           onOpenDocument={onOpenDocument}
-        />
+        />}
       </div>
 
       {query.trim() !== "" && filteredDocuments.length === 0 && (
         <p className="empty-copy">没有匹配的文献</p>
       )}
-      {documentsFailed && <p role="alert">文献列表暂时无法读取</p>}
+      {query.trim() === "" && filteredDocuments.length === 0 && !documentsFailed && <p className="empty-copy">{category === "favorites" ? "点击文献旁的星标，收藏常用文献。" : category === "recent" ? "打开一篇文献后，这里会显示阅读记录。" : "这里还没有文献，可以在下方导入 PDF。"}</p>}
+      {documentsFailed && <div role="alert"><p>文献列表暂时无法读取</p><button className="button button--ghost" type="button" onClick={() => void refreshDocuments()}>重试加载列表</button></div>}
 
       {/* Import & Storage Footer */}
       <div className="library-panel__footer">
@@ -344,13 +373,14 @@ export function LibraryPanel({
 
         <div className="library-storage-info">
           <div className="library-storage-info__header">
-            <span>本地只读库</span>
+            <span title="进度与收藏保存在当前浏览器">本地文献库 · 自动记住页码</span>
             <span>{documents.length} 篇已同步</span>
           </div>
         </div>
       </div>
 
       {unsupported && <p>首版暂不导入；以后可在单次明确授权后用于云处理</p>}
+      {folderManagerOpen && <FolderManager onClose={() => setFolderManagerOpen(false)} onChanged={() => void refreshDocuments()} />}
       {selected && (
         <ImportConfirmDialog
           fileName={selected.name}

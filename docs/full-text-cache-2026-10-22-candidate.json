@@ -1,0 +1,102 @@
+{
+  "candidate_manifest_sha256": "0e3654571c73436ff996f036e858598d23b8a251c0417d8a9eca550d52a06471",
+  "files": {
+    "backend/src/literature_workbench/db/migrations.py": "9667649b5d38b054ada5702204e391af977801710da7f5850bd8416c23c1d2d8",
+    "backend/src/literature_workbench/db/schema_v14_study_cache.sql": "9b618d00f237e970548a84f1ba124599ce04786d6ecc667acaecc19453c2d551",
+    "backend/src/literature_workbench/features/research/full_text.py": "853fda214ce343e8b5331cda0b2fc0e150e2acfb3b3d944dec4dac3a86d44e12",
+    "backend/src/literature_workbench/features/research/study_cache.py": "f6c3b34cdcacd6909484efcb0dca124fe0dd323b1d75331407b198b3b55b8042",
+    "backend/src/literature_workbench/features/research/service.py": "662c8d2edbf33bd94782088c88176499cc8fc8ecc04aad1b66f7e9d55e2339db",
+    "backend/src/literature_workbench/api/research.py": "1c0a662ba8d79db4a17abee7594047475662857b26e7ab9530511869fc31243f",
+    "backend/tests/research/test_library_service.py": "ee0491c0ad7fc272b495f170f52f0f6d2daa2b1a67a2c11206ea76e9b938a5ef",
+    "backend/tests/api/test_research.py": "29b3e854563b58908a8df987e67f719bbb53c190dd9744e6023968e87fcfef25",
+    "backend/tests/db/test_migrations.py": "e5c39fa87bc1d050d85906100e34e6527abb210fe315f5d6af8be3a38a5b9eaa",
+    "web/src/features/research/AssistantPanel.tsx": "85b6d83dd059ca092180b7cf16c806da7710b55ba4deb483a6b9d2dd939d9d66",
+    "web/src/features/research/fullTextStudy.tsx": "8e92e9fc1eedd366d077700ec0a084fc0cf398780f78b7d33cd92f2f5400c53b",
+    "web/src/features/research/fullTextStudy.test.tsx": "42ee91c658a19d9d9abe1113249bd0928e8fa3e10fcc40e8073386a84faf3e07",
+    "web/src/features/research/ResearchNotebook.tsx": "3600d3763805422cfba2f5b4270159b0d03ae488f28f3a02116926f2963ea00e",
+    "web/src/app/App.css": "2d341edae4cef816bf0757a40e3ce9466ecea6608f2787ba098438116f475fe3"
+  },
+  "independent_review": {
+    "result": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "backend_research_api_tests": 53,
+    "migration_tests": 11,
+    "frontend_tests": 7
+  },
+  "production": {
+    "url": "http://127.0.0.1:53101",
+    "asset_checks": {
+      "index-DppEvM4Q.js": true,
+      "PdfReader-DwIGiAnD.js": true,
+      "index-CnPAFg_5.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0014_study_cache",
+    "study_cache_rows": 0
+  },
+  "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-study-cache-20261023-000016.sqlite3",
+  "preserved_tables": {
+    "research_entries": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "reading_groups": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "document_relations": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "relation_analyses": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "relation_candidates": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "translation_cache": {
+      "count": 68,
+      "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+    }
+  },
+  "browser_phase1": {
+    "first_full_text": true,
+    "identical_question_free": true,
+    "new_question_uses_smaller_verified_notes": true,
+    "cost_badges_and_history": true,
+    "model_calls": 2,
+    "page_errors": []
+  },
+  "browser_phase2": {
+    "cache_survives_actual_server_restart": true,
+    "annotation_only_preserves_cache": true,
+    "explicit_refresh_calls_once": true,
+    "refresh_option_resets": true,
+    "changed_original_invalidates_cache": true,
+    "model_calls": 3,
+    "page_errors": []
+  },
+  "migration_self": {
+    "old_tables_unchanged": 34,
+    "idempotent": true,
+    "integrity": "ok",
+    "cache_initially_empty": true
+  },
+  "migration_independent": {
+    "old_tables_unchanged": 34,
+    "idempotent": true,
+    "integrity": "ok",
+    "cache_initially_empty": true
+  }
+}

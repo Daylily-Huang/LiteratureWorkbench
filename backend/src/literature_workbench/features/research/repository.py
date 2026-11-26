@@ -195,6 +195,42 @@ class RagChunkRepository:
                 (match_query, limit),
             ).fetchall()
 
+    def search_selected(
+        self,
+        match_query: str,
+        *,
+        limit: int,
+        document_ids: list[str],
+    ) -> list[sqlite3.Row]:
+        """Corpus-wide FTS search with document attribution.
+
+        Rows come back score-ordered and may contain several rows per
+        document and per content; the retriever applies dedupe and the
+        per-document cap as policy.
+        """
+        if not document_ids:
+            return []
+        placeholders = ",".join("?" for _ in document_ids)
+        with self._database.connect() as connection:
+            return connection.execute(
+                f"""
+                SELECT c.id AS chunk_id,c.content_sha256,c.physical_page,c.text,
+                       c.rects_json,d.id AS document_id,d.display_name,
+                       bm25(rag_chunks_fts) AS score
+                FROM rag_chunks_fts
+                JOIN rag_chunks AS c ON c.id=rag_chunks_fts.chunk_id
+                LEFT JOIN contents AS co ON co.sha256=c.content_sha256
+                JOIN documents AS d ON d.content_sha256=c.content_sha256
+                  AND d.status IN ('candidate_pdf','valid_pdf') AND d.format='pdf'
+                JOIN libraries AS l ON l.id=d.library_id AND l.status='active'
+                WHERE rag_chunks_fts MATCH ? AND d.id IN ({placeholders})
+                  AND (co.current_parse_run_id IS NULL OR co.current_parse_run_id = c.parse_run_id)
+                ORDER BY score
+                LIMIT ?
+                """,
+                (match_query, *document_ids, limit),
+            ).fetchall()
+
     def search(
         self,
         content_id: ContentId | str,

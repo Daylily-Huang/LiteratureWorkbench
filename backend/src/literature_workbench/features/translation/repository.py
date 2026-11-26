@@ -7,16 +7,17 @@ import re
 import sqlite3
 import unicodedata
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
 from literature_workbench.db.database import Database
 from literature_workbench.db.task_queue import TaskQueue
+from literature_workbench.features.translation.reuse import TranslationPiece
 
 
-PROMPT_VERSION = "selection-translation-v1"
+PROMPT_VERSION = "selection-translation-v2"
 MAX_CONTEXT_CODE_POINTS = 500
 MIN_PROSE_BLOCK_WORDS = 8
 TranslationStatus = Literal["queued", "running", "completed", "failed"]
@@ -40,6 +41,7 @@ class VerifiedSelection:
     context_before: str
     context_after: str
     target_language: Literal["zh-CN"]
+    page_text_hash: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +69,9 @@ class TranslationTask:
     error_code: str | None
     translated_text: str | None
     detected_source_language: str | None
+    page_text_hash: str = ""
+    prefer_exact: bool = False
+    reuse_details: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,6 +354,7 @@ class TranslationRepository:
             context_before="".join(list(before)[-MAX_CONTEXT_CODE_POINTS:]),
             context_after="".join(list(after)[:MAX_CONTEXT_CODE_POINTS]),
             target_language=target_language,
+            page_text_hash=page_text_fingerprint(row),
         )
 
     @staticmethod
@@ -412,9 +418,12 @@ class TranslationRepository:
         requested_model: str,
         settings_revision: int,
         queue: TaskQueue,
+        prefer_exact: bool = False,
+        prompt_version: str | None = None,
     ) -> TranslationTask:
         timestamp = self._timestamp()
         task_id = uuid4()
+        effective_version = prompt_version or PROMPT_VERSION
         with self._database.transaction() as connection:
             existing = connection.execute(
                 "SELECT id FROM translation_tasks WHERE session_generation=? AND client_task_id=?",
@@ -428,8 +437,8 @@ class TranslationRepository:
                   id,session_generation,client_task_id,document_id,document_version_id,
                   content_sha256,physical_page,selected_text,context_before,context_after,
                   target_language,route_mode,requested_provider,requested_model,
-                  settings_revision,prompt_version,status,stage,created_at,updated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'queued','pending',?,?)
+                  settings_revision,prompt_version,status,stage,created_at,updated_at,page_text_hash,prefer_exact)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'queued','pending',?,?,?,?)
                 """,
                 (
                     str(task_id), session_generation, str(client_task_id),
@@ -437,7 +446,8 @@ class TranslationRepository:
                     selection.content_id, selection.physical_page, selection.selected_text,
                     selection.context_before, selection.context_after,
                     selection.target_language, route_mode, requested_provider,
-                    requested_model, settings_revision, PROMPT_VERSION, timestamp, timestamp,
+                    requested_model, settings_revision, effective_version, timestamp, timestamp,
+                    selection.page_text_hash, int(prefer_exact),
                 ),
             )
             queue.enqueue_in_transaction(
@@ -452,10 +462,41 @@ class TranslationRepository:
                     "physical_page": selection.physical_page,
                     "selected_text": selection.selected_text,
                     "target_language": selection.target_language,
-                    "prompt_version": PROMPT_VERSION,
+                    "prompt_version": effective_version,
                 },
             )
         return self.get_for_worker(task_id)
+
+    def read_paper_context(self, document_id: UUID, content_id: str, physical_page: int) -> tuple[str, str]:
+        """Return (paper_title, paper_opening_excerpt) from server-verified records."""
+        with self._database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT d.display_name, c.title, c.current_parse_run_id
+                FROM documents AS d
+                JOIN contents AS c ON c.sha256 = d.content_sha256
+                WHERE d.id = ? AND d.content_sha256 = ?
+                """,
+                (str(document_id), content_id),
+            ).fetchone()
+            if row is None:
+                return "", ""
+            title = str(row["title"] or "").strip()
+            if not title:
+                display = str(row["display_name"] or "").strip()
+                title = display[:-4] if display.lower().endswith(".pdf") else display
+            opening = ""
+            if physical_page > 1 and row["current_parse_run_id"]:
+                first_page = connection.execute(
+                    """
+                    SELECT normalized_text, raw_text FROM pages
+                    WHERE content_sha256 = ? AND parse_run_id = ? AND physical_page = 1
+                    """,
+                    (content_id, str(row["current_parse_run_id"])),
+                ).fetchone()
+                if first_page is not None:
+                    opening = str(first_page["normalized_text"] or first_page["raw_text"] or "")
+        return title, opening
 
     def get(
         self, task_id: UUID, *, session_generation: str
@@ -532,8 +573,8 @@ class TranslationRepository:
     def cache_key(self, task: TranslationTask, provider: str, model: str) -> str:
         stable = json.dumps(
             {
-                "document_version_id": str(task.document_version_id),
-                "content_id": task.content_id,
+                "document_id": str(task.document_id),
+                "page_text_hash": task.page_text_hash,
                 "physical_page": task.physical_page,
                 "selected_text": normalize_selection(task.selected_text),
                 "target_language": task.target_language,
@@ -613,6 +654,68 @@ class TranslationRepository:
             )
         return self.get_for_worker(task_id)
 
+    def set_reuse_details(self, task_id: UUID, details: dict[str, object]) -> None:
+        with self._database.transaction() as connection:
+            connection.execute(
+                "UPDATE translation_tasks SET reuse_details=? WHERE id=? AND status='running'",
+                (json.dumps(details, ensure_ascii=False), str(task_id)),
+            )
+
+    def remember(self, task: TranslationTask, provider: str, model: str, piece: TranslationPiece) -> None:
+        if not task.page_text_hash or not piece.source or not piece.translation:
+            return
+        key = hashlib.sha256(json.dumps([
+            str(task.document_id), task.physical_page, task.page_text_hash, piece.source,
+            provider, model, task.target_language, task.prompt_version,
+        ], ensure_ascii=False).encode()).hexdigest()
+        with self._database.transaction() as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO translation_memory VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (key, str(task.document_id), task.physical_page, task.page_text_hash,
+                 piece.source, piece.translation, provider, model, task.target_language,
+                 task.prompt_version, str(task.id), self._timestamp()),
+            )
+
+    def memories(self, task: TranslationTask, provider: str, model: str) -> list[TranslationPiece]:
+        if not task.page_text_hash:
+            return []
+        scope = (str(task.document_id), task.physical_page, provider, model,
+                 task.target_language, task.prompt_version)
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                """SELECT source_text,translated_text FROM translation_memory
+                   WHERE document_id=? AND physical_page=? AND provider=? AND model=?
+                     AND target_language=? AND prompt_version=? AND page_text_hash=?
+                   ORDER BY created_at DESC LIMIT 500""", (*scope, task.page_text_hash),
+            ).fetchall()
+            result = {str(row["source_text"]): str(row["translated_text"]) for row in reversed(rows)}
+            # Old successful translations remain usable. Reconstruct their page
+            # fingerprint from the retained parse snapshot, never from a new file.
+            legacy = connection.execute(
+                """SELECT t.selected_text,t.context_before,t.context_after,t.content_sha256,c.translated_text FROM translation_tasks t
+                   JOIN translation_cache c ON c.cache_key=t.result_cache_key
+                   WHERE t.document_id=? AND t.physical_page=? AND t.provider=? AND t.model=?
+                     AND t.target_language=? AND t.prompt_version=? AND t.status='completed'
+                     AND t.page_text_hash='' ORDER BY t.updated_at DESC LIMIT 500""", scope,
+            ).fetchall()
+            hashes: dict[str, str] = {}
+            page_texts: dict[str, list[str]] = {}
+            for row in legacy:
+                content = str(row["content_sha256"])
+                if content not in hashes:
+                    page = connection.execute(
+                        """SELECT p.raw_text,p.normalized_text,p.blocks_json FROM pages p
+                           JOIN contents c ON c.sha256=p.content_sha256 AND c.current_parse_run_id=p.parse_run_id
+                           JOIN parse_runs r ON r.id=p.parse_run_id AND r.status='completed'
+                           WHERE p.content_sha256=? AND p.physical_page=?""", (content, task.physical_page),
+                    ).fetchone()
+                    hashes[content] = "" if page is None else page_text_fingerprint(page)
+                    page_texts[content] = [] if page is None else current_page_text_candidates(page)
+                context = normalize_selection(" ".join(str(row[key]) for key in ("context_before", "selected_text", "context_after")))
+                if hashes[content] == task.page_text_hash and any(context in normalize_selection(text) for text in page_texts[content]):
+                    result.setdefault(normalize_selection(str(row["selected_text"])), str(row["translated_text"]))
+        return [TranslationPiece(source, translation) for source, translation in result.items() if source and translation]
+
     def _timestamp(self) -> str:
         value = self._now()
         if value.tzinfo is None:
@@ -640,4 +743,11 @@ class TranslationRepository:
             error_code=None if row["error_code"] is None else str(row["error_code"]),
             translated_text=None if row["translated_text"] is None else str(row["translated_text"]),
             detected_source_language=None if row["detected_source_language"] is None else str(row["detected_source_language"]),
+            page_text_hash=str(row["page_text_hash"]), prefer_exact=bool(row["prefer_exact"]),
+            reuse_details=json.loads(str(row["reuse_details"])),
         )
+
+
+def page_text_fingerprint(row: sqlite3.Row) -> str:
+    candidates = sorted({normalize_selection(text) for text in current_page_text_candidates(row)})
+    return hashlib.sha256(json.dumps(candidates, ensure_ascii=False).encode("utf-8")).hexdigest()

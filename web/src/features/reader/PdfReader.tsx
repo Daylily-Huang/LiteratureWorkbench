@@ -17,9 +17,12 @@ import {
 import "pdfjs-dist/web/pdf_viewer.css";
 
 import "./pdfWorker";
+import { cleanPdfCopyText } from "./copyText";
 import { OcrTextLayer, type OcrBlock } from "./OcrTextLayer";
 import { CitationHighlight, type PdfRect } from "./CitationHighlight";
+import { PdfSearch } from "./PdfSearch";
 import { PdfToolbar } from "./PdfToolbar";
+import { PdfOutline } from "./PdfOutline";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { AnnotationOverlay } from "../annotations/AnnotationOverlay";
 import type { PdfAnnotation } from "../annotations/annotations";
@@ -63,8 +66,15 @@ export type CitationJump = {
 };
 
 type PdfReaderProps = ReaderDocument & {
+  selectionTools?: boolean;
+  fitOnOpen?: boolean;
+  searchRequest?: { query: string; nonce: number };
+  onProgress?(documentId: string, page: number, totalPages: number): void;
   initialPage?: number;
+  initialScale?: number;
+  onScaleChange?(documentId: string, scale: number): void;
   requestedPage?: number;
+  pageRequestId?: number;
   citationHighlight?: CitationJump | null;
   annotations?: PdfAnnotation[];
   activeAnnotationId?: string | null;
@@ -78,7 +88,9 @@ type PdfReaderProps = ReaderDocument & {
   onOpenAnnotation?(annotationId: string): void;
   onSelectionClear?(): void;
   onSelectionChange?(selected: SelectedText): void;
+  onDismissTranslation?(): void;
   onTranslateSelection?(selected: SelectedText): void;
+  onAskSelection?(selected: SelectedText): void;
 };
 
 
@@ -129,11 +141,14 @@ function PdfPage({
   annotationBusy,
   citationHighlight = null,
   selectionDragging,
+  selectionTools,
   onAnnotateSelection,
   onCancelSelection,
   onOpenAnnotation,
   onRendered,
+  onDismissTranslation,
   onTranslateSelection,
+  onAskSelection,
 }: {
   document: PDFDocumentProxy;
   documentId: string;
@@ -148,6 +163,7 @@ function PdfPage({
   annotationBusy?: boolean;
   citationHighlight?: { rects: readonly PdfRect[] | number[][]; nonce: number } | null;
   selectionDragging?: boolean;
+  selectionTools?: boolean;
   onAnnotateSelection?(
     selected: SelectedText,
     type: "highlight" | "underline" | "comment",
@@ -157,7 +173,9 @@ function PdfPage({
   onCancelSelection?(): void;
   onOpenAnnotation?(annotationId: string): void;
   onRendered?(): void;
+  onDismissTranslation?(): void;
   onTranslateSelection?(selected: SelectedText): void;
+  onAskSelection?(selected: SelectedText): void;
 }) {
   const pageRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -287,15 +305,18 @@ function PdfPage({
           {selected?.pdfPage === pageIndex + 1 && (
             <SelectionOverlay
               busy={annotationBusy}
-              onAnnotate={(type, color, comment) => onAnnotateSelection?.(selected, type, color, comment)}
+              onAnnotate={onAnnotateSelection ? (type, color, comment) => onAnnotateSelection(selected, type, color, comment) : undefined}
+              onOpenMarkup={onDismissTranslation}
               onCancel={onCancelSelection}
               onTranslate={() => onTranslateSelection?.(selected)}
+              onAsk={onAskSelection ? () => onAskSelection(selected) : undefined}
               scale={scale}
               selected={selected}
-              showTools={!selectionDragging}
+              showTools={!selectionDragging && selectionTools !== false}
             />
           )}
           <AnnotationOverlay
+            key={documentId}
             activeAnnotationId={activeAnnotationId}
             annotations={annotations}
             onOpen={onOpenAnnotation}
@@ -322,8 +343,15 @@ export function PdfReader({
   documentVersionId,
   contentId,
   filename,
+  onProgress,
+  searchRequest,
+  selectionTools = true,
+  fitOnOpen = false,
   initialPage = 1,
+  initialScale = 1,
+  onScaleChange,
   requestedPage,
+  pageRequestId,
   citationHighlight = null,
   annotations = [],
   activeAnnotationId,
@@ -332,7 +360,9 @@ export function PdfReader({
   onOpenAnnotation,
   onSelectionClear,
   onSelectionChange,
+  onDismissTranslation,
   onTranslateSelection,
+  onAskSelection,
 }: PdfReaderProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -341,8 +371,17 @@ export function PdfReader({
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [basePageSizes, setBasePageSizes] = useState<PageSize[]>([]);
   const [pageIndex, setPageIndex] = useState(Math.max(0, initialPage - 1));
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState(initialScale);
+  const previousScale = useRef(initialScale);
   const [error, setError] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  useEffect(() => { if (searchRequest) { setSearchOpen(true); setOutlineOpen(false); } }, [searchRequest]);
+  const restoredPdf = useRef<PDFDocumentProxy | null>(null);
+  const handledPageRequest = useRef<string | null>(null);
+  const loadedDocumentId = useRef<string | null>(null);
+  const fittedDocumentId = useRef<string | null>(null);
   const [selected, setSelected] = useState<SelectedText | null>(null);
   const [selectionHint, setSelectionHint] = useState<string | null>(null);
   const [selectionDragging, setSelectionDragging] = useState(false);
@@ -357,17 +396,18 @@ export function PdfReader({
   useEffect(() => {
     let disposed = false;
     let published = false;
-    const root = rootRef.current;
-    if (root !== null) {
-      root.scrollTop = 0;
-      root.scrollLeft = 0;
+    const sameDocument = loadedDocumentId.current === documentId;
+    loadedDocumentId.current = documentId;
+    if (!sameDocument) {
+      const root = rootRef.current;
+      if (root !== null) { root.scrollTop = 0; root.scrollLeft = 0; }
+      const previousTask = activeLoadingTaskRef.current;
+      activeLoadingTaskRef.current = null;
+      if (previousTask !== null) void previousTask.destroy();
+      setPdf(null);
+      setBasePageSizes([]);
+      setPageIndex(Math.max(0, initialPage - 1));
     }
-    const previousTask = activeLoadingTaskRef.current;
-    activeLoadingTaskRef.current = null;
-    if (previousTask !== null) void previousTask.destroy();
-    setPdf(null);
-    setBasePageSizes([]);
-    setPageIndex(Math.max(0, initialPage - 1));
     setError(false);
     const loadingTask: PDFDocumentLoadingTask = getDocument({
       url: `/api/documents/${documentId}/file`,
@@ -386,6 +426,7 @@ export function PdfReader({
         return;
       }
       published = true;
+      if (sameDocument) restoredPdf.current = loaded;
       const previousTask = activeLoadingTaskRef.current;
       activeLoadingTaskRef.current = loadingTask;
       setPdf(loaded);
@@ -401,7 +442,7 @@ export function PdfReader({
       disposed = true;
       if (!published) void loadingTask.destroy();
     };
-  }, [documentId]);
+  }, [documentId, contentId, reload]);
 
   useEffect(() => {
     let disposed = false;
@@ -417,12 +458,20 @@ export function PdfReader({
         }
       }),
     ).then((sizes) => {
-      if (!disposed) setBasePageSizes(sizes);
+      if (!disposed) {
+        if (fitOnOpen && fittedDocumentId.current !== documentId && rootRef.current && sizes.length) {
+          const page = sizes[Math.min(Math.max(initialPage - 1, 0), sizes.length - 1)]!;
+          const width = rootRef.current.clientWidth;
+          if (width > 48) setScale(Math.max(.25, Math.min(1, (width - 48) / page.width)));
+          fittedDocumentId.current = documentId;
+        }
+        setBasePageSizes(sizes);
+      }
     });
     return () => {
       disposed = true;
     };
-  }, [pdf]);
+  }, [pdf, fitOnOpen]);
 
   useEffect(() => {
     setSelected((current) => {
@@ -474,9 +523,37 @@ export function PdfReader({
 
   useEffect(() => {
     if (requestedPage !== undefined && pdf !== null) {
+      const requestKey = JSON.stringify([documentId, requestedPage, pageRequestId]);
+      if (handledPageRequest.current === requestKey) return;
+      handledPageRequest.current = requestKey;
       scrollToPage(requestedPage - 1, "auto");
+    } else if (requestedPage === undefined) {
+      handledPageRequest.current = null;
     }
-  }, [pdf, requestedPage, scrollToPage]);
+  }, [documentId, pdf, requestedPage, pageRequestId, scrollToPage]);
+
+  useEffect(() => {
+    if (pdf === null || basePageSizes.length !== pdf.numPages || restoredPdf.current === pdf) return;
+    restoredPdf.current = pdf;
+    if (requestedPage !== undefined || (initialPage > 1 && pageIndex === initialPage - 1)) {
+      scrollToPage((requestedPage ?? initialPage) - 1, "auto");
+    }
+  }, [pdf, basePageSizes, initialPage, requestedPage, scrollToPage]);
+
+  useEffect(() => {
+    if (pdf && restoredPdf.current === pdf) onProgress?.(documentId, pageIndex + 1, pdf.numPages);
+  }, [documentId, pdf, pageIndex, basePageSizes, onProgress]);
+
+  useEffect(() => {
+    if (!pdf || previousScale.current === scale) return;
+    previousScale.current = scale;
+    // Keep the current physical page in view when fitting a comparison pane.
+    scrollToPage(pageIndex, "auto");
+  }, [pdf, scale, scrollToPage]);
+
+  useEffect(() => {
+    if (pdf) onScaleChange?.(documentId, scale);
+  }, [documentId, pdf, scale, onScaleChange]);
 
   const pageIndexes = useMemo(
     () => renderedPageIndexes(pageIndex, pdf?.numPages ?? 0),
@@ -616,7 +693,10 @@ export function PdfReader({
       setSelectionDragging(false);
       setSelected(captured.selected);
       setSelectionHint(captured.hint);
-      if (captured.selected !== null) onSelectionChange?.(captured.selected);
+      if (captured.selected !== null) {
+        rootRef.current?.focus({ preventScroll: true });
+        onSelectionChange?.(captured.selected);
+      }
       if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -632,7 +712,10 @@ export function PdfReader({
     selectionGestureRef.current = null;
     setSelected(captured.selected);
     setSelectionHint(captured.hint);
-    if (captured.selected !== null) onSelectionChange?.(captured.selected);
+    if (captured.selected !== null) {
+      rootRef.current?.focus({ preventScroll: true });
+      onSelectionChange?.(captured.selected);
+    }
   }
 
   function startSelection(event: ReactPointerEvent<HTMLDivElement>) {
@@ -692,13 +775,36 @@ export function PdfReader({
     return map;
   }, [annotations]);
 
-  if (error) return <p role="alert">PDF 暂时无法打开</p>;
+  if (error) return <div className="workbench-error-wrap"><p role="alert">PDF 暂时无法打开</p><button className="button button--primary" type="button" onClick={() => setReload(value => value + 1)}>重试打开 PDF</button></div>;
   if (pdf === null) return <p>正在打开 {filename}</p>;
 
   return (
     <section aria-label={`阅读 ${filename}`} className="pdf-reader">
+      {searchOpen && <PdfSearch key={`${documentId}:${searchRequest?.nonce ?? 0}`} initialQuery={searchRequest?.query} pdf={pdf} onJump={page => scrollToPage(page - 1, "auto")} onClose={() => setSearchOpen(false)} />}
+      {outlineOpen && <PdfOutline key={documentId} pdf={pdf} onJump={page => scrollToPage(page - 1, "auto")} onClose={() => setOutlineOpen(false)} />}
       <div
         className="pdf-reader__pages"
+        tabIndex={0}
+        onCopy={event => {
+          // The visual selection is intentionally separate from the browser Range.
+          // Preserve native copy in editors; clean only PDF text owned by this reader.
+          const target = event.target;
+          if (!(target instanceof Element) || !rootRef.current?.contains(target)
+            || target.closest("input, textarea, [contenteditable]:not([contenteditable='false'])")
+            || selectionDragging) return;
+          const native = window.getSelection();
+          if (native?.toString()) {
+            const layer = native.anchorNode?.parentElement?.closest(".textLayer");
+            if (!layer || !rootRef.current.contains(layer) || !native.focusNode || !layer.contains(native.focusNode)) return;
+            event.clipboardData.setData("text/plain", cleanPdfCopyText(native.toString(), layer.textContent ?? ""));
+            event.preventDefault();
+            return;
+          }
+          if (!selected || selected.documentId !== documentId
+            || selected.documentVersionId !== documentVersionId || selected.contentId !== contentId) return;
+          event.clipboardData.setData("text/plain", selected.copyText ?? cleanPdfCopyText(selected.text));
+          event.preventDefault();
+        }}
         onPointerCancel={cancelSelectionGesture}
         onPointerDown={startSelection}
         onPointerMove={rememberValidSelection}
@@ -739,21 +845,28 @@ export function PdfReader({
                 onSelectionClear?.();
               }}
               onOpenAnnotation={onOpenAnnotation}
+              onDismissTranslation={onDismissTranslation}
               onTranslateSelection={onTranslateSelection}
+              onAskSelection={onAskSelection}
               pageIndex={index}
               pageSize={{ height: baseSize.height * scale, width: baseSize.width * scale }}
               scale={scale}
               selected={selected}
               selectionDragging={selectionDragging}
+              selectionTools={selectionTools}
             />
           );
         })}
       </div>
       {selectionHint !== null && <p role="status">{selectionHint}</p>}
       <PdfToolbar
+        onOutline={() => { setOutlineOpen(value => !value); setSearchOpen(false); }}
+        outlineOpen={outlineOpen}
+        onSearch={() => { setSearchOpen(value => !value); setOutlineOpen(false); }}
+        searchOpen={searchOpen}
         currentPage={pageIndex + 1}
         onFitWidth={() => void fitWidth()}
-        onPageChange={(page) => scrollToPage(page - 1, "smooth")}
+        onPageChange={(page) => scrollToPage(page - 1, "auto")}
         onScaleChange={setScale}
         scale={scale}
         totalPages={pdf.numPages}

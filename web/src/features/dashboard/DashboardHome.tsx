@@ -1,22 +1,24 @@
 import { useState } from "react";
+import type { ReadingRecords } from "../library/readingRecords";
 import type { DocumentListItem } from "../library/documents";
 
 type DashboardHomeProps = {
   documents: DocumentListItem[];
+  readingRecords?: ReadingRecords;
   onOpenDocument(documentId: string): void;
   onAskQuestion?(question: string): void;
   onTriggerImport?(): void;
 };
 
 const DEFAULT_QUESTIONS = [
-  "这篇文献的核心研究问题与主要贡献是什么？",
-  "作者采用了哪些研究方法与实验设计？是否存在局限？",
-  "这项研究与相关领域的经典工作有哪些承接与突破？",
-  "该研究对我们当前的课题与写作有哪些具体启发？",
+  "文献库中有哪些主要研究问题与代表性成果？",
+  "比较文献库中主要研究方法的适用条件与局限。",
+  "文献库中的研究有哪些相互支持或矛盾的发现？",
+  "基于文献库的证据，哪些问题值得进一步研究？",
 ];
 
 const ALTERNATIVE_QUESTIONS = [
-  "论文的核心论点与理论假设是什么？",
+  "比较文献库中不同研究的核心论点与理论假设。",
   "实验数据集与评估指标是如何构建和选取的？",
   "作者在讨论部分指出了哪些潜在的威胁与未来方向？",
   "有哪些关键的段落或结论适合作为学术引用？",
@@ -24,6 +26,7 @@ const ALTERNATIVE_QUESTIONS = [
 
 export function DashboardHome({
   documents,
+  readingRecords = {},
   onOpenDocument,
   onAskQuestion,
   onTriggerImport,
@@ -32,8 +35,11 @@ export function DashboardHome({
 
   const activeQuestions = questionSet === 0 ? DEFAULT_QUESTIONS : ALTERNATIVE_QUESTIONS;
 
-  const recentDocuments = documents.slice(0, 3);
-  const primaryDoc = documents[0];
+  const recentlyRead = documents.filter(doc => (readingRecords[doc.document_id]?.lastOpened ?? 0) > 0)
+    .sort((a, b) => (readingRecords[b.document_id]?.lastOpened ?? 0) - (readingRecords[a.document_id]?.lastOpened ?? 0));
+  const recentDocuments = (recentlyRead.length ? recentlyRead : documents).slice(0, 3);
+  const primaryDoc = recentDocuments[0];
+  const lastRead = primaryDoc ? readingRecords[primaryDoc.document_id] : undefined;
 
   function handleStartReading() {
     if (primaryDoc) {
@@ -58,11 +64,11 @@ export function DashboardHome({
             <span className="dashboard-hero__sun">☀</span> 专注当下，积累复利
           </span>
           <h1 className="dashboard-hero__title">
-            每天进步一点点，<br />
-            距离答案更近一步。
+            {recentlyRead.length ? "接着上次的思路，" : "从一篇文献开始，"}<br />
+            让研究向前一步。
           </h1>
           <p className="dashboard-hero__subtitle">
-            从一篇文献开始，构建自己的学术知识体系。
+            {lastRead?.lastOpened ? `${primaryDoc?.filename} · 上次读到第 ${lastRead.page} 页` : "找回原文、留下思考，把阅读变成可追溯的积累。"}
           </p>
           <div className="dashboard-hero__actions">
             <button
@@ -70,7 +76,7 @@ export function DashboardHome({
               onClick={handleStartReading}
               type="button"
             >
-              <span>{primaryDoc ? "继续阅读" : "导入文献开始阅读"}</span>
+              <span>{primaryDoc ? (lastRead?.lastOpened ? "继续阅读" : "开始阅读") : "导入文献开始阅读"}</span>
               <span aria-hidden="true" className="dashboard-hero__arrow">→</span>
             </button>
             <span className="dashboard-hero__badge">
@@ -93,7 +99,7 @@ export function DashboardHome({
         {/* Quick Access */}
         <section className="dashboard-card">
           <div className="dashboard-card__header">
-            <h3>文献快捷入口</h3>
+            <h3>{recentlyRead.length ? "最近阅读" : "文献快捷入口"}</h3>
             <span className="dashboard-card__tag">快速打开</span>
           </div>
           <div className="dashboard-reading-list">
@@ -108,15 +114,15 @@ export function DashboardHome({
                   <span className="dashboard-reading-item__icon">PDF</span>
                   <div className="dashboard-reading-item__info">
                     <h4>{doc.filename}</h4>
-                    <p>{doc.relative_folder || "默认文件夹"}</p>
+                    <p>{readingRecords[doc.document_id]?.lastOpened ? `第 ${readingRecords[doc.document_id]?.page} / ${readingRecords[doc.document_id]?.totalPages} 页` : doc.relative_folder || "默认文件夹"}</p>
                   </div>
                   <span className="dashboard-card__link">阅读 →</span>
                 </button>
               ))
             ) : (
               <div className="dashboard-empty-card">
-                <p>暂无正在阅读的文献</p>
-                <small>导入文献后可在此处快速恢复阅读</small>
+                <p>还没有阅读记录</p>
+                <small>导入 PDF 后，阅读页码会自动记住</small>
               </div>
             )}
           </div>
@@ -136,7 +142,7 @@ export function DashboardHome({
             </div>
             <p className="dashboard-goal__hint">
               {documents.length > 0
-                ? "文献库运行正常，支持单篇精读与跨文献 RAG 检索"
+                ? `${recentlyRead.length} 篇有阅读记录 · ${documents.filter(doc => readingRecords[doc.document_id]?.favorite).length} 篇已收藏`
                 : "文献库当前为空，点击下方按钮或拖入 PDF 开始阅读"}
             </p>
             {onTriggerImport && (
@@ -162,14 +168,14 @@ export function DashboardHome({
             <div className="dashboard-note-item">
               <span className="dashboard-note-item__bullet">•</span>
               <div className="dashboard-note-item__content">
-                <p><strong>PDF 精读与划选翻译</strong>：支持双语平行翻译与批注高亮</p>
+                <p><strong>PDF 精读与划选翻译</strong>：选中文字即可翻译、标注和记录思考</p>
                 <time>深度阅读模式</time>
               </div>
             </div>
             <div className="dashboard-note-item">
               <span className="dashboard-note-item__bullet">•</span>
               <div className="dashboard-note-item__content">
-                <p><strong>证据溯源与问答</strong>：单篇与跨文献 RAG，点击页码标签精准高亮定位</p>
+                <p><strong>证据溯源与问答</strong>：按单篇或全库提问，点击来源返回原文核对</p>
                 <time>可信科研助手</time>
               </div>
             </div>

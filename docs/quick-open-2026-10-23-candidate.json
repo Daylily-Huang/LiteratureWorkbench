@@ -1,0 +1,151 @@
+{
+  "implementation_hashes": {
+    "web/src/features/library/documentSearch.ts": "cfa54ed6e4b91b229e5f92711bf65f3cfbe895855a803099b727dd92a2e59650",
+    "web/src/features/library/QuickOpen.tsx": "915418d2c4ee58301a7a0632effe00240a2ad02b37fb50d03137c982dd82327b",
+    "web/src/app/Workbench.tsx": "1964a8f3e5d019cdb7a54cd93c521562941060f606fe2ef0c898a380dd059839",
+    "web/src/features/library/LiteratureDesk.tsx": "7dd26239a100a79f39a49ba4d67078d7237079063cac41361ea4680bb7e505b2",
+    "web/src/features/library/LibraryPanel.tsx": "713d20674529ba7d88e00ffd0200c961435d1a92563529ad74b60c26156ac609",
+    "web/src/features/ui/ModalDialog.tsx": "2ee1e5840299df4d5ed062b0aaddc1a8cc2aed3f3abddec78a5a92f2eafc23fc",
+    "web/src/features/research/studyExport.ts": "e9060d51a96ff9ad81433e12bc4b0fe11dbdc00466c9c3c0866128142ab0b4be",
+    "web/src/features/research/StudyHistory.tsx": "0ed2eb5d3a454264b115e59e86b2f202bb8aa7c520cce614134f34403cb63fc6",
+    "web/src/features/ui/exportText.ts": "bb3bdb5e8640c1f028271ffebef2c252ea0bc721459377b4044bd23c7c3a1c34",
+    "web/src/features/research/ResearchNotebook.tsx": "0544e92b2d43122b5e7216f0d7911723ed46a5deb323c284bb753f5dda639586",
+    "web/src/app/App.css": "bc69ca9379916954fe044cd5a80996899b43b56971532ead89196fb9e18ff991",
+    "web/src/features/library/QuickOpen.test.tsx": "772a2f982131c1fb69c5648a1ef11563e844d2010fdc386a66390a20d198eed1",
+    "web/src/features/ui/ModalDialog.test.tsx": "6c83e600990e5977a26bd4035ba9b854f93cf40a1d82de2ca0c4c36b630b2dec",
+    "web/src/features/research/studyExport.test.ts": "6b230c92710e8b018738c6596dad70140ab0bd13a3077fb45a752b42cf19b3b4",
+    "web/src/features/research/StudyHistoryExport.test.tsx": "5852175ebca293b985b522574a2b9b8e8200b1b61483a365e962942923a5ca5f",
+    "web/src/app/Workbench.test.tsx": "55bcbd36f35abb144e0c7593472fc603c8ef3644725aa55367071b7dc0f7c816"
+  },
+  "manifest_sha256": "522ef62ff7fa68cffb548dc67ef3a738665b8295bd9b99dfb5232e65f2d31a1d",
+  "review": {
+    "first_verdict": "NO-GO",
+    "first_P1": 1,
+    "issue": "same-paper split remount could use stale initial page",
+    "final_verdict": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "first_tools": 6,
+    "recheck_tools": 2,
+    "independent_first_tests": 31,
+    "independent_recheck_tests": 15,
+    "not_independently_verified": [
+      "real browser",
+      "production installation"
+    ]
+  },
+  "self_checks": {
+    "frontend_files": 46,
+    "frontend_tests": 229,
+    "typescript": "passed",
+    "build": "passed",
+    "original_same_paper_regression": "failed as expected; fixed passes",
+    "backend_changes": false,
+    "paid_api_calls": 0
+  },
+  "browser": {
+    "quick_keyboard_and_focus": true,
+    "cache_browse_copy_export_no_new_calls": true,
+    "original_two_paper_group_and_sources_preserved": true,
+    "notebook_query": true,
+    "two_pane_ids": true,
+    "reader_page_and_zoom_preserved": true,
+    "modal_escape_preserves_focus_reading": true,
+    "editing_shortcut_untouched": true,
+    "compare_drafts_only": true,
+    "commands_navigation_only": true,
+    "mobile_bounds_and_overflow": true,
+    "stale_source_export_and_flags": true,
+    "controlled_model_calls": 1,
+    "page_errors": []
+  },
+  "same_paper_browser": {
+    "same_paper_split_preserves_page_and_zoom": true,
+    "physical_page": 2,
+    "scale": "125%"
+  },
+  "production_preflight": {
+    "url": "http://127.0.0.1:54433",
+    "homepage_status": 200,
+    "database_integrity": "ok",
+    "documents": 226,
+    "translation_cache": 68
+  },
+  "installation": {
+    "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-quick-open-20261023-030026.sqlite3",
+    "snapshots": {
+      "research_entries": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_groups": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "document_relations": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_analyses": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_candidates": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "translation_cache": {
+        "count": 68,
+        "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+      },
+      "full_text_study_cache": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "full_text_study_documents": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_records": {
+        "count": 11,
+        "sha256": "ffc62427f79bc573d4cb2fdcd03f6b108437fe3528e41cffd85f6de97b896aa2"
+      },
+      "translation_memory": {
+        "count": 6,
+        "sha256": "9792d7d36ab0684af6b13dd73a215353ad86cef7c1e95c2cf54b0354549d408a"
+      },
+      "pdf_annotation_baselines": {
+        "count": 4,
+        "sha256": "096565e1997824c15cdb571b43c79395344d987dfeebdd79dfeb740091530663"
+      },
+      "pdf_annotation_mutations": {
+        "count": 14,
+        "sha256": "2a02593f7a4a2398fbb15b8f9f9be30a1b1ff5e77f7bec1d2c5b12967d0c844f"
+      }
+    },
+    "candidate_manifest_sha256": "522ef62ff7fa68cffb548dc67ef3a738665b8295bd9b99dfb5232e65f2d31a1d"
+  },
+  "production": {
+    "url": "http://127.0.0.1:55184",
+    "asset_checks": {
+      "index-Bg7V0UTg.js": true,
+      "PdfReader-EL18-SIM.js": true,
+      "index-CDtV3ARK.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200,
+      "/api/libraries/full-text/studies": 200,
+      "/api/data/overview": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0015_study_documents",
+    "study_cache_rows": 0,
+    "member_rows": 0,
+    "existing_full_backup_sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9"
+  }
+}

@@ -339,7 +339,15 @@ def persist_structure_validation(
             """
             SELECT d.*,l.root_path,l.root_volume_id,l.root_file_id,l.recursive,
                    l.discovery_mode,l.authorization_source AS root_authorization_source,
-                   l.status AS root_status,l.cloud_pdf_auto_allowed
+                   l.status AS root_status,l.cloud_pdf_auto_allowed,
+                   EXISTS (
+                     SELECT 1 FROM confirmed_imports AS ci
+                     JOIN import_intents AS ii ON ii.id=ci.intent_id
+                     WHERE ci.document_id=d.id AND ci.content_sha256=d.content_sha256
+                       AND ci.final_path_key=d.path_key AND ii.status='completed'
+                       AND ii.content_sha256=ci.content_sha256
+                       AND ii.final_path_key=ci.final_path_key
+                   ) AS has_confirmed_import
             FROM documents AS d JOIN libraries AS l ON l.id=d.library_id
             WHERE d.content_sha256=?
             """,
@@ -391,6 +399,22 @@ def _document_cloud_eligible(
     cancellation: object | None,
     primary_identity: FileIdentity,
 ) -> bool:
+    authorization = str(row["authorization_source"])
+    authorized = authorization == "registered_library" or (
+        authorization == "confirmed_import"
+        and str(row["discovery_mode"]) == "managed_import"
+        and str(row["root_authorization_source"]) == "managed_import_internal"
+        and bool(row["has_confirmed_import"])
+    )
+    if (
+        not authorized
+        or not bool(row["cloud_pdf_auto_allowed"])
+        or str(row["root_status"]) != "active"
+        or not str(row["root_authorization_source"] or "")
+        or str(row["status"]) not in {"candidate_pdf", "valid_pdf"}
+        or int(row["hard_link_count"]) != 1
+    ):
+        return False
     if inspector is None:
         return (
             bool(row["cloud_pdf_auto_allowed"])
@@ -403,15 +427,6 @@ def _document_cloud_eligible(
             and int(row["mtime_ns"]) == primary_identity.modified_ns
             and int(row["hard_link_count"]) == primary_identity.hard_link_count == 1
         )
-    if (
-        not bool(row["cloud_pdf_auto_allowed"])
-        or str(row["root_status"]) != "active"
-        or not str(row["root_authorization_source"] or "")
-        or str(row["authorization_source"]) != "registered_library"
-        or str(row["status"]) not in {"candidate_pdf", "valid_pdf"}
-        or int(row["hard_link_count"]) != 1
-    ):
-        return False
     handle: VerifiedHandle | None = None
     try:
         if cancellation is not None:

@@ -1,0 +1,21 @@
+{
+  "backend/src/literature_workbench/api/app.py": "4dbe67dc0a17188552276baac2f2929a8e89eba23e3c9002c65ac173f8de33e3",
+  "backend/src/literature_workbench/api/reading_graph.py": "2575d75e4133264e8142f269a2d97d6039d56ad5e37afc84670497f6ae04e5d2",
+  "backend/src/literature_workbench/api/relation_review.py": "3125336b1a3a596f5a30f57b0394c21f782a0e2fa814a8bfafd4e586f221dbdc",
+  "backend/src/literature_workbench/features/research/service.py": "44e25c316e34120ff52bd0ea70e7c9e173be02ccd734ce74908aff10570b9872",
+  "backend/src/literature_workbench/features/research/relation_analysis.py": "1c419316c0d24c902817ebd97fd42953fd5b8418f303734e772d6746c4448cfc",
+  "backend/src/literature_workbench/db/migrations.py": "22d5b80160fb12e04f6f6ac2809161eda722c824d9e920942a407a45430278b6",
+  "backend/src/literature_workbench/db/schema_v12_relation_review.sql": "cea56740f4583521b5f5f24aa7065101fb1d11b82215cec20657d7a11a85436a",
+  "backend/tests/api/test_relation_review.py": "a1da5350773f625f0d1fe26a5382ad2405b7ae2d47b2311536f7946047eaa731",
+  "backend/tests/research/test_relation_analysis.py": "6f0318595f00694faa5a60342964fec9874dec4dd6da4116c1fb5036d7f574fa",
+  "backend/tests/research/test_library_service.py": "4ad837dcc1d84d51120c851f36804641d6d79b1f1ef9c12636a7c7cc85cb3515",
+  "backend/tests/db/test_migrations.py": "26e95d975c70f713af15427e57e62bd1714b23295ecde9118c4f99f558bab88b",
+  "web/src/app/App.css": "5e4c962c0d524a0de627ab2063a07c7ae84eb5c2c087c2d328b3f2a7b25f02b6",
+  "web/src/features/research/ResearchStudio.tsx": "e616856ab5c45ebe4ff8abd7cd91a9b4c1307efc320c37ac0b3cd8797fb4bca2",
+  "web/src/features/research/RelationReview.tsx": "98952a172f2b35349a5bd1f0a77e4a176fdd5504668d3238ce52aef74025ac8a",
+  "web/src/features/research/RelationReview.test.tsx": "035376475544d8649d77987fc93859933088eee580fb26965e8425c35b3edfff",
+  "web/src/features/research/workspaceApi.ts": "0859526cabbf7cf5b5eae4a05ed2f2d4964828cae039018b1b91c848b7b7db9e",
+  "web/src/features/research/graphModel.ts": "c2894b92207e4c7782b5808ef441af986407430d564ca17083f39224b13c7b18",
+  "web/src/features/research/KnowledgeGraph.tsx": "a14aeabf4b961793485ee393f8b74749d3fe5d9f8954bda43ac015cee0fa7fb5",
+  "web/src/features/research/QuestionEvidence.tsx": "a71c54e056d9ca0df4475f482f1ae1281a5b1e313dc8b3952291c3288a3332a5"
+}

@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { downloadText } from "../ui/exportText";
+import { exportNotes } from "./exportNotes";
 import type { ReaderDocument } from "../reader/PdfReader";
 import { annotationColorName, type AnnotationState, type PdfAnnotation } from "./annotations";
 
@@ -46,8 +48,11 @@ export function AnnotationPanel({
   onUndo,
   onUpdate,
 }: AnnotationPanelProps) {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
   const [editing, setEditing] = useState<string | null>(null);
   const [comment, setComment] = useState("");
+  useEffect(() => { setEditing(null); setComment(""); setSearch(""); setFilter("all"); }, [document?.documentId]);
 
   if (document === null) {
     return (
@@ -59,6 +64,7 @@ export function AnnotationPanel({
 
   const grouped = new Map<number, PdfAnnotation[]>();
   for (const item of state?.items ?? []) {
+    if ((filter !== "all" && item.type !== filter) || !`${item.selected_text} ${item.comment}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())) continue;
     grouped.set(item.page, [...(grouped.get(item.page) ?? []), item]);
   }
 
@@ -72,6 +78,7 @@ export function AnnotationPanel({
           <span className="annotation-panel__count">{totalAnnotations} 条</span>
         </div>
         <div className="annotation-panel__global-actions">
+          <button className="annotation-panel__action-btn" disabled={busy || totalAnnotations === 0} type="button" onClick={() => downloadText(`${document.filename.replace(/\.pdf$/i, "")}-阅读笔记.md`, exportNotes(document.filename, state?.items ?? []))}>导出笔记</button>
           <button
             className="annotation-panel__action-btn"
             disabled={busy}
@@ -93,17 +100,19 @@ export function AnnotationPanel({
         </div>
       </div>
 
+      {totalAnnotations > 0 && <div className="annotation-filters"><input aria-label="搜索摘录与评论" placeholder="搜索摘录与评论…" value={search} onChange={e => setSearch(e.target.value)} /><select aria-label="批注类型筛选" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">全部批注</option><option value="highlight">高亮</option><option value="underline">下划线</option><option value="comment">评论</option></select>{!grouped.size && <p>没有匹配的批注。导出仍包含全部笔记。</p>}</div>}
       {busy && (
         <div className="annotation-status" role="status">
           <span className="annotation-status__spinner" />
           <span>正在写入 PDF…</span>
         </div>
       )}
-      {error !== null && <p className="annotation-error" role="alert">{error}</p>}
+      {error !== null && <p className="annotation-error" role="alert">{error === "annotation_external_change" ? "PDF 已被其他程序修改，请重新打开后再操作。" : error === "annotation_ambiguous_id" ? "多处批注编号相同，未修改 PDF；请重新打开文献后再操作。" : error === "annotation_undo_unavailable" ? "没有可撤销的批注操作。" : "批注操作未完成，请重试或重新打开文献。"}</p>}
+      {!busy && state === null && error === null && <p role="status">正在读取文献笔记…</p>}
       {!busy && state !== null && (state.items?.length ?? 0) === 0 && (
         <div className="annotation-empty-state">
           <p>尚无批注</p>
-          <small>在左侧 PDF 中选中文字即可高亮、下划线或添加学术评论</small>
+          <small>在当前 PDF 中选中文字即可高亮、下划线或添加学术评论</small>
         </div>
       )}
 
@@ -146,10 +155,11 @@ export function AnnotationPanel({
                       className="annotation-card__select"
                       disabled={busy}
                       onChange={(event) => onUpdate(annotation, { color: event.target.value })}
-                      defaultValue={annotation.type === "underline" ? "red" : "yellow"}
+                      value={annotationColorName(annotation.color) ?? ""}
                     >
+                      {!annotationColorName(annotation.color) && <option value="">原始颜色</option>}
                       {(annotation.type === "underline" ? UNDERLINE_COLORS : HIGHLIGHT_COLORS).map((color) => (
-                        <option key={color} value={color}>{color}</option>
+                        <option key={color} value={color}>{{ yellow: "黄色", green: "绿色", blue: "蓝色", pink: "粉色", red: "红色", black: "黑色" }[color]}</option>
                       ))}
                     </select>
                   )}

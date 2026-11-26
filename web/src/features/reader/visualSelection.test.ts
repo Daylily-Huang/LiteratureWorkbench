@@ -49,6 +49,23 @@ const metadata = {
 
 
 describe("visual PDF text selection", () => {
+  it("cleans the clipboard using line geometry without changing the source quotation", () => {
+    const fragments = [
+      seed("We identify individu-", rect(20, 100, 200)),
+      seed("als with long-", rect(20, 124, 140)),
+      seed("term tracking.", rect(20, 148, 140)),
+      seed("Another paragraph.", rect(20, 204, 180)),
+    ];
+    const captured = resolveVisualSelection(createVisualTextIndex(fragments), {
+      node: fragments[0]!.node, offset: 0, clientX: 20, clientY: 110,
+    }, {
+      node: fragments[3]!.node, offset: fragments[3]!.node.length, clientX: 200, clientY: 214,
+    }, { metadata, page: 1, pageBounds: rect(0, 0, 700, 600), transform: [1, 0, 0, -1, 0, 600], scale: 1 });
+    expect(captured.selected?.text).toBe("We identify individu- als with long- term tracking. Another paragraph.");
+    expect(captured.selected?.copyText).toBe("We identify individuals with long-term tracking.\n\nAnother paragraph.");
+    expect(captured.selected?.rawText).toContain("individu-\nals");
+  });
+
   it("uses visual column order when DOM order interleaves a sidebar and footer", () => {
     const sidebar = seed("Published: October 25, 2021", rect(190, 100, 180));
     const first = seed("Microsatellites are neutral,", rect(330, 100, 290));

@@ -120,7 +120,7 @@ async def test_reconcile_active_starts_only_monitored_watchers_with_recursive_se
     await asyncio.wait_for(started.wait(), timeout=10)
 
     assert manager.active_library_ids == (monitored.id,)
-    assert calls == [(monitored.canonical_path, False, 750, 1000)]
+    assert [(Path(str(p).removeprefix('\\\\?\\')), recursive, debounce, step) for p, recursive, debounce, step in calls] == [(monitored.canonical_path, False, 750, 1000)]
     await manager.shutdown()
     assert manager.active_library_ids == ()
 

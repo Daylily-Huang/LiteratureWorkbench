@@ -22,6 +22,15 @@ type TranslationTask = {
   model?: string | null;
   fallback_reason?: string | null;
   error_code?: string | null;
+  cache_hit?: boolean;
+  reuse?: {
+    mode?: "fresh" | "exact" | "partial" | "reference";
+    cloud_requested?: boolean;
+    reused_characters?: number;
+    new_characters?: number;
+    source_text?: string;
+    parts?: { source: string; translation: string; cached: boolean }[];
+  };
 };
 
 type TranslationPopoverProps = {
@@ -124,11 +133,14 @@ export function TranslationPopover({
   pollInterval = 500,
 }: TranslationPopoverProps) {
   const [attempt, setAttempt] = useState(0);
+  const exactSelectionRef = useRef<string | null>(null);
   const [task, setTask] = useState<TranslationTask | null>(null);
   const [requestFailed, setRequestFailed] = useState(false);
   const [copied, setCopied] = useState(false);
   const notifiedTaskRef = useRef<string | null>(null);
   const cardRef = useRef<HTMLElement>(null);
+  const [size, setSize] = useState<Size | null>(null);
+  const resizeRef = useRef<{ pointer: number; x: number; y: number; width: number; height: number } | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const selectionKey = JSON.stringify([
@@ -176,6 +188,7 @@ export function TranslationPopover({
       setRequestFailed(false);
       setCopied(false);
       const token = await csrf(fetcher);
+      if (!active) return;
       const current = selectedRef.current;
       const response = await fetcher("/api/translations", {
         method: "POST",
@@ -189,6 +202,7 @@ export function TranslationPopover({
           physical_page: current.pdfPage,
           selected_text: current.text,
           target_language: "zh-CN",
+          prefer_exact: exactSelectionRef.current === selectionKey,
         }),
       });
       const value = await response.json() as TranslationTask & { code?: string };
@@ -216,6 +230,10 @@ export function TranslationPopover({
       userPositionedRef.current = false;
     }
     function reposition() {
+      setSize(current => current ? {
+        width: Math.min(current.width, Math.max(160, window.innerWidth - VIEWPORT_MARGIN * 2)),
+        height: Math.min(current.height, Math.max(160, window.innerHeight - VIEWPORT_MARGIN * 2)),
+      } : null);
       const bounds = cardRef.current?.getBoundingClientRect();
       const measured = {
         width: bounds?.width ?? DEFAULT_CARD_WIDTH,
@@ -224,7 +242,23 @@ export function TranslationPopover({
       const viewport = { width: window.innerWidth, height: window.innerHeight };
       setPosition((current) => {
         if (!userPositionedRef.current) {
-          return calculatePopoverPosition(selected.viewportAnchor, measured, viewport);
+          const next = calculatePopoverPosition(selected.viewportAnchor, measured, viewport);
+          const toolsRect = document.querySelector(".selection-overlay__tools")?.getBoundingClientRect();
+          if (toolsRect && toolsRect.width > 0 && toolsRect.height > 0) {
+            const overlapsX = next.left < toolsRect.right + 4 && next.left + measured.width > toolsRect.left - 4;
+            const overlapsY = next.top < toolsRect.bottom + 4 && next.top + measured.height > toolsRect.top - 4;
+            if (overlapsX && overlapsY) {
+              const below = toolsRect.bottom + 8;
+              const above = toolsRect.top - measured.height - 8;
+              if (below + measured.height <= viewport.height - VIEWPORT_MARGIN) {
+                return { left: next.left, top: below };
+              }
+              if (above >= VIEWPORT_MARGIN) {
+                return { left: next.left, top: above };
+              }
+            }
+          }
+          return next;
         }
         const clamped = clampPopoverPosition(
           { x: current.left, y: current.top },
@@ -237,7 +271,7 @@ export function TranslationPopover({
     reposition();
     window.addEventListener("resize", reposition);
     return () => window.removeEventListener("resize", reposition);
-  }, [copied, requestFailed, selected.viewportAnchor, selectionKey, task]);
+  }, [copied, requestFailed, selected.viewportAnchor, selectionKey, task, size?.width, size?.height]);
 
   useEffect(() => {
     if (
@@ -288,12 +322,19 @@ export function TranslationPopover({
   const failed = requestFailed || task?.status === "failed";
   const badge = task === null ? null : sourceBadge(task);
 
+  function resizeCard(width: number, height: number) {
+    userPositionedRef.current = true;
+    const maxWidth = Math.max(160, window.innerWidth - position.left - VIEWPORT_MARGIN);
+    const maxHeight = Math.max(160, window.innerHeight - position.top - VIEWPORT_MARGIN);
+    setSize({ width: clamp(width, Math.min(280, maxWidth), maxWidth), height: clamp(height, Math.min(200, maxHeight), maxHeight) });
+  }
+
   return (
     <section
       aria-label="选区翻译"
       className="translation-popover"
       ref={cardRef}
-      style={{ left: `${position.left}px`, top: `${position.top}px` }}
+      style={{ left: `${position.left}px`, top: `${position.top}px`, ...(size ? { width: size.width, height: size.height } : {}) }}
     >
       <div
         className="translation-popover__header"
@@ -303,16 +344,29 @@ export function TranslationPopover({
         onPointerUp={finishDrag}
         title="拖动翻译框"
       >
-        <strong>选区翻译</strong>
+        <div className="translation-popover__title-group">
+          <strong>选区翻译</strong>
+          <span className="translation-popover__context-pill" title="翻译已结合论文标题、摘要与同页前后文语境">语境学术翻译</span>
+        </div>
+        <button type="button" className="translation-popover__reset" onClick={() => setSize(null)}>重置大小</button>
         {onClose && <button aria-label="关闭翻译" onClick={onClose} type="button">×</button>}
       </div>
+      <div className="translation-popover__body">
       <p className="translation-popover__source">{selected.text}</p>
       {(task === null || task.status === "queued" || task.status === "running") && !requestFailed && (
-        <p role="status">正在翻译…</p>
+        <p role="status">正在检查本地译文，未命中时翻译新内容…</p>
       )}
       {task?.status === "completed" && (
         <>
+          {task.reuse?.mode === "reference" && <div className="translation-popover__reference">
+            <p>下面是包含选区的整段原文及缓存译文，并非仅针对当前选区的精确翻译。</p>
+            <details open><summary>缓存对应的完整原文</summary><p className="translation-popover__source">{task.reuse.source_text}</p></details>
+            <button type="button" onClick={() => { exactSelectionRef.current = selectionKey; setAttempt(value => value + 1); }}>仅翻译当前选区（可能产生 API 费用）</button>
+          </div>}
           <p className="translation-popover__result">{task.translated_text}</p>
+          {task.reuse?.mode === "partial" && <details className="translation-popover__parts"><summary>查看哪些内容使用了缓存</summary>
+            {task.reuse.parts?.map((part, index) => <div key={index}><strong>{part.cached ? "缓存复用" : "新增翻译"}</strong><p>{part.source}</p><p>{part.translation}</p></div>)}
+          </details>}
           {badge && <p className="translation-popover__badge">{badge}</p>}
           <button
             aria-label="复制译文"
@@ -333,6 +387,37 @@ export function TranslationPopover({
           </button>
         </>
       )}
+      </div>
+      {task?.status === "completed" && task.reuse?.mode && <small
+        className="translation-popover__reuse"
+        role="status"
+        tabIndex={0}
+        title={task.reuse.cloud_requested
+          ? task.reuse.mode === "partial" && task.provider === "deepseek" ? "仅新增句段调用云端 API，可能产生费用。" : "本次已请求云端 API，可能产生费用。"
+          : "本次未调用云端 API，不新增 API 费用。"}
+      >
+        {task.reuse.mode === "reference" ? "整段缓存参考" : task.reuse.mode === "exact" ? "已使用本地缓存" : task.reuse.mode === "partial" ? "部分译文来自缓存" : task.provider === "qwen" ? "本地模型新翻译" : "本次新翻译"}
+        {task.reuse.cloud_requested ? " · 云端请求" : ""}
+      </small>}
+      <button type="button" className="translation-popover__resize" aria-label="调整翻译框大小" title="拖动调整翻译框大小；方向键微调"
+        onPointerDown={event => {
+          if (event.button !== 0) return;
+          const bounds = cardRef.current?.getBoundingClientRect(); if (!bounds) return;
+          event.preventDefault(); event.stopPropagation();
+          resizeRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, width: bounds.width, height: bounds.height };
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+        }}
+        onPointerMove={event => {
+          const start = resizeRef.current; if (!start || start.pointer !== event.pointerId) return;
+          resizeCard(start.width + event.clientX - start.x, start.height + event.clientY - start.y);
+        }}
+        onPointerUp={event => { if (resizeRef.current?.pointer !== event.pointerId) return; resizeRef.current = null; event.currentTarget.releasePointerCapture?.(event.pointerId); }}
+        onPointerCancel={() => { resizeRef.current = null; }} onLostPointerCapture={() => { resizeRef.current = null; }}
+        onKeyDown={event => {
+          if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+          event.preventDefault(); const bounds = cardRef.current?.getBoundingClientRect(); if (!bounds) return;
+          resizeCard(bounds.width + (event.key === "ArrowRight" ? 20 : event.key === "ArrowLeft" ? -20 : 0), bounds.height + (event.key === "ArrowDown" ? 20 : event.key === "ArrowUp" ? -20 : 0));
+        }}><span aria-hidden="true">◢</span></button>
     </section>
   );
 }

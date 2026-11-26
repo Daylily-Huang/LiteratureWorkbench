@@ -15,6 +15,19 @@ def _headers(authenticated) -> dict[str, str]:
     return {"Origin": "http://testserver", "X-LW-CSRF": authenticated.csrf}
 
 
+def test_cached_study_browsing_requires_session_and_never_creates_records(client, authenticated):
+    root = '/api/libraries/full-text/studies'
+    assert client.get(root).json() == {'items': []}
+    assert client.get(f'{root}/{uuid4()}').status_code == 404
+    assert client.get(f'{root}/invalid').status_code == 422
+    assert client.get(f'{root}/{uuid4()}?offset=-1').status_code == 422
+    with client.app.state.database.connect() as c:
+        assert c.execute('SELECT count(*) FROM full_text_study_cache').fetchone()[0] == 0
+        assert c.execute('SELECT count(*) FROM research_entries').fetchone()[0] == 0
+    client.cookies.clear()
+    assert client.get(root).status_code == 403
+
+
 @dataclass(slots=True)
 class StubResearchService:
     answer: ResearchAnswer | None = None
@@ -63,7 +76,7 @@ def test_ask_returns_answer_body(client: TestClient, authenticated) -> None:
     body = response.json()
     assert body["answer"] == "Alpha is the first letter [r1 p1]."
     assert body["citations"] == [
-        {"physical_page": 1, "excerpt": "Alpha beta gamma", "rects": [[10, 20, 300, 80]]}
+        {"physical_page": 1, "excerpt": "Alpha beta gamma", "rects": [[10, 20, 300, 80]], "document_id": document_id, "display_name": "原文献", "content_id": None}
     ]
     assert body["provider"] == "deepseek"
     assert body["model"] == "deepseek-v4-flash"
@@ -89,6 +102,50 @@ def test_ask_enforces_bounded_question_contract(client: TestClient, authenticate
     assert extra.status_code == 422
     assert empty.status_code == 422
     assert oversized.status_code == 422
+
+
+def test_selection_reading_verifies_source_and_archives_the_original_context(client, authenticated) -> None:
+    from datetime import UTC, datetime
+
+    document_id = _register_parsed_document(client)
+    version = str(uuid4())
+    with client.app.state.database.transaction() as c:
+        c.execute("INSERT INTO document_versions VALUES(?,?,?,1,1,'v','f',1,?)",
+                  (version, document_id, "c" * 64, datetime.now(UTC).isoformat()))
+    calls = []
+
+    class Model:
+        def answer_question(self, **kwargs):
+            calls.append(kwargs)
+            return "选区含义来自原文 [r1 p1]。"
+
+    client.app.state.research_service._deepseek = Model()
+    selection = {"document_version_id": version, "content_id": "c" * 64,
+                 "physical_page": 1, "selected_text": "Alpha beta gamma"}
+    payload = {"question": "请解释选区的方法假设", "source_selection": selection}
+    response = client.post(f"/api/documents/{document_id}/ask", headers=_headers(authenticated), json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["citations"][0]["excerpt"] == "Alpha beta gamma"
+    assert body["citations"][0]["physical_page"] == 1
+    assert body["selection_context"]["content_id"] == "c" * 64
+    assert len(calls) == 1  # The verified passage needs no paid query expansion.
+    assert "[r1 p1]" in calls[0]["prompt"] and "Alpha beta gamma" in calls[0]["prompt"]
+    assert "untrusted" in calls[0]["system_prompt"]
+    archived = client.get("/api/workspace/notebook").json()["items"][0]
+    assert archived["answer"]["selection_context"] == body["selection_context"]
+    for route, changed in [
+        (document_id, {**selection, "selected_text": "invented statement"}),
+        (document_id, {**selection, "document_version_id": str(uuid4())}),
+        (str(uuid4()), selection),
+    ]:
+        rejected = client.post(f"/api/documents/{route}/ask", headers=_headers(authenticated),
+                               json={**payload, "source_selection": changed})
+        assert rejected.status_code == 409
+    assert len(calls) == 1
+    library = client.post("/api/libraries/ask", headers=_headers(authenticated), json=payload)
+    assert library.status_code == 422
+    assert len(calls) == 1
 
 
 def test_ask_maps_service_error_codes(client: TestClient, authenticated) -> None:
@@ -243,6 +300,7 @@ def test_library_ask_returns_attributed_citations(
     assert body["citations"] == [
         {
             "document_id": "doc-1",
+            "content_id": None,
             "display_name": "paper.pdf",
             "physical_page": 1,
             "excerpt": "Alpha beta gamma",
@@ -283,3 +341,44 @@ def test_library_ask_enforces_question_contract(
         json={"question": "x" * 2001},
     )
     assert response.status_code == 422
+
+
+def test_full_text_api_preflight_requires_explicit_scope_and_archives_only_verified_quotes(client, authenticated):
+    import json
+    document_id = _register_parsed_document(client)
+    calls = []
+    class Model:
+        def answer_question(self, **kwargs):
+            calls.append(kwargs)
+            return json.dumps({"claims": [{"conclusion": "A bounded finding", "evidence": [{"ref": "[d1 p1]", "quote": "Alpha beta gamma"}]}], "limitations": []})
+    client.app.state.research_service._deepseek = Model()
+    payload = {"question": "Compare", "document_ids": [document_id]}
+    prepare = client.post("/api/libraries/full-text/prepare", headers=_headers(authenticated), json=payload)
+    assert prepare.status_code == 200 and not calls
+    assert client.get("/api/workspace/notebook").json()["items"] == []
+    rejected = client.post("/api/libraries/ask", headers=_headers(authenticated), json={**payload, "reading_mode": "full_text"})
+    assert rejected.status_code == 409 and not calls
+    result = client.post("/api/libraries/ask", headers=_headers(authenticated), json={**payload, "reading_mode": "full_text", "source_versions": prepare.json()["source_versions"], "plan_id": prepare.json()["plan_id"]})
+    assert result.status_code == 200 and len(calls) == 1
+    body = result.json()
+    assert body["reading_coverage"]["coverage"][0]["supplied_pages"] == 1
+    assert body["citations"][0]["excerpt"] == "Alpha beta gamma"
+    assert body["history_saved"]
+    saved = client.get("/api/workspace/notebook").json()["items"][0]
+    assert saved["answer"]["reading_coverage"] == body["reading_coverage"]
+    assert saved["answer"]["citations"] == [{**item, "source_changed": False} for item in body["citations"]]
+    no_scope = client.post("/api/libraries/ask", headers=_headers(authenticated), json={"question": "Compare", "reading_mode": "full_text"})
+    assert no_scope.status_code == 400 and len(calls) == 1
+
+
+def test_full_text_forged_quote_is_not_archived(client, authenticated):
+    doc = _register_parsed_document(client)
+    class Model:
+        def answer_question(self, **kwargs):
+            return '{"claims":[{"conclusion":"fake","evidence":[{"ref":"[d1 p1]","quote":"Never present in original"}]}],"limitations":[]}'
+    client.app.state.research_service._deepseek = Model()
+    payload = {"question": "Compare", "document_ids": [doc]}
+    ready = client.post("/api/libraries/full-text/prepare", headers=_headers(authenticated), json=payload).json()
+    response = client.post("/api/libraries/ask", headers=_headers(authenticated), json={**payload, "reading_mode": "full_text", "source_versions": ready["source_versions"], "plan_id": ready["plan_id"]})
+    assert response.status_code == 502 and response.json()["code"] == "full_text_unverified_answer"
+    assert client.get("/api/workspace/notebook").json()["items"] == []

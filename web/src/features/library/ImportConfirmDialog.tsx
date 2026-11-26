@@ -1,3 +1,4 @@
+import { ModalDialog } from "../ui/ModalDialog";
 import type { ImportStatus } from "./dropFiles";
 
 type Props = {
@@ -30,18 +31,18 @@ const errorLabels: Record<string, string> = {
 };
 
 export function ImportConfirmDialog({ fileName, status, errorCode, onConfirm, onCancel }: Props) {
+  if (status === "awaiting_confirmation") return (
+    <ModalDialog label={`导入 ${fileName}`} onClose={onCancel}>
+      <div className="modal-dialog__header"><h2>导入文献</h2><button type="button" className="icon-button" aria-label="关闭导入确认" onClick={onCancel}>×</button></div>
+      <p className="import-filename">{fileName}</p>
+      <p>登记后，这篇 PDF 可按需自动用于云端处理</p>
+      <div className="modal-dialog__actions"><button className="button button--ghost" type="button" onClick={onCancel}>取消</button><button className="button button--primary" type="button" onClick={onConfirm}>确认导入</button></div>
+    </ModalDialog>
+  );
   return (
-    <section role="dialog" aria-label={`导入 ${fileName}`}>
+    <section role="status" aria-label={`导入 ${fileName}`}>
       <p>{fileName}</p>
-      {status === "awaiting_confirmation" ? (
-        <>
-          <p>登记后，这篇 PDF 可按需自动用于云端处理</p>
-          <button type="button" onClick={onConfirm}>确认导入</button>
-          <button type="button" onClick={onCancel}>取消</button>
-        </>
-      ) : (
-        <p>{status === "failed" ? errorLabels[errorCode ?? ""] ?? errorLabels.import_failed : labels[status]}</p>
-      )}
+      <p>{status === "failed" ? errorLabels[errorCode ?? ""] ?? errorLabels.import_failed : labels[status]}</p>
     </section>
   );
 }

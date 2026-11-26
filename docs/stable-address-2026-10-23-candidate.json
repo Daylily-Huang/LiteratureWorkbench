@@ -1,0 +1,141 @@
+{
+  "implementation_hashes": {
+    "backend/src/literature_workbench/platform/windows/loopback.py": "ef2bd60027107686ccdc145d1ef352c3d30df7b0abae0f7b5134683d74b0592a",
+    "backend/src/literature_workbench/launcher.py": "1d820742b0039b23e8d7777c2f72663de3b96786e48288e9a3f253db1356bfea",
+    "backend/src/literature_workbench/api/backups.py": "925546b179b7741d09e7c7c568ee77dd75438fdd4df829fbd723109b2f2aecc3",
+    "backend/tests/e2e/test_launcher.py": "372f33ba14a7deb123b6e7032dbe964f704b9410680ec5741c3e6f71aa4ae6c8",
+    "backend/tests/e2e/test_loopback_address.py": "094bbcd6b8d58a26330f9330bd012d52d66def5df3dc7a8a1d64c57b81a4627d",
+    "web/src/features/settings/LaunchAddress.tsx": "4bc81c25d5fabfb1b997610d95a87fbc38db71ec2be1663a288d5f783079de7d",
+    "web/src/features/settings/LaunchAddress.test.tsx": "6841c5ddc42b3e21dddbffbd38bae328d2f989b6fcb870c766a5b16a731bd3a9",
+    "web/src/features/settings/DataCenter.tsx": "f4c77371fb9704491a134ec827a30bc10f9d2ca4a86ae1541c723167660b9fc1",
+    "web/src/features/settings/DataCenter.test.tsx": "f3eb365142110c8bca643da15760e7aeccf0011b541551c71f10031f41260f25",
+    "web/src/app/Workbench.tsx": "0fb737ff63c9a93acff3db7344c791d1b10eca58f3de9c177737c7b6e3c2ec5b",
+    "web/src/app/App.css": "6fd09f14f7b7782392ae09704b190482058776961cba8fb8b582a64235282767"
+  },
+  "manifest_sha256": "67315aa8bf3007c3073f4f673df2b935c71caef358b8e1b476639f6cd5f9a2ac",
+  "review": {
+    "verdict": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "initial_calls": 6,
+    "targeted_rereview_calls": 4,
+    "initial_backend_tests": 44,
+    "frontend_tests": 30,
+    "final_backend_tests": 46,
+    "completed_utc": "2026-10-22 21:00:43 UTC",
+    "manifest_sha256": "67315aa8bf3007c3073f4f673df2b935c71caef358b8e1b476639f6cd5f9a2ac",
+    "seed_script_sha256": "65c128ff35a2343bcc26811c9a96bf12e5dbffd741e3b3deceda3fbffe4a6fa0",
+    "limits": "Browser and production checks are author evidence; listener check/send has a TOCTOU window, not hostile-local-process isolation."
+  },
+  "self_tests": {
+    "backend": 818,
+    "backend_deselected": 2,
+    "frontend": 255,
+    "frontend_files": 49,
+    "ruff": "passed",
+    "mypy_source_files": 87,
+    "typescript": "passed",
+    "production_build": "passed",
+    "full_suite_scope": "818/255 before listener-ownership hardening; final hardening: 41 related backend tests, Ruff and Mypy passed; independent 46 passed."
+  },
+  "browser": {
+    "real_supervisor_and_worker": true,
+    "listener_is_loopback_only": true,
+    "normal_restart_keeps_url": true,
+    "browser_draft_recovered_at_same_origin": true,
+    "browser_theme_and_pdf_page_retained": true,
+    "duplicate_launch_reuses_exact_supervisor": true,
+    "recovery_separate_address_and_cookie": true,
+    "recovery_restart_keeps_own_url": true,
+    "occupied_original_port_not_contacted_or_stopped": true,
+    "collision_ui_reports_previous_and_current_address": true,
+    "fallback_address_remembered_next_launch": true,
+    "mobile_no_horizontal_overflow": true,
+    "controlled_model_calls": 0,
+    "page_errors": [],
+    "original_url": "http://127.0.0.1:62479",
+    "recovery_url": "http://127.0.0.1:61733",
+    "fallback_url": "http://127.0.0.1:54207",
+    "index_assets": "<!doctype html>\n<html lang=\"zh-CN\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>文献工作台</title>\n    <script type=\"module\" crossorigin src=\"/assets/index-CaVrEU3w.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/index-BHd4TosP.css\">\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n"
+  },
+  "installation": {
+    "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-stable-address-20261023-050109.sqlite3",
+    "snapshots": {
+      "research_entries": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_groups": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "document_relations": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_analyses": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_candidates": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "translation_cache": {
+        "count": 68,
+        "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+      },
+      "full_text_study_cache": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "full_text_study_documents": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_records": {
+        "count": 11,
+        "sha256": "ffc62427f79bc573d4cb2fdcd03f6b108437fe3528e41cffd85f6de97b896aa2"
+      },
+      "translation_memory": {
+        "count": 6,
+        "sha256": "9792d7d36ab0684af6b13dd73a215353ad86cef7c1e95c2cf54b0354549d408a"
+      },
+      "pdf_annotation_baselines": {
+        "count": 4,
+        "sha256": "096565e1997824c15cdb571b43c79395344d987dfeebdd79dfeb740091530663"
+      },
+      "pdf_annotation_mutations": {
+        "count": 14,
+        "sha256": "2a02593f7a4a2398fbb15b8f9f9be30a1b1ff5e77f7bec1d2c5b12967d0c844f"
+      }
+    },
+    "candidate_manifest_sha256": "67315aa8bf3007c3073f4f673df2b935c71caef358b8e1b476639f6cd5f9a2ac"
+  },
+  "production": {
+    "url": "http://127.0.0.1:59978",
+    "asset_checks": {
+      "index-CaVrEU3w.js": true,
+      "PdfReader-ByKYUgU6.js": true,
+      "index-BHd4TosP.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200,
+      "/api/libraries/full-text/studies": 200,
+      "/api/data/overview": 200,
+      "/api/data/context": 200,
+      "/api/workspace/notebook/index": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0015_study_documents",
+    "study_cache_rows": 0,
+    "member_rows": 0,
+    "existing_full_backup_sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9",
+    "verified_standard_restarts": 2
+  }
+}

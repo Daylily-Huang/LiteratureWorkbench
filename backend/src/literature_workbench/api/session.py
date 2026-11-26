@@ -27,7 +27,7 @@ def bootstrap_session(
         return Response(status_code=403)
     response = Response(status_code=204)
     response.set_cookie(
-        "lw_session",
+        session.cookie_name,
         session.session_cookie,
         httponly=True,
         samesite="strict",

@@ -22,6 +22,24 @@ const selected: SelectedText = {
 
 
 describe("TranslationPopover", () => {
+  it("resizes and resets without submitting the translation again", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1200 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return { x:110,y:76,left:110,top:76,right:510,bottom:376,width:Number.parseFloat(this.style.width)||400,height:Number.parseFloat(this.style.height)||300,toJSON:()=>({}) };
+    });
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({csrf_token:"test"})))
+      .mockResolvedValueOnce(new Response(JSON.stringify({id:"task-resize",status:"completed",translated_text:"译文"})));
+    render(<TranslationPopover selected={selected} fetcher={fetcher} />);
+    await screen.findByText("译文");
+    fireEvent.keyDown(screen.getByRole("button", {name:"调整翻译框大小"}), {key:"ArrowRight"});
+    expect(screen.getByRole("region", {name:"选区翻译"})).toHaveStyle({width:"420px"});
+    fireEvent.keyDown(screen.getByRole("button", {name:"调整翻译框大小"}), {key:"ArrowDown"});
+    expect(screen.getByRole("region", {name:"选区翻译"})).toHaveStyle({width:"420px",height:"320px"});
+    fireEvent.click(screen.getByRole("button", {name:"重置大小"}));
+    expect(screen.getByRole("region", {name:"选区翻译"}).style.width).toBe("");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
@@ -183,4 +201,38 @@ describe("TranslationPopover", () => {
 
     expect(card).toHaveStyle({ left: "428px", top: "388px" });
   });
+});
+
+
+it("labels a covering cache as a reference and charges only after an explicit exact request", async () => {
+  const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+    if (!init?.body) return new Response(JSON.stringify({ csrf_token: "test" }));
+    const exact = JSON.parse(String(init.body)).prefer_exact;
+    return new Response(JSON.stringify({ id: "cache", status: "completed", provider: "deepseek",
+      translated_text: exact ? "精确译文" : "整段译文", cache_hit: !exact,
+      reuse: { mode: exact ? "fresh" : "reference", cloud_requested: exact, source_text: "Full paragraph containing selected text." },
+    }));
+  });
+  render(<TranslationPopover selected={selected} fetcher={fetcher} />);
+  await screen.findByText("整段缓存参考");
+  expect(screen.getByRole("status")).toHaveAttribute("title", "本次未调用云端 API，不新增 API 费用。");
+  expect(screen.getByText("Full paragraph containing selected text.")).toBeVisible();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "仅翻译当前选区（可能产生 API 费用）" }));
+  await screen.findByText("精确译文");
+  expect(screen.getByRole("status")).toHaveAttribute("title", "本次已请求云端 API，可能产生费用。");
+  expect(fetcher).toHaveBeenCalledTimes(4);
+  cleanup();
+});
+
+it("does not label fallback cache as free when cloud was already attempted", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({csrf_token:"test"})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ id:"fallback", status:"completed", provider:"qwen", translated_text:"本地缓存",
+      reuse:{mode:"exact",cloud_requested:true}, cache_hit:true })));
+  render(<TranslationPopover selected={selected} fetcher={fetcher} />);
+  await screen.findByText("本地缓存");
+  expect(screen.getByRole("status")).toHaveAttribute("title", "本次已请求云端 API，可能产生费用。");
+  expect(screen.getByRole("status")).toHaveTextContent("云端请求");
+  expect(screen.queryByText("本次未调用云端 API，不新增 API 费用。")).not.toBeInTheDocument();
+  cleanup();
 });

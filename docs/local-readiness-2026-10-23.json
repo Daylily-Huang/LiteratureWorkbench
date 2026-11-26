@@ -1,0 +1,158 @@
+{
+  "date": "2026-10-23",
+  "scope": "Local personal workbench readiness audit; not commercial release authorization",
+  "branch": "feature/ui-ux-refactor",
+  "production": {
+    "url": "http://127.0.0.1:59978/",
+    "health_http": 200,
+    "served_previous_release_asset": "index-l6s5-6eY.js",
+    "relation_request_candidate_installed": false
+  },
+  "runtime_alignment": {
+    "project_node": ">=24 <25",
+    "ci_node": 24,
+    "readme_node": "24.x",
+    "locally_verified_node": "24.19.0",
+    "lock_distinct_node_ranges": [
+      "20 || >=22",
+      ">= 10",
+      ">= 12.0.0",
+      ">=0.10.0",
+      ">=10",
+      ">=12",
+      ">=12.0.0",
+      ">=12.20.0",
+      ">=14",
+      ">=14.0.0",
+      ">=16",
+      ">=16.20.0",
+      ">=18",
+      ">=20",
+      ">=20.18.1",
+      ">=20.19.0",
+      ">=22.13.0 || >=24",
+      ">=24 <25",
+      ">=4",
+      ">=6",
+      ">=6.9.0",
+      ">=8",
+      ">=v12.22.7",
+      "^10 || ^12 || >=14",
+      "^10 || ^12 || ^13.7 || ^14 || >=15.0.1",
+      "^10 || ^12.20.0 || ^14.13.0 || >=15.0.0",
+      "^10.13.0 || ^12.13.0 || ^14.15.0 || >=15.0.0",
+      "^20.0.0 || ^22.0.0 || >=24.0.0",
+      "^20.19.0 || >=22.12.0",
+      "^20.19.0 || ^22.12.0 || >=24.0.0",
+      "^20.19.0 || ^22.13.0 || >=24.0.0",
+      "^8.16.0 || ^10.6.0 || >=11.0.0"
+    ],
+    "node_24_0_covers_declared_ranges": true,
+    "validation_scope": "Conservative comparator for current declared >=/< /^/major alternatives; not an npm installation test. Package/lock dependency maps identical. Dependencies and lock resolutions unchanged.",
+    "fresh_machine_install": "not verified",
+    "remote_CI": "not run"
+  },
+  "direct_runtime_dependency_licenses": [
+    {
+      "name": "fastapi",
+      "version": "0.139.0",
+      "declared_license": "MIT",
+      "source": "installed distribution METADATA; declared direct requirement in backend/pyproject.toml"
+    },
+    {
+      "name": "pydantic",
+      "version": "2.13.4",
+      "declared_license": "MIT",
+      "source": "installed distribution METADATA; declared direct requirement in backend/pyproject.toml"
+    },
+    {
+      "name": "uvicorn",
+      "version": "0.51.0",
+      "declared_license": "BSD-3-Clause",
+      "source": "installed distribution METADATA; declared direct requirement in backend/pyproject.toml"
+    },
+    {
+      "name": "watchfiles",
+      "version": "1.2.0",
+      "declared_license": "MIT",
+      "source": "installed distribution METADATA; declared direct requirement in backend/pyproject.toml"
+    },
+    {
+      "name": "pymupdf",
+      "version": "1.28.0",
+      "declared_license": "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License",
+      "source": "installed distribution METADATA; declared direct requirement in backend/pyproject.toml"
+    },
+    {
+      "name": "keyring",
+      "version": "25.7.0",
+      "declared_license": "MIT",
+      "source": "installed distribution METADATA; declared direct requirement in backend/pyproject.toml"
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "declared_license": "BSD-3-Clause",
+      "source": "installed distribution METADATA; declared direct requirement in backend/pyproject.toml"
+    },
+    {
+      "name": "tenacity",
+      "version": "9.1.4",
+      "declared_license": "Apache 2.0",
+      "source": "installed distribution METADATA; declared direct requirement in backend/pyproject.toml"
+    },
+    {
+      "name": "psutil",
+      "version": "7.2.2",
+      "declared_license": "BSD-3-Clause",
+      "source": "installed distribution METADATA; declared direct requirement in backend/pyproject.toml"
+    },
+    {
+      "name": "filelock",
+      "version": "3.29.7",
+      "declared_license": "MIT",
+      "source": "installed distribution METADATA; declared direct requirement in backend/pyproject.toml"
+    },
+    {
+      "name": "react",
+      "version": "19.2.7",
+      "declared_license": "MIT",
+      "source": "installed package.json; declared direct dependency in web/package.json"
+    },
+    {
+      "name": "react-dom",
+      "version": "19.2.7",
+      "declared_license": "MIT",
+      "source": "installed package.json; declared direct dependency in web/package.json"
+    },
+    {
+      "name": "pdfjs-dist",
+      "version": "6.1.200",
+      "declared_license": "Apache-2.0",
+      "source": "installed package.json; declared direct dependency in web/package.json"
+    }
+  ],
+  "license_scope": "Declared metadata inventory for 13 direct runtime requirements only; not full transitive/native/font/model notices or legal compliance determination. README still Internal Research Use. No license choices/changes/purchases.",
+  "unproven": [
+    "Relation request final browser regression resolution and reviewed installation",
+    "Fresh Windows installation, browser/runtime provisioning, rollback",
+    "Real paid-provider quality and invoice reconciliation",
+    "Long duration and realistic large workload reliability",
+    "Full transitive/native/font/model license inventory and chosen distribution policy"
+  ],
+  "source_hashes": {
+    "README.md": "99bb0d2446973fc5a8f64bf2822f07d82dda2adea6995d7777046ad1adb3dd33",
+    "backend/pyproject.toml": "aac04aadf013b79290645d3a29c0e5a7fd56a5706d5832952020265e51b0a81b",
+    "web/package.json": "e92759b23d98e6463d578ffdb22a733ac2176b7f997b7555128478ff3e7a642f",
+    "web/package-lock.json": "9e5c577c3f1ba97e782a8b5f8c2685e205ca8d7e5becd0cea02a5f16cc2b765f",
+    ".github/workflows/ci.yml": "840bca36f28d678ca48fb471186606ccb7175afb437e3847a823d45566d05873",
+    "scripts/Start-LiteratureWorkbench.ps1": "779f0f859f908195bbf19722c6f18c5ea57db1518355c6c6a5cc7e2ddff632d4"
+  },
+  "references": [
+    "https://pymupdf.readthedocs.io/en/latest/about.html#license-and-copyright",
+    "https://www.zotero.org/support/pdf_reader",
+    "https://docs.openwebui.com/features/workspace/knowledge/"
+  ],
+  "subsequent_audit": "docs/dependency-distribution-2026-10-23.md",
+  "source_hashes_are_prior_snapshot": true
+}

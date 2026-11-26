@@ -10,6 +10,7 @@ from uuid import UUID
 from watchfiles import awatch
 
 from literature_workbench.features.library.models import LibraryRoot, ScanSummary
+from literature_workbench.platform.windows.paths import io_path, ordinary_path
 
 
 class ActiveLibraryRepository(Protocol):
@@ -95,7 +96,7 @@ class WatcherManager:
         root = Path(os.path.abspath(library.canonical_path))
         candidates: dict[str, Path] = {}
         for _change, raw_path in changes:
-            candidate = Path(os.path.abspath(raw_path))
+            candidate = ordinary_path(Path(raw_path))
             if not self._contained(candidate, root):
                 continue
             candidates[os.path.normcase(str(candidate))] = candidate
@@ -118,7 +119,7 @@ class WatcherManager:
         while not self._shutdown.is_set():
             try:
                 async for changes in self._watch(
-                    library.canonical_path,
+                    io_path(library.canonical_path),
                     recursive=library.recursive,
                     debounce=750,
                     step=1000,

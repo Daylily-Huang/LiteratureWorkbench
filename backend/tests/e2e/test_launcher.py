@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
 from typing import cast
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -100,6 +101,7 @@ def test_second_launch_validates_exact_instance_and_opens_fresh_fragment_token(
     assert reuse_running_instance(
         manifest_path,
         identity_lookup=lookup,
+        port_owner_check=lambda *_: True,
         health_probe=health,
         control_request=control,
         browser_open=opened.append,
@@ -131,6 +133,7 @@ def test_second_launch_refuses_stale_manifest_without_control_or_browser(
     assert not reuse_running_instance(
         manifest_path,
         identity_lookup=stale_lookup,
+        port_owner_check=lambda *_: True,
         health_probe=lambda _: True,
         control_request=lambda *args: control_calls.append(args) or "unused",
         browser_open=opened.append,
@@ -243,15 +246,34 @@ def test_production_worker_handlers_separate_interactive_translation() -> None:
     assert set(interactive) == {"translate_selection"}
 
 
-def test_public_cli_exposes_only_start_and_stop_and_rejects_data_root() -> None:
+def test_public_cli_has_explicit_recovery_commands_and_rejects_arbitrary_data_root() -> None:
     help_text = build_argument_parser().format_help()
 
-    assert "{start,stop}" in help_text
+    assert "start-recovery" in help_text and "stop-recovery" in help_text
     assert "worker" not in help_text
     with pytest.raises(SystemExit):
         build_argument_parser().parse_args(["start", "--data-root", "D:\\other"])
     with pytest.raises(SystemExit):
         build_argument_parser().parse_args(["stop", "--data-root", "D:\\other"])
+
+
+@pytest.mark.parametrize('wrong_root', [False, True])
+def test_worker_ready_binds_the_exact_recovery_root(tmp_path: Path, wrong_root: bool) -> None:
+    ready = tmp_path/'ready.json'
+    shim = ProcessIdentity(101, 1.0, r'C:\venv\python.exe')
+    child = ProcessIdentity(102, 2.0, r'C:\Python\python.exe')
+    WorkerReady('generation', 't'*43, child).write(ready)
+    data_root = tmp_path/'recovery-data'
+    kwargs = dict(generation='generation', token='t'*43, expected_worker=shim,
+        expected_child_executable=child.executable, child_alive=lambda: True,
+        identity_lookup=lambda _: child, parent_lookup=lambda _: shim.pid,
+        cmdline_lookup=lambda _: (child.executable, '-m', 'literature_workbench.launcher', '_worker', 'generation', 't'*43, str(tmp_path/'other' if wrong_root else data_root)),
+        data_root=data_root, timeout_seconds=.01)
+    if wrong_root:
+        with pytest.raises(RuntimeError, match='worker_ready_timeout'):
+            wait_for_worker_ready(ready, **kwargs)
+    else:
+        assert wait_for_worker_ready(ready, **kwargs) == child
 
 
 def test_internal_worker_without_runtime_capability_fails_before_database(
@@ -457,7 +479,8 @@ def test_supervisor_manifests_real_worker_and_cleans_real_then_shim(
     class FakeServer:
         should_exit = False
 
-        def run(self) -> None:
+        def run(self, *, sockets: list[object]) -> None:
+            assert len(sockets) == 1
             return None
 
     class FakeProcess:
@@ -469,8 +492,7 @@ def test_supervisor_manifests_real_worker_and_cleans_real_then_shim(
     monkeypatch.setattr(launcher_module, "Event", FakeEvent)
     monkeypatch.setattr(launcher_module, "recover_exact_stale_worker", lambda _: False)
     monkeypatch.setattr(launcher_module, "_wait_worker_lock_available", lambda _: None)
-    monkeypatch.setattr(launcher_module, "_choose_port", lambda: 58380)
-    monkeypatch.setattr(launcher_module, "create_desktop_app", lambda *args: object())
+    monkeypatch.setattr(launcher_module, "create_desktop_app", lambda *args: SimpleNamespace(state=SimpleNamespace()))
     monkeypatch.setattr(launcher_module.uvicorn, "Config", lambda *args, **kwargs: object())
     monkeypatch.setattr(launcher_module.uvicorn, "Server", lambda _: FakeServer())
     monkeypatch.setattr(launcher_module, "lookup_process_identity", lambda pid: supervisor)
@@ -546,6 +568,7 @@ def test_stop_waits_for_exact_processes_manifest_and_locks_before_success(
     assert stop_running_instance(
         manifest_path,
         identity_lookup=lookup,
+        port_owner_check=lambda *_: True,
         health_probe=lambda _: True,
         control_request=control,
         locks_released=lambda _: stopped,
@@ -600,6 +623,7 @@ def test_stop_recovers_exact_unhealthy_instance_without_control_endpoint(
     assert stop_running_instance(
         manifest_path,
         identity_lookup=lookup,
+        port_owner_check=lambda *_: True,
         health_probe=lambda _: False,
         control_request=lambda *args: control_calls.append(args) or "unused",
         locks_released=lambda _: not alive,
@@ -676,6 +700,7 @@ def test_stop_fails_when_captured_owned_qwen_is_not_verified_gone(
         identity_lookup=lambda pid: None if stopped else (
             manifest.supervisor if pid == 101 else manifest.worker
         ),
+        port_owner_check=lambda *_: True,
         health_probe=lambda _: True,
         control_request=control,
         locks_released=lambda _: stopped,

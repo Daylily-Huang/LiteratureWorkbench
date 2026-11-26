@@ -14,6 +14,10 @@ $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`"
 $shortcut.WorkingDirectory = Split-Path -Parent $PSScriptRoot
 $shortcut.WindowStyle = 7
 $shortcut.Description = 'Start Literature Workbench on localhost'
+$iconPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'assets\icons\literature-workbench.ico'
+if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
+    $shortcut.IconLocation = "$iconPath,0"
+}
 $shortcut.Save()
 
 Write-Output "Desktop shortcut installed: $shortcutPath"

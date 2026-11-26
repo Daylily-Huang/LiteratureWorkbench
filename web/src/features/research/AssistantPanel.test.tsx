@@ -25,6 +25,33 @@ const ANSWER = {
 describe("AssistantPanel", () => {
   afterEach(cleanup);
 
+  it("prepares selected reading without a request, then submits its exact identity only to its document", async () => {
+    const selection = { ...DOCUMENT, pdfPage: 3, text: "Alpha beta gamma", contextBefore: "", contextAfter: "", rects: [], pdfQuads: [], buttonAnchor: { x: 0, y: 0 }, viewportAnchor: { x: 0, y: 0 }, translationEligible: true };
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...ANSWER, content_id: DOCUMENT.contentId })));
+    const jump = vi.fn();
+    const props = { document: DOCUMENT, fetcher, onJumpToCitation: jump, selectionDraft: { selection, nonce: 1 }, selectedDocuments: [{ document_id: "other", filename: "other.pdf" }] };
+    const { rerender } = render(<AssistantPanel {...props} />);
+    expect(screen.getByRole("region", { name: "选区精读原文" })).toHaveTextContent("Alpha beta gamma");
+    expect(fetcher).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "方法与假设" }));
+    fireEvent.click(screen.getByRole("button", { name: "提问" }));
+    await screen.findByText(ANSWER.answer);
+    expect(fetcher.mock.calls[1]![0]).toBe("/api/documents/doc-1/ask");
+    const payload = JSON.parse(fetcher.mock.calls[1]![1].body);
+    expect(payload.source_selection).toEqual({ document_version_id: "ver-1", content_id: DOCUMENT.contentId, physical_page: 3, selected_text: "Alpha beta gamma" });
+    expect(payload.document_ids).toBeUndefined();
+    rerender(<AssistantPanel {...props} document={{ ...DOCUMENT, contentId: "d".repeat(64), documentVersionId: "ver-2" }} />);
+    expect(screen.getByRole("button", { name: "提问" })).toBeDisabled();
+    expect(screen.getByText(/这份回答对应的 PDF 已变化/)).toBeVisible();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "第 3 页" }));
+    expect(jump).toHaveBeenCalledWith({ ...ANSWER.citations[0], rects: [] });
+    confirm.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "移除选区" }));
+    expect(screen.getByRole("button", { name: "提问" })).toBeEnabled();
+  });
+
   it("defaults to the library scope without an open document", () => {
     render(<AssistantPanel document={null} onJumpToCitation={() => undefined} />);
 
@@ -75,7 +102,7 @@ describe("AssistantPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "提问" }));
 
     expect(await screen.findByText("库里有 alpha [d1 p1]")).toBeVisible();
-    expect(screen.getByText("已检索 3 篇文献")).toBeVisible();
+    expect(screen.getByText("可检索 3 篇 · 引用 1 篇")).toBeVisible();
     const askCall = fetcher.mock.calls[1];
     expect(askCall?.[0]).toBe("/api/libraries/ask");
 
@@ -321,4 +348,102 @@ describe("AssistantPanel", () => {
     expect(abortSignal?.aborted).toBe(true);
     expect(screen.getByRole("button", { name: "提问" })).not.toBeDisabled();
   });
+});
+
+it("clears a completed answer when the user changes its search scope", async () => {
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf" })))
+    .mockResolvedValueOnce(new Response(JSON.stringify(ANSWER)));
+  const view = render(<AssistantPanel document={DOCUMENT} fetcher={fetcher} onJumpToCitation={() => undefined} />);
+  try {
+    fireEvent.change(screen.getByLabelText("向当前文献提问"), {target:{value:"alpha"}});
+    fireEvent.click(screen.getByRole("button",{name:"提问"}));
+    await screen.findByText(ANSWER.answer);
+    fireEvent.click(screen.getByRole("button",{name:"整个文献库"}));
+    expect(screen.queryByText(ANSWER.answer)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button",{name:"第 3 页"})).not.toBeInTheDocument();
+  } finally { view.unmount(); }
+});
+
+it("stops waiting and ignores a late answer from the stopped request", async () => {
+  let finish!: (value: Response) => void;
+  const pending = new Promise<Response>(resolve => { finish = resolve; });
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({csrf_token:"csrf"}))).mockReturnValueOnce(pending);
+  const view = render(<AssistantPanel document={DOCUMENT} fetcher={fetcher} onJumpToCitation={() => {}} initialQuestion="Question" />);
+  fireEvent.click(screen.getByRole("button",{name:"提问"}));
+  await waitFor(()=>expect(fetcher).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole("button",{name:"停止等待"}));
+  expect(screen.getByRole("button",{name:"提问"})).toBeEnabled();
+  finish(new Response(JSON.stringify(ANSWER)));
+  await waitFor(()=>expect(screen.getByRole("status")).toHaveTextContent("已停止等待"));
+  expect(screen.queryByText(ANSWER.answer)).not.toBeInTheDocument();
+  view.unmount();
+});
+
+it("sends the explicit selection and opens the archived answer", async () => {
+  const fetcher=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({csrf_token:"csrf"}))).mockResolvedValueOnce(new Response(JSON.stringify({...ANSWER, citations:[], indexed_documents:2,entry_id:"entry-1",history_saved:true})));
+  const open=vi.fn();
+  render(<AssistantPanel document={null} selectedDocuments={[{document_id:"d1",filename:"A.pdf"},{document_id:"d2",filename:"B.pdf"}]} selectionRequest={1} onOpenNotebook={open} onJumpToCitation={vi.fn()} fetcher={fetcher} />);
+  fireEvent.change(screen.getByLabelText("阅读方式"),{target:{value:"retrieval"}});
+  fireEvent.change(screen.getByLabelText("向所选文献提问"),{target:{value:"Compare"}});
+  fireEvent.click(screen.getByRole("button",{name:"提问"}));
+  await screen.findByText(ANSWER.answer);
+  expect(JSON.parse(fetcher.mock.calls[1]![1].body)).toEqual({question:"Compare",document_ids:["d1","d2"]});
+  fireEvent.click(screen.getByRole("button",{name:"查看记录 / 写笔记"}));
+  expect(open).toHaveBeenCalledWith("entry-1");
+  cleanup();
+});
+
+
+it("switches current document to full-text mode when clicking 总结全文 and submits full-text ask", async () => {
+  const prepareResponse = {
+    reading_mode: "full_text",
+    text_only: true,
+    plan_id: "f".repeat(64),
+    cache_status: "miss",
+    api_call_required: true,
+    context_kind: "full_text",
+    request_bytes: 24_000,
+    max_request_bytes: 200_000,
+    source_versions: { "doc-1": DOCUMENT.contentId },
+    coverage: [{
+      document_id: "doc-1",
+      display_name: "paper.pdf",
+      content_id: DOCUMENT.contentId,
+      parse_run_id: "run-1",
+      total_pages: 15,
+      supplied_pages: 15,
+      text_characters: 38_000,
+    }],
+  };
+  const askResponse = {
+    answer: "Full-paper summary covering pages 1 to 15 [d1 p12].",
+    citations: [{ document_id: "doc-1", display_name: "paper.pdf", physical_page: 12, excerpt: "Results on page 12", rects: [[10, 20, 300, 80]] }],
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    fallback_reason: null,
+    indexed_documents: 1,
+    citation_status: "verified",
+    reading_mode: "full_text",
+    reading_coverage: prepareResponse,
+  };
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf" })))
+    .mockResolvedValueOnce(new Response(JSON.stringify(prepareResponse)))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: "csrf" })))
+    .mockResolvedValueOnce(new Response(JSON.stringify(askResponse)));
+  const onJump = vi.fn();
+  render(<AssistantPanel document={DOCUMENT} fetcher={fetcher} onJumpToCitation={onJump} />);
+  fireEvent.click(screen.getByRole("button", { name: "总结全文" }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledWith("/api/libraries/full-text/prepare", expect.anything()));
+  await waitFor(() => expect(screen.getByRole("button", { name: "提问" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "提问" }));
+  expect(await screen.findByText(/Full-paper summary covering pages 1 to 15/)).toBeVisible();
+  expect(fetcher.mock.calls[3]?.[0]).toBe("/api/libraries/ask");
+  const payload = JSON.parse(String((fetcher.mock.calls[3]?.[1] as RequestInit).body));
+  expect(payload.reading_mode).toBe("full_text");
+  expect(payload.document_ids).toEqual(["doc-1"]);
+  fireEvent.click(screen.getByRole("button", { name: "《paper.pdf》第 12 页" }));
+  expect(onJump).toHaveBeenCalledWith(expect.objectContaining({ physical_page: 12 }));
+  cleanup();
 });

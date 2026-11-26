@@ -17,6 +17,7 @@ class SettingsRecord:
     deepseek_model: str
     qwen_fallback_enabled: bool
     revision: int
+    translation_glossary: str = ""
 
 
 class SettingsRepository:
@@ -35,6 +36,7 @@ class SettingsRepository:
                 deepseek_model="deepseek-v4-flash",
                 qwen_fallback_enabled=False,
                 revision=0,
+                translation_glossary="",
             )
         values = json.loads(str(row["value_json"]))
         mode: TranslationMode = values["default_translation_mode"]
@@ -43,6 +45,7 @@ class SettingsRepository:
             deepseek_model=str(values.get("deepseek_model", "deepseek-v4-flash")),
             qwen_fallback_enabled=bool(values.get("qwen_fallback_enabled", False)),
             revision=int(row["revision"]),
+            translation_glossary=str(values.get("translation_glossary", "")),
         )
 
     def update(
@@ -51,6 +54,7 @@ class SettingsRepository:
         default_translation_mode: TranslationMode | None = None,
         deepseek_model: str | None = None,
         qwen_fallback_enabled: bool | None = None,
+        translation_glossary: str | None = None,
     ) -> SettingsRecord:
         current = self.read()
         mode = default_translation_mode or current.default_translation_mode
@@ -59,6 +63,11 @@ class SettingsRepository:
             current.qwen_fallback_enabled
             if qwen_fallback_enabled is None
             else qwen_fallback_enabled
+        )
+        glossary = (
+            current.translation_glossary
+            if translation_glossary is None
+            else translation_glossary.strip()
         )
         with self._database.transaction() as connection:
             row = connection.execute(
@@ -71,8 +80,9 @@ class SettingsRepository:
                     "default_translation_mode": mode,
                     "deepseek_model": model,
                     "qwen_fallback_enabled": fallback,
+                    "translation_glossary": glossary,
                 },
-                ensure_ascii=True,
+                ensure_ascii=False,
                 separators=(",", ":"),
             )
             connection.execute(
@@ -91,6 +101,7 @@ class SettingsRepository:
             deepseek_model=model,
             qwen_fallback_enabled=fallback,
             revision=revision,
+            translation_glossary=glossary,
         )
 
     def update_translation_mode(self, mode: TranslationMode) -> SettingsRecord:

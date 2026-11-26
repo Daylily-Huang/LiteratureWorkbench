@@ -1,0 +1,21 @@
+{
+  "backend/src/literature_workbench/api/app.py": "9769d75a0e94a16d8f6fb102990b36702588f96b65e67d6be4c4f0b0d2cbda7c",
+  "backend/src/literature_workbench/api/reading_graph.py": "9864ce9c9c1e0f5c80e6294f764c6ae3095635554840ca7837d6f11d7b71b73a",
+  "backend/src/literature_workbench/db/migrations.py": "1b8ff4ad32492b9e611b492e38043cf2927c5b68c53a1bf6cfc573a80133ac06",
+  "backend/src/literature_workbench/db/schema_v10_reading_graph.sql": "fd7814344a00f30e14de8f4f2c393b3a33b2983a71b221ffbc1b6e4afb12f9b8",
+  "backend/tests/api/test_reading_graph.py": "42d78c6c45261b600c95b04acd57006683572f13a4948e43959c2512f1f0f0bc",
+  "backend/tests/db/test_migrations.py": "96db0fe4576b24f87bf390d91d0b26a253075d68a2375c1e697164197e727545",
+  "web/src/app/App.css": "c9c9fea7335594d6a38b29271a4d27436668dc0cb1da7a2bf3509ade1bdaffa0",
+  "web/src/app/Workbench.tsx": "4543764b060f48d2dce4082a3c4eddd3a57723ee2cddeb55bae101556397ff81",
+  "web/src/features/library/LiteratureDesk.tsx": "14918a16ba1f46ed38f6c2c15ee80a80abbc0071670016550a10d468bc19a37a",
+  "web/src/features/reader/PdfReader.tsx": "b0984cf8c50adb069d287667388044e9e0cbe29e30c620a7c4314e5936e56b5d",
+  "web/src/features/reader/PdfSearch.tsx": "0c67772f4e2f078747552ac9f0d255019d6fe6a74cd8e3495715eb2fa226c0f1",
+  "web/src/features/research/graphModel.ts": "a2cb3c81480bc01367206d88ec9a87e9ddf3534d379895e57b8809a3a40b590f",
+  "web/src/features/research/graphModel.test.ts": "f041000fec09192b1ef0801f045e0ee8899d9a1bc66f399c8ca7adb134371e07",
+  "web/src/features/research/KnowledgeGraph.tsx": "3d1d279b35286970cf91c2d37f59f91f9d2ccd54fcc0c4dde2b470ecd8de7de3",
+  "web/src/features/research/LinkedPdfPane.tsx": "5a1987778f30d409b2c812e56b292fdf32096d0149a5c3a8013ae1d0fef996ec",
+  "web/src/features/research/ResearchStudio.tsx": "9df72f852a6dbed7030fd8cd6eb2445d35fd88006a5ae65e8fdb5fe8ab624e67",
+  "web/src/features/research/ResearchStudio.test.tsx": "82ea52bfa0ced0032be6b14cb211af6d34d3991321f91a1c46c107c1d619f403",
+  "web/src/features/research/EvidenceMatrix.tsx": "d1c32af46be2274ca6021dc703ecffbb9d5c147f4f93694c7c10e57878000b39",
+  "web/src/features/research/EvidenceMatrix.test.tsx": "5ad3b5765aa1aceaff4fbe71ffecb1ba163bbc8b9fb603a3199f15ac1a08db30"
+}

@@ -1,4 +1,10 @@
+import { useEffect, useState } from "react";
+
 type PdfToolbarProps = {
+  onOutline?(): void;
+  outlineOpen?: boolean;
+  onSearch?(): void;
+  searchOpen?: boolean;
   currentPage: number;
   totalPages: number;
   scale: number;
@@ -9,6 +15,10 @@ type PdfToolbarProps = {
 
 
 export function PdfToolbar({
+  onOutline,
+  outlineOpen,
+  onSearch,
+  searchOpen = false,
   currentPage,
   totalPages,
   scale,
@@ -16,6 +26,13 @@ export function PdfToolbar({
   onScaleChange,
   onFitWidth,
 }: PdfToolbarProps) {
+  const [pageDraft, setPageDraft] = useState(String(currentPage));
+  useEffect(() => setPageDraft(String(currentPage)), [currentPage]);
+  function commitPage() {
+    setPage(Number(pageDraft));
+    if (!Number.isInteger(Number(pageDraft)) || Number(pageDraft) < 1 || Number(pageDraft) > totalPages) setPageDraft(String(currentPage));
+  }
+
   function setPage(value: number) {
     if (Number.isInteger(value) && value >= 1 && value <= totalPages) {
       onPageChange(value);
@@ -41,9 +58,11 @@ export function PdfToolbar({
             className="pdf-toolbar__input"
             max={totalPages}
             min={1}
-            onChange={(event) => setPage(Number(event.target.value))}
+            onChange={(event) => setPageDraft(event.target.value)}
+            onBlur={commitPage}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitPage(); } }}
             type="number"
-            value={currentPage}
+            value={pageDraft}
           />
         </label>
         <span className="pdf-toolbar__page-display">{currentPage} / {totalPages}</span>
@@ -58,6 +77,8 @@ export function PdfToolbar({
         </button>
       </div>
 
+      {onOutline && <button className="pdf-toolbar__btn" aria-label="打开文献目录" aria-expanded={outlineOpen} onClick={onOutline} type="button">目录</button>}
+      {onSearch && <button className="pdf-toolbar__btn" aria-label="查找正文" aria-expanded={searchOpen} onClick={onSearch} type="button">查找</button>}
       <div className="pdf-toolbar__separator" />
 
       <div className="pdf-toolbar__group">

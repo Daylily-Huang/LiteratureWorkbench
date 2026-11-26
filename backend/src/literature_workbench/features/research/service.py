@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from dataclasses import dataclass, field
-from typing import Protocol
+import threading
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID, uuid4
 
 from literature_workbench.db.database import Database
@@ -33,6 +34,11 @@ from literature_workbench.features.research.retriever import (
     RetrievalHit,
 )
 from literature_workbench.features.settings.repository import SettingsRepository
+from literature_workbench.features.translation.repository import VerifiedSelection
+
+if TYPE_CHECKING:
+    from literature_workbench.features.research.comparison import Comparison
+    from literature_workbench.features.research.full_text_relations import FullTextRelations
 
 _FALLBACK_ERRORS = {
     "deepseek_http_error",
@@ -134,6 +140,7 @@ class ResearchAnswer:
     model: str
     fallback_reason: str | None = field(default=None)
     citation_status: str = "verified"
+    content_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +150,7 @@ class LibraryCitation:
     physical_page: int
     excerpt: str
     rects: tuple[tuple[int, int, int, int], ...] = ()
+    content_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +162,9 @@ class LibraryAnswer:
     fallback_reason: str | None = field(default=None)
     indexed_documents: int = 0
     citation_status: str = "verified"
+    source_fragments: dict[str, LibraryCitation] = field(default_factory=dict)
+    reading_mode: str = "retrieval"
+    reading_coverage: dict[str, object] | None = None
 
 
 class ResearchService:
@@ -174,8 +185,9 @@ class ResearchService:
         self._deepseek = deepseek
         self._qwen = qwen
         self._qwen_process = qwen_process
+        self._study_locks = [threading.Lock() for _ in range(16)]
 
-    def ask(self, *, document_id: UUID | str, question: str) -> ResearchAnswer:
+    def ask(self, *, document_id: UUID | str, question: str, selection: VerifiedSelection | None = None) -> ResearchAnswer:
         question = question.strip()
         if not question:
             raise ResearchError("question_empty")
@@ -185,11 +197,18 @@ class ResearchService:
         if document is None:
             raise ResearchError("document_not_found")
         content_id, parse_run_id, display_name = document
+        if selection is not None and (str(selection.document_id) != str(document_id) or selection.content_id != str(content_id)):
+            raise ResearchError("selection_version_stale")
         if parse_run_id is None:
             raise ResearchError("parse_required")
         self._ensure_index(content_id, parse_run_id)
         settings = self._settings.read()
         hits = self._retriever.search(content_id, question)
+        if selection is not None:
+            # The API verified this passage against the current page. Keep it as
+            # an explicit first source, separate from retrieval and the question.
+            hits = [RetrievalHit("selected-passage", selection.physical_page, selection.selected_text, 0.0),
+                    *[hit for hit in hits if hit.text != selection.selected_text][:3]]
         if (
             not hits
             and contains_cjk(question)
@@ -213,12 +232,13 @@ class ResearchService:
                 provider="retrieval_only",
                 model="",
                 citation_status="missing",
+                content_id=str(content_id),
             )
         system_instruction, user_prompt = _build_prompt(question, hits)
         if settings.default_translation_mode == "local_only":
-            return self._ask_qwen(
+            return replace(self._ask_qwen(
                 system_instruction, user_prompt, hits, fallback_reason=None
-            )
+            ), content_id=str(content_id))
         try:
             answer = self._ask_deepseek_with_one_retry(
                 document_id=document_id,
@@ -231,9 +251,9 @@ class ResearchService:
         except EgressRejected as error:
             code = str(error)
             if code in _FALLBACK_ERRORS and settings.qwen_fallback_enabled:
-                return self._ask_qwen(
+                return replace(self._ask_qwen(
                     system_instruction, user_prompt, hits, fallback_reason=code
-                )
+                ), content_id=str(content_id))
             raise ResearchError(code or "deepseek_failed") from None
         citations, citation_status = _citations_for(answer, hits)
         return ResearchAnswer(
@@ -242,18 +262,106 @@ class ResearchService:
             provider="deepseek",
             model=settings.deepseek_model,
             citation_status=citation_status,
+            content_id=str(content_id),
         )
 
-    def ask_library(self, *, question: str) -> LibraryAnswer:
+    def study_summaries(self) -> dict[str, object]:
+        from literature_workbench.features.research.study_library import StudyLibrary
+        return StudyLibrary(self._database, self._repository, self._settings.read().deepseek_model).summaries()
+
+    def study_history(self, document_id: str, offset: int = 0) -> dict[str, object]:
+        from literature_workbench.features.research.study_library import StudyLibrary
+        return StudyLibrary(self._database, self._repository, self._settings.read().deepseek_model).history(document_id, offset)
+
+    def full_text_relations(self) -> FullTextRelations:
+        from literature_workbench.features.research.full_text_relations import FullTextRelations
+        return FullTextRelations(self._database, self._repository, self._settings, self._deepseek)
+
+    def comparisons(self, generation: str) -> Comparison:
+        from literature_workbench.features.research.comparison import Comparison
+        return Comparison(self._database, self._repository, self._settings, self._deepseek, generation)
+
+    def prepare_full_text(self, *, question: str, document_ids: list[str], reuse_analysis: bool = True,
+                          force_refresh: bool = False) -> dict[str, object]:
+        from literature_workbench.features.research.full_text import FullTextStudy, FullTextError
+        from literature_workbench.features.research.study_cache import StudyCache
+        settings = self._settings.read()
+        prepared = FullTextStudy(self._database, self._repository).prepare(document_ids, question, settings.deepseek_model, check_budget=False)
+        plan = StudyCache(self._database).plan(prepared, question, settings.deepseek_model,
+                                              reuse_analysis=reuse_analysis, force_refresh=force_refresh)
+        if settings.default_translation_mode == "local_only" and plan.hit is None:
+            raise FullTextError("full_text_online_required")
+        return plan.public()
+
+    def ask_full_text(self, *, question: str, document_ids: list[str], source_versions: dict[str, str],
+                      reuse_analysis: bool = True, force_refresh: bool = False, plan_id: str | None = None) -> LibraryAnswer:
+        from literature_workbench.features.research.full_text import FullTextStudy, FullTextError, verify_output
+        from literature_workbench.features.research.study_cache import StudyCache
+        settings = self._settings.read()
+        study = FullTextStudy(self._database, self._repository)
+        prepared = study.prepare(document_ids, question, settings.deepseek_model, check_budget=False)
+        if source_versions != prepared.versions:
+            raise FullTextError("full_text_source_changed")
+        cache = StudyCache(self._database)
+        _, key = cache.keys(prepared, question, settings.deepseek_model)
+        # Bounded locks coalesce simultaneous identical questions in this app
+        # instance. A second waiter rechecks the cache before any paid call.
+        with self._study_locks[int(key[:8], 16) % len(self._study_locks)]:
+            study.assert_current(prepared)
+            plan = cache.plan(prepared, question, settings.deepseek_model,
+                              reuse_analysis=reuse_analysis, force_refresh=force_refresh)
+            # A newly available exact answer is safe to return for free; any
+            # other change to the prepared sending plan needs another check.
+            if plan.hit is None and plan_id is not None and plan_id != plan.plan_id:
+                raise FullTextError("full_text_plan_changed")
+            if plan.hit is None and settings.default_translation_mode == "local_only":
+                raise FullTextError("full_text_online_required")
+            if plan.hit is not None:
+                raw = plan.hit.raw
+                saved = True
+            else:
+                try:
+                    raw = self._deepseek.answer_question(
+                        task_id=f"full-text:{uuid4()}", document_id=None, content_sha256=None,
+                        display_file_name=None, model=settings.deepseek_model, prompt=plan.context.prompt,
+                        system_prompt=plan.system, purpose="research_full_text",
+                    )
+                except EgressRejected as error:
+                    raise ResearchError(str(error) or "deepseek_failed") from None
+                study.assert_current(prepared)
+                verify_output(raw, plan.context)
+                saved = cache.store(plan, question, settings.deepseek_model, raw)
+            study.assert_current(prepared)
+            answer, evidence = verify_output(raw, plan.context)
+            citations = [LibraryCitation(
+                document_id=str(item["document_id"]), content_id=str(item["content_id"]),
+                display_name=str(item["display_name"]), physical_page=int(str(item["physical_page"])),
+                excerpt=str(item["excerpt"]),
+            ) for item in evidence]
+            return LibraryAnswer(answer=answer, citations=citations, provider="deepseek", model=settings.deepseek_model,
+                                 indexed_documents=len(prepared.coverage), reading_mode="full_text",
+                                 reading_coverage={**plan.public(), "cache_saved": saved},
+                                 citation_status="verified" if citations else "missing")
+
+    def ask_library(self, *, question: str, document_ids: list[str] | None = None, relation_analysis: bool = False) -> LibraryAnswer:
         question = question.strip()
         if not question:
             raise ResearchError("question_empty")
         if len(question) > _MAX_QUESTION_CHARS:
             raise ResearchError("question_too_long")
-        self._ensure_library_index()
-        indexed_documents = self._repository.indexed_document_count()
+        if document_ids is not None:
+            document_ids = list(dict.fromkeys(document_ids))
+            if not 1 <= len(document_ids) <= 8:
+                raise ResearchError("invalid_document_scope")
+            if any(self._read_document(UUID(item)) is None for item in document_ids):
+                raise ResearchError("document_not_found")
+        self._ensure_library_index(document_ids)
+        indexed_documents = self._repository.indexed_document_count() if document_ids is None else sum(
+            1 for doc_id, content, run in self._repository.parsed_documents()
+            if doc_id in document_ids and self._repository.indexed_parse_run_id(content) == run
+        )
         settings = self._settings.read()
-        hits = self._retriever.search_library(question)
+        hits = self._retriever.search_library(question) if document_ids is None else self._retriever.search_selected(question, document_ids)
         if (
             not hits
             and contains_cjk(question)
@@ -265,14 +373,10 @@ class ResearchService:
             if expansion is not None:
                 if expansion.kind == "overview":
                     # "总览文献库"没有单一语料可喂；退化为摘要类关键词检索。
-                    hits = self._retriever.search_library_match_query(
-                        _OVERVIEW_FALLBACK_QUERY
-                    )
+                    hits = self._retriever.search_library_match_query(_OVERVIEW_FALLBACK_QUERY) if document_ids is None else self._retriever.search_selected(question, document_ids, match_query=_OVERVIEW_FALLBACK_QUERY)
                 else:
                     assert expansion.match_query is not None
-                    hits = self._retriever.search_library_match_query(
-                        expansion.match_query
-                    )
+                    hits = self._retriever.search_library_match_query(expansion.match_query) if document_ids is None else self._retriever.search_selected(question, document_ids, match_query=expansion.match_query)
         if not hits:
             return LibraryAnswer(
                 answer=_NO_HIT_LIBRARY_MESSAGE,
@@ -283,10 +387,21 @@ class ResearchService:
                 citation_status="missing",
             )
         system_instruction, user_prompt, hits_by_ref = _build_library_prompt(question, hits)
+        sources = {f"[d{d} r{r} p{hit.physical_page}]": LibraryCitation(
+            document_id=hit.document_id, display_name=hit.display_name, content_id=hit.content_id,
+            physical_page=hit.physical_page, excerpt=hit.text, rects=hit.rects,
+        ) for (d, r), hit in hits_by_ref.items()} if relation_analysis else {}
+        if relation_analysis:
+            from literature_workbench.features.research.relation_analysis import RELATION_INSTRUCTION
+            system_instruction += "\n" + RELATION_INSTRUCTION
+            if len({hit.document_id for hit in hits}) < 2:
+                return LibraryAnswer(answer='{"summary":"只有一篇文献有相关片段，无法进行双侧证据比较。","candidates":[]}',
+                                     citations=[], provider="retrieval_only", model="", indexed_documents=indexed_documents,
+                                     citation_status="missing", source_fragments=sources)
         if settings.default_translation_mode == "local_only":
-            return self._ask_library_qwen(
+            return replace(self._ask_library_qwen(
                 system_instruction, user_prompt, hits_by_ref, indexed_documents, fallback_reason=None
-            )
+            ), source_fragments=sources)
         try:
             answer = self._ask_deepseek_with_one_retry(
                 document_id=None,
@@ -299,9 +414,9 @@ class ResearchService:
         except EgressRejected as error:
             code = str(error)
             if code in _FALLBACK_ERRORS and settings.qwen_fallback_enabled:
-                return self._ask_library_qwen(
+                return replace(self._ask_library_qwen(
                     system_instruction, user_prompt, hits_by_ref, indexed_documents, fallback_reason=code
-                )
+                ), source_fragments=sources)
             raise ResearchError(code or "deepseek_failed") from None
         citations, citation_status = _library_citations_for(answer, hits_by_ref)
         return LibraryAnswer(
@@ -311,13 +426,16 @@ class ResearchService:
             model=settings.deepseek_model,
             indexed_documents=indexed_documents,
             citation_status=citation_status,
+            source_fragments=sources,
         )
 
-    def _ensure_library_index(self) -> None:
+    def _ensure_library_index(self, document_ids: list[str] | None = None) -> None:
         """Incrementally index every parsed document whose chunks are stale
         or missing; per-document failures are skipped, not fatal."""
         seen_contents: set[str] = set()
         for _document_id, content_sha256, parse_run_id in self._repository.parsed_documents():
+            if document_ids is not None and _document_id not in document_ids:
+                continue
             if content_sha256 in seen_contents:
                 continue
             seen_contents.add(content_sha256)
@@ -650,6 +768,7 @@ def _library_citations_for(
         LibraryCitation(
             document_id=hit.document_id,
             display_name=hit.display_name,
+            content_id=hit.content_id,
             physical_page=hit.physical_page,
             excerpt=_excerpt(hit.text),
             rects=hit.rects,

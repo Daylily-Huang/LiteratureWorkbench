@@ -32,6 +32,7 @@ class SettingsService:
             default_translation_mode=record.default_translation_mode,
             deepseek_model=record.deepseek_model,
             qwen_fallback_enabled=record.qwen_fallback_enabled,
+            translation_glossary=record.translation_glossary,
         )
 
     def patch_public(self, patch: SettingsPatch) -> PublicSettings:
@@ -40,6 +41,7 @@ class SettingsService:
                 default_translation_mode=patch.default_translation_mode,
                 deepseek_model=patch.deepseek_model,
                 qwen_fallback_enabled=patch.qwen_fallback_enabled,
+                translation_glossary=patch.translation_glossary,
             )
         return self.read_public()
 

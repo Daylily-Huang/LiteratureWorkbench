@@ -1,0 +1,103 @@
+{
+  "implementation_hashes": {
+    "backend/src/literature_workbench/db/migrations.py": "1d85a569d9bd057362b432f9b4360fd4d0485279dc9812b0ebf88f84d193777d",
+    "backend/src/literature_workbench/db/schema_v15_study_documents.sql": "6106c0069101c48d1253bb0a37cfba98fca840168ab8bd2e367f40ef47e5007e",
+    "backend/src/literature_workbench/features/research/study_cache.py": "c15c3d6b041b46de2b821fb0b76c0481798e8749a19ebf9f5ad6ff53ced24fc3",
+    "backend/tests/research/test_library_service.py": "906af8d17dbfdcdf8a8d28ecdbe52c824ac1eea2ad1159358a1379fea25fc0fc",
+    "backend/tests/db/test_migrations.py": "c115aeb49301c54b40d8c343bf0662a90f2e292d02a86b18285e39fdf09464e9",
+    "web/src/features/research/fullTextStudy.tsx": "d9a86c4efdd9f2927b118dd0b9316fe01009c70d3ca9141fc3777c28ddd3c3fe",
+    "web/src/features/research/AssistantPanel.tsx": "6e9840362b4d6dc0fd1f88bbe2fda0ea53c9d086969b93b42ea6804d8b11a965",
+    "web/src/features/research/fullTextStudy.test.tsx": "017cbe24f4bcf36ac5bf5077baa81d795a938e84ca7fdb689d15a5e8c715eb82"
+  },
+  "review": {
+    "verdict": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "independent_tests": {
+      "research_api": 60,
+      "migration": 11,
+      "frontend_related": 8
+    },
+    "manifest_sha256": "e3323fae31e952c27589ad5c296f1772bb50117a23cc8369d9e25f9990073dab",
+    "scope": "Frozen implementation review and independent targeted tests; browser and migration-copy evidence inspected, not independently rerun."
+  },
+  "browser_phase1": {
+    "ab_then_add_c_only_c_full_text": true,
+    "then_add_d_reuses_c": true,
+    "one_call_per_comparison": true,
+    "original_citations_for_each_paper": true,
+    "per_paper_plan_and_history": true,
+    "model_calls": 3,
+    "page_errors": []
+  },
+  "browser_phase2": {
+    "exact_answer_free_after_actual_restart": true,
+    "subset_cd_reuses_individual_memories": true,
+    "unselected_papers_not_transmitted": true,
+    "changed_c_only_is_full_text": true,
+    "model_calls": 4,
+    "page_errors": []
+  },
+  "migration_copy": {
+    "old_tables_preserved": 35,
+    "idempotent": true,
+    "integrity": "ok",
+    "old_cache_rows_preserved": 1,
+    "synthetic_row_added_only_to_copy": true,
+    "new_members_table_empty": true
+  },
+  "installation": {
+    "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-incremental-study-20261023-003039.sqlite3",
+    "snapshots": {
+      "research_entries": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_groups": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "document_relations": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_analyses": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_candidates": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "translation_cache": {
+        "count": 68,
+        "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+      },
+      "full_text_study_cache": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    },
+    "candidate_manifest_sha256": "e3323fae31e952c27589ad5c296f1772bb50117a23cc8369d9e25f9990073dab"
+  },
+  "production": {
+    "url": "http://127.0.0.1:50958",
+    "asset_checks": {
+      "index-CfBsAT7Q.js": true,
+      "PdfReader-CtiyVcKU.js": true,
+      "index-CnPAFg_5.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0015_study_documents",
+    "study_cache_rows": 0,
+    "member_rows": 0
+  }
+}

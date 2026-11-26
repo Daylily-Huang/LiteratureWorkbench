@@ -1,0 +1,43 @@
+{
+  "task": "multi-document reader tabs",
+  "created": "2026-10-19T10:32:27.7421117+08:00",
+  "files": [
+    {
+      "path": "web/src/app/Workbench.tsx",
+      "sha256": "25f042cb79dc539a95b367fee956a49236521b16db61742553145a1904d6a70e"
+    },
+    {
+      "path": "web/src/app/Workbench.test.tsx",
+      "sha256": "f244977ee68c2ab55a9756b27d91dd8797132ccad8b938410a7d795b7f3f26f4"
+    },
+    {
+      "path": "web/src/app/App.css",
+      "sha256": "a1bbd92ed038155d437c4064d51a4dedb94223f67999bb84985a26ce1f61e7b9"
+    },
+    {
+      "path": "web/src/features/reader/ReaderTabs.tsx",
+      "sha256": "ac4c2ff1fff078f9ac05e5e36f4a965e0673814e86dbd37af647d84ebb48edd0"
+    },
+    {
+      "path": "web/src/features/reader/ReaderTabs.test.ts",
+      "sha256": "80f30665f92c2071a732ba5d000931a1cd5b157f93642d3b5bfc31913f0fe9cd"
+    },
+    {
+      "path": "web/src/features/reader/PdfReader.tsx",
+      "sha256": "87393b2d421e78aa37c26426ee25e42803bfd32da400498f8f2998861f9012a7"
+    },
+    {
+      "path": "web/src/features/reader/PdfReader.test.tsx",
+      "sha256": "ea2419cc270d1dd06c387a355aa839de28ef513f1329570dd4d32641150112dd"
+    },
+    {
+      "path": "web/src/features/library/LiteratureDesk.tsx",
+      "sha256": "1c854f0ffedb89f3b159c993c81c857de378046695249652f9a23105cedae233"
+    },
+    {
+      "path": "web/src/features/library/LiteratureDesk.test.tsx",
+      "sha256": "8f0338e89bfc6db12e1360a7c9fcaa29e6a3b9926ac40c2753463797c2fa455e"
+    }
+  ],
+  "tests": "163 frontend tests; TypeScript; Vite; isolated Chrome real PDF"
+}

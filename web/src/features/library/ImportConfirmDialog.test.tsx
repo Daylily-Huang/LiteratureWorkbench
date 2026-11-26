@@ -309,3 +309,15 @@ test("dropping a PDF with an empty browser MIME still waits for confirmation", (
   expect(importApi.createImportIntent).not.toHaveBeenCalled();
   expect(importApi.uploadImport).not.toHaveBeenCalled();
 });
+
+test("search reveals matching documents inside collapsed nested folders", async () => {
+  render(<LibraryPanel documentApi={documentApi([
+    { document_id: "target", filename: "target.pdf", relative_folder: "研究/方法", authorization_source: "registered_library" },
+  ])} importApi={api()} />);
+  await screen.findByText("研究");
+  expect(screen.getByText("研究").closest("details")).not.toHaveAttribute("open");
+  fireEvent.change(screen.getByLabelText("搜索文献"), { target: { value: "target" } });
+  expect(screen.getByText("研究").closest("details")).toHaveAttribute("open");
+  expect(screen.getByText("方法").closest("details")).toHaveAttribute("open");
+  expect(screen.getByRole("button", { name: "target.pdf" })).toBeVisible();
+});

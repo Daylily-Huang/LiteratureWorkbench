@@ -13,6 +13,7 @@ from typing import BinaryIO, NoReturn, Protocol
 from uuid import UUID
 
 from literature_workbench.features.library.models import DocumentRecord, LibraryRoot
+from literature_workbench.platform.windows.paths import io_path
 
 
 FILE_READ_ATTRIBUTES = 0x0080
@@ -366,7 +367,7 @@ class Win32FileMetadataProvider:
         if share_delete:
             share_mode |= FILE_SHARE_DELETE
         raw_handle = _CreateFileW(
-            str(path),
+            str(io_path(path)),
             access,
             share_mode,
             None,
