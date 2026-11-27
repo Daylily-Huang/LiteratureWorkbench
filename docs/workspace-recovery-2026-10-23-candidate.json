@@ -1,0 +1,183 @@
+{
+  "implementation_hashes": {
+    "backend/src/literature_workbench/features/recovery.py": "8f5f172970bd4560753ba744c81a5c4e081565f11fcc853f34d31bf6d61f7b61",
+    "backend/src/literature_workbench/features/backups.py": "eaf867abf912829da2e08b43f9cfc15044a58fb3deb6538065e473f9cde6e08a",
+    "backend/src/literature_workbench/api/backups.py": "4405a93022b5b2e6be78892a38b26bdac8a8cd877fcb7dd772ee9863c1dda9e6",
+    "backend/src/literature_workbench/launcher.py": "83b6494715ed9a4923f0e1d25d06183bce323a261d0855b9d683adc74b5d7943",
+    "backend/src/literature_workbench/security/local_session.py": "2ceac440892533cdab891c8437a1c364b3d34a65fcb44bb5c4708ca1191b018d",
+    "backend/src/literature_workbench/api/session.py": "6996349345f5dcc47a47ad5da9f4f5a326685dd3302e2fc93adafa7392b1c9e6",
+    "backend/src/literature_workbench/platform/windows/paths.py": "e0c386d9af44114bc051f99c08c7ffb1cc96b13c7ae2ddcd71013a1f6cb370f0",
+    "backend/src/literature_workbench/platform/windows/filesystem.py": "a8fb9b280ebde41198dacac4e5ce753466abd29e358898e40e225fe81a811903",
+    "backend/src/literature_workbench/features/annotations/service.py": "3fed6f5c3a2d14ffaa6a67aee4fbf9775059677901db06396e4f4f3757117fda",
+    "backend/src/literature_workbench/features/library/scanner.py": "9e6a063820c89a6594c9df2bc5a7f7008e12dae2c41e79e8b2277b75cac26863",
+    "backend/src/literature_workbench/features/library/watcher.py": "a072b1dd52f73bb9ef5809453581baad7d4c98611e216d7a6e56f31a0ee676fe",
+    "backend/src/literature_workbench/features/library/import_files.py": "a2c564e72141254c1bb4c31cb5f47f0a7c7d467b9c8cab8582e63a9101ea9c6d",
+    "backend/tests/api/test_workspace_recovery.py": "59117bd6e7d79504979d6c35b8e14684c90ea9445f1ed13b1c7735d45e219cb3",
+    "backend/tests/e2e/test_launcher.py": "1bd34e1fd02ec40caef4307412bb1a4978eeb82ca9d9ca900acb6810c2615d25",
+    "backend/tests/annotations/test_annotations_api.py": "41affcee3393e835c32e06cab565fce10bfceacc52d4cb46e117136e7394fc93",
+    "backend/tests/library/test_scanner.py": "aad036768c0b221cd6ca14bf39db430b3fe772caee6ccdb892f14cb6f038f38e",
+    "backend/tests/library/test_watcher.py": "19fc0235900d492a0ced1c14b64471fe7f0194122e531501f8281efe47310573",
+    "web/src/features/settings/DataCenter.tsx": "bac3ec29848889bc1dd591574b45e02ec8ed9be4e70050808e5dc912f300eae5",
+    "web/src/features/settings/DataCenter.test.tsx": "c306b12e8282c09ec4def3d312453702d726a932a736aad98c9d6b4eb43ee118",
+    "web/src/app/Workbench.tsx": "fd24f978c7a193dacff6e59daef0e112b747a58f0b9681b13b383ee5062e25da",
+    "web/src/app/App.css": "9c6989a9cccfa362c8d1d2ed73c96b980657de70ccc915787c21f3cfb3de694f"
+  },
+  "manifest_sha256": "98a401347c5de588dbc580d2d0519fd90cadf19592e29c2088536893a703818b",
+  "review": {
+    "verdict": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "tools": 6,
+    "recheck_tools": 0,
+    "independent_backend_tests": 89,
+    "independent_frontend_tests": 10,
+    "not_independently_rerun": [
+      "real 190 PDF archive recovery",
+      "real browser supervisor flow",
+      "production installation"
+    ]
+  },
+  "self_checks": {
+    "backend": 785,
+    "backend_deselected": 2,
+    "frontend": 233,
+    "frontend_files": 46,
+    "ruff": "passed",
+    "mypy_source_files": 85,
+    "typescript": "passed",
+    "build": "passed",
+    "paid_api_calls": 0
+  },
+  "browser": {
+    "four_pdf_complete_backup": true,
+    "original_source_offline": true,
+    "real_recovery_supervisor_and_worker": true,
+    "browser_auto_open_suppressed_in_test_mirror": true,
+    "original_and_recovery_sessions_coexist": true,
+    "reading_state_and_original_ids": true,
+    "study_cache_evidence_verified_without_model_call": true,
+    "notebook_groups_graph_and_comments": true,
+    "clone_annotation_edit_and_undo_including_pre_recovery_snapshot": true,
+    "original_source_hash_preserved": true,
+    "explicit_stop_and_actual_restart_persistence": true,
+    "mobile_no_horizontal_overflow": true,
+    "controlled_model_calls": 1,
+    "page_errors": []
+  },
+  "real_archive_recovery": {
+    "verified_files": 325,
+    "verified_at": "2026-10-22T19:33:53.858872+00:00",
+    "restore_preview": "D:\\_scratch\\2026-10-23-workspace-recovery\\real-archive-holder\\backups\\workspace\\restore-previews\\d6363227-da8e-4f38-a044-d61883bbde46",
+    "workspace_root": "D:\\_scratch\\2026-10-23-workspace-recovery\\real-archive-holder\\backups\\workspace\\restore-previews\\d6363227-da8e-4f38-a044-d61883bbde46\\data",
+    "recovered_pdfs": 190,
+    "recovery_ready": true,
+    "unavailable_documents": 36,
+    "original_archive_unchanged": true,
+    "archive_sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9",
+    "preserved_table_hashes": {
+      "reading_records": "ffc62427f79bc573d4cb2fdcd03f6b108437fe3528e41cffd85f6de97b896aa2",
+      "research_entries": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "reading_groups": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "document_relations": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "relation_candidates": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "full_text_study_cache": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "full_text_study_documents": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "translation_cache": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0",
+      "pdf_annotation_mutations": "38a759c998cb67d6da85742af51f18674d6c62072d2a3d179a76dd16d1b1dcd2",
+      "translation_memory": "9792d7d36ab0684af6b13dd73a215353ad86cef7c1e95c2cf54b0354549d408a",
+      "pdf_annotation_baselines": "d4f5fd13b886b17446112b7c6e3519dc9c6df3063c6919ce140952c9ff154314"
+    },
+    "translation_cache": 68,
+    "all_190_pdf_range_requests": true,
+    "annotated_documents_checked": 4,
+    "annotations_read": 8,
+    "relative_parser_output_dirs_before": 4,
+    "paid_api_calls": 0,
+    "production_database_replaced": false
+  },
+  "production_preflight": {
+    "url": "http://127.0.0.1:55184",
+    "homepage": 200,
+    "database_integrity": "ok",
+    "translation_cache": 68,
+    "last_backup_exists": true
+  },
+  "installation": {
+    "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-workspace-recovery-20261023-033756.sqlite3",
+    "snapshots": {
+      "research_entries": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_groups": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "document_relations": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_analyses": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_candidates": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "translation_cache": {
+        "count": 68,
+        "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+      },
+      "full_text_study_cache": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "full_text_study_documents": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_records": {
+        "count": 11,
+        "sha256": "ffc62427f79bc573d4cb2fdcd03f6b108437fe3528e41cffd85f6de97b896aa2"
+      },
+      "translation_memory": {
+        "count": 6,
+        "sha256": "9792d7d36ab0684af6b13dd73a215353ad86cef7c1e95c2cf54b0354549d408a"
+      },
+      "pdf_annotation_baselines": {
+        "count": 4,
+        "sha256": "096565e1997824c15cdb571b43c79395344d987dfeebdd79dfeb740091530663"
+      },
+      "pdf_annotation_mutations": {
+        "count": 14,
+        "sha256": "2a02593f7a4a2398fbb15b8f9f9be30a1b1ff5e77f7bec1d2c5b12967d0c844f"
+      }
+    },
+    "candidate_manifest_sha256": "98a401347c5de588dbc580d2d0519fd90cadf19592e29c2088536893a703818b"
+  },
+  "production": {
+    "url": "http://127.0.0.1:57775",
+    "asset_checks": {
+      "index-DGS553SJ.js": true,
+      "PdfReader-Dw8uveAo.js": true,
+      "index-BGwB-jow.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200,
+      "/api/libraries/full-text/studies": 200,
+      "/api/data/overview": 200,
+      "/api/data/context": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0015_study_documents",
+    "study_cache_rows": 0,
+    "member_rows": 0,
+    "existing_full_backup_sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9"
+  }
+}

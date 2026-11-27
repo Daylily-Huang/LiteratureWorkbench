@@ -25,6 +25,7 @@ def test_public_settings_have_one_deepseek_model_and_derived_key_state(
         "deepseek_model": "deepseek-v4-flash",
         "qwen_fallback_enabled": False,
         "default_translation_mode": "online",
+        "translation_glossary": "",
     }
 
 
@@ -103,12 +104,17 @@ def test_patch_updates_bounded_model_and_qwen_fallback_once(
     response = client.patch(
         "/api/settings",
         headers=_write_headers(authenticated),
-        json={"deepseek_model": "deepseek-reasoner", "qwen_fallback_enabled": True},
+        json={
+            "deepseek_model": "deepseek-reasoner",
+            "qwen_fallback_enabled": True,
+            "translation_glossary": "allelic dropout = 等位基因脱扣",
+        },
     )
 
     assert response.status_code == 200
     assert response.json()["deepseek_model"] == "deepseek-reasoner"
     assert response.json()["qwen_fallback_enabled"] is True
+    assert response.json()["translation_glossary"] == "allelic dropout = 等位基因脱扣"
     assert repository.read().revision == before + 1
 
 

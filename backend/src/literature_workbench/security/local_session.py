@@ -51,9 +51,11 @@ class LocalSession:
         "csrf_token",
         "session_cookie",
         "session_generation",
+        "cookie_name",
     )
 
-    def __init__(self, now: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, now: Callable[[], float] = time.monotonic, *, cookie_name: str = 'lw_session') -> None:
+        self.cookie_name = cookie_name
         self.session_cookie = secrets.token_urlsafe(32)
         self.csrf_token = secrets.token_urlsafe(32)
         self.session_generation = str(uuid.uuid4())
@@ -102,7 +104,7 @@ class LocalApiSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         policy = api_route_policy(request.url.path, request.method)
         if policy in {ApiRoutePolicy.SESSION_READ, ApiRoutePolicy.SESSION_WRITE}:
-            if not self._session.valid_session(request.cookies.get("lw_session")):
+            if not self._session.valid_session(request.cookies.get(self._session.cookie_name)):
                 return JSONResponse({"code": "session_required"}, status_code=403)
         if policy is ApiRoutePolicy.SESSION_WRITE:
             if not self._session.valid_csrf(request.headers.get("X-LW-CSRF")):

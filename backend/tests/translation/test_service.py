@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -30,10 +30,16 @@ from literature_workbench.worker import Worker, translation_job_handlers
 class FakeDeepSeek:
     result: str = "深度求索译文"
     error: str | None = None
+    error_sequence: list[str | None] | None = None
     calls: list[object] = field(default_factory=list)
 
     def translate_selection(self, proof: object) -> str:
         self.calls.append(proof)
+        if self.error_sequence:
+            outcome = self.error_sequence.pop(0)
+            if outcome is not None:
+                raise EgressRejected(outcome)
+            return self.result
         if self.error is not None:
             raise EgressRejected(self.error)
         return self.result
@@ -181,7 +187,7 @@ def test_rejects_forged_selection_and_stale_identity_before_any_model_call(
     deepseek, qwen, process = FakeDeepSeek(), FakeQwen(), FakeQwenProcess()
     subject = service(translation_db, deepseek=deepseek, qwen=qwen, process=process)
 
-    with pytest.raises(SelectionRejected, match="selection_not_current"):
+    with pytest.raises(SelectionRejected, match="selection_text_mismatch"):
         subject.submit("session", request(ids, text="forged text"))
     stale = request(ids)
     with database.transaction() as connection:
@@ -262,8 +268,53 @@ def test_rejects_selection_that_skips_an_intervening_prose_block(translation_db)
             (json.dumps(blocks), ids["run"]),
         )
 
-    with pytest.raises(SelectionRejected, match="selection_not_current"):
+    with pytest.raises(SelectionRejected, match="selection_text_mismatch"):
         service(translation_db).submit("session", request(ids, text=f"{first} {continuation}"))
+
+
+def test_rejects_selection_that_mixes_page_words_with_forged_text(translation_db) -> None:
+    _, ids = translation_db
+
+    with pytest.raises(SelectionRejected, match="selection_text_mismatch"):
+        service(translation_db).submit(
+            "session",
+            request(ids, text="selected words entirely forged trailing"),
+        )
+
+
+def test_accepts_reordered_capture_when_tokens_stay_in_one_window(translation_db) -> None:
+    database, ids = translation_db
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET normalized_text=?,raw_text=? WHERE parse_run_id=?",
+            (
+                "one two three four five six seven eight nine ten eleven twelve",
+                "one two three four five six seven eight nine ten eleven twelve",
+                ids["run"],
+            ),
+        )
+
+    reordered = "three four five seven six eight nine ten"
+    task = service(translation_db).submit("session", request(ids, text=reordered))
+
+    assert task.status == "queued"
+    assert task.selected_text == reordered
+
+
+def test_parse_pending_when_content_has_no_completed_parse_run(translation_db) -> None:
+    database, ids = translation_db
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE parse_runs SET status='failed',error_code='invalid_pdf_structure' WHERE id=?",
+            (ids["run"],),
+        )
+        connection.execute(
+            "UPDATE contents SET current_parse_run_id=NULL WHERE sha256=?",
+            (ids["content"],),
+        )
+
+    with pytest.raises(SelectionRejected, match="selection_parse_pending"):
+        service(translation_db).submit("session", request(ids))
 
 
 def test_accepts_pdf_style_span_gap_before_punctuation(translation_db) -> None:
@@ -405,6 +456,42 @@ def test_credential_or_configuration_failure_is_terminal_without_fallback(
     assert process.calls == 0
 
 
+def test_transient_deepseek_failure_is_retried_once_then_succeeds(translation_db) -> None:
+    database, ids = translation_db
+    SettingsRepository(database).update(qwen_fallback_enabled=True)
+    deepseek = FakeDeepSeek(error_sequence=["deepseek_transport_failed", None])
+    qwen, process = FakeQwen(), FakeQwenProcess()
+    subject = service(translation_db, deepseek=deepseek, qwen=qwen, process=process)
+
+    task = subject.submit("session", request(ids))
+    subject.process_task(task.id)
+
+    completed = subject.get(task.id, session_generation="session")
+    assert completed.status == "completed"
+    assert completed.provider == "deepseek"
+    assert completed.fallback_reason is None
+    assert len(deepseek.calls) == 2
+    assert qwen.calls == []
+    assert process.calls == 0
+
+
+def test_non_retryable_deepseek_failure_is_not_retried(translation_db) -> None:
+    database, ids = translation_db
+    SettingsRepository(database).update(qwen_fallback_enabled=True)
+    deepseek = FakeDeepSeek(error="deepseek_response_too_large")
+    qwen, process = FakeQwen(), FakeQwenProcess()
+    subject = service(translation_db, deepseek=deepseek, qwen=qwen, process=process)
+
+    task = subject.submit("session", request(ids))
+    subject.process_task(task.id)
+
+    completed = subject.get(task.id, session_generation="session")
+    assert completed.status == "completed"
+    assert completed.provider == "qwen"
+    assert completed.fallback_reason == "deepseek_response_too_large"
+    assert len(deepseek.calls) == 1
+
+
 def test_known_transient_deepseek_failure_falls_back_to_qwen_once(translation_db) -> None:
     database, ids = translation_db
     SettingsRepository(database).update(qwen_fallback_enabled=True)
@@ -420,7 +507,9 @@ def test_known_transient_deepseek_failure_falls_back_to_qwen_once(translation_db
     assert completed.provider == "qwen"
     assert completed.model == "literature-workbench-qwen"
     assert completed.fallback_reason == "deepseek_total_timeout"
-    assert len(deepseek.calls) == len(qwen.calls) == process.calls == 1
+    # One bounded retry precedes the fallback, so DeepSeek sees two attempts.
+    assert len(deepseek.calls) == 2
+    assert len(qwen.calls) == process.calls == 1
 
 
 def test_local_only_routes_directly_to_qwen(translation_db) -> None:
@@ -556,5 +645,182 @@ def test_same_content_older_document_version_is_not_current(translation_db) -> N
             ),
         )
 
-    with pytest.raises(SelectionRejected, match="selection_not_current"):
+    with pytest.raises(SelectionRejected, match="selection_version_stale"):
         service(translation_db).submit("session", old_request)
+
+
+def _page_text(database: Database, text: str) -> None:
+    with database.transaction() as connection:
+        connection.execute("UPDATE pages SET raw_text=?, normalized_text=?", (text, text))
+
+
+def _annotation_revision(database: Database, ids: dict[str, str]) -> dict[str, str]:
+    newer = {**ids, "version": str(uuid4()), "content": "b" * 64, "run": str(uuid4())}
+    now = (datetime.now(UTC) + timedelta(seconds=1)).isoformat()
+    with database.transaction() as c:
+        c.execute("""INSERT INTO contents(sha256,size_bytes,mime_type,page_count,current_parse_run_id,status,created_at,updated_at)
+                     VALUES(?,12,'application/pdf',1,NULL,'completed',?,?)""", (newer["content"], now, now))
+        c.execute("INSERT INTO document_versions VALUES(?,?,?,12,1,'vol','file',1,?)", (newer["version"], ids["document"], newer["content"], now))
+        c.execute("""INSERT INTO parse_runs(id,content_sha256,parser_name,parser_version,status,created_at,updated_at,completed_at)
+                     VALUES(?,?,'pymupdf','1','completed',?,?,?)""", (newer["run"], newer["content"], now, now, now))
+        c.execute("UPDATE contents SET current_parse_run_id=? WHERE sha256=?", (newer["run"], newer["content"]))
+        c.execute("""INSERT INTO pages SELECT ?,page_index,physical_page,?,normalized_text,raw_text,width_points,height_points,blocks_json,coordinate_reliable
+                     FROM pages WHERE content_sha256=?""", (newer["content"], newer["run"], ids["content"]))
+        c.execute("UPDATE documents SET content_sha256=? WHERE id=?", (newer["content"], ids["document"]))
+    return newer
+
+
+def test_annotation_revision_reuses_translation_without_cloud_call(translation_db) -> None:
+    database, ids = translation_db
+    deepseek = FakeDeepSeek()
+    subject = service(translation_db, deepseek=deepseek)
+    subject.process_task(subject.submit("session", request(ids)).id)
+    newer = _annotation_revision(database, ids)
+    second = subject.process_task(subject.submit("session", request(newer)).id)
+    assert len(deepseek.calls) == 1
+    assert second.reuse_details["mode"] == "exact"
+    assert second.reuse_details["cloud_requested"] is False
+    assert second.translated_text == "深度求索译文"
+
+
+def test_changed_page_text_does_not_reuse_old_translation(translation_db) -> None:
+    database, ids = translation_db
+    deepseek = FakeDeepSeek()
+    subject = service(translation_db, deepseek=deepseek)
+    subject.process_task(subject.submit("session", request(ids)).id)
+    newer = _annotation_revision(database, ids)
+    with database.transaction() as c:
+        c.execute("UPDATE pages SET normalized_text=?,raw_text=? WHERE content_sha256=?", ("Different evidence selected words", "Different evidence selected words", newer["content"]))
+    second = subject.process_task(subject.submit("session", request(newer)).id)
+    assert len(deepseek.calls) == 2
+    assert second.reuse_details["mode"] == "fresh"
+
+
+def test_legacy_translation_is_reused_after_annotation(translation_db) -> None:
+    database, ids = translation_db
+    deepseek = FakeDeepSeek()
+    subject = service(translation_db, deepseek=deepseek)
+    first = subject.process_task(subject.submit("session", request(ids)).id)
+    with database.transaction() as c:
+        c.execute("DELETE FROM translation_memory")
+        c.execute("UPDATE translation_tasks SET page_text_hash='',reuse_details='{}' WHERE id=?", (str(first.id),))
+    newer = _annotation_revision(database, ids)
+    second = subject.process_task(subject.submit("session", request(newer)).id)
+    assert len(deepseek.calls) == 1
+    assert second.reuse_details["mode"] == "exact"
+
+
+def test_shrinking_selection_is_labelled_reference_and_exact_is_opt_in(translation_db) -> None:
+    _, ids = translation_db
+    deepseek = FakeDeepSeek(result="整段译文")
+    subject = service(translation_db, deepseek=deepseek)
+    subject.process_task(subject.submit("session", request(ids, text="Alpha beta selected words gamma delta")).id)
+    short = subject.process_task(subject.submit("session", request(ids)).id)
+    assert short.reuse_details["mode"] == "reference"
+    assert short.reuse_details["source_text"] == "Alpha beta selected words gamma delta"
+    assert short.translated_text == "整段译文"
+    assert len(deepseek.calls) == 1
+    deepseek.result = "精确短句译文"
+    exact = subject.process_task(subject.submit("session", replace(request(ids), prefer_exact=True)).id)
+    assert exact.translated_text == "精确短句译文"
+    assert exact.reuse_details["mode"] == "fresh"
+    again = subject.process_task(subject.submit("session", request(ids)).id)
+    assert again.translated_text == "精确短句译文"
+    assert again.reuse_details["mode"] == "exact"
+    assert len(deepseek.calls) == 2
+
+
+def test_expanding_selection_translates_only_new_complete_sentence(translation_db) -> None:
+    database, ids = translation_db
+    old, new = "Animals increased.", "Habitats improved."
+    _page_text(database, f"{old} {new}")
+    deepseek = FakeDeepSeek(result="动物增加。")
+    subject = service(translation_db, deepseek=deepseek)
+    subject.process_task(subject.submit("session", request(ids, text=old)).id)
+    deepseek.result = "栖息地改善。"
+    expanded = subject.process_task(subject.submit("session", request(ids, text=f"{old} {new}")).id)
+    assert len(deepseek.calls) == 2
+    assert deepseek.calls[-1].verified_text == new
+    assert expanded.translated_text == "动物增加。\n\n栖息地改善。"
+    assert expanded.reuse_details["mode"] == "partial"
+    assert [p["cached"] for p in expanded.reuse_details["parts"]] == [True, False]
+    subject.process_task(subject.submit("session", request(ids, text=new)).id)
+    assert len(deepseek.calls) == 2
+
+
+@pytest.mark.parametrize("prefix", ["The U.S.", "See Fig.", "Named by Dr.", "Species sp.", 'The "U.K."'])
+def test_abbreviation_expansion_translates_the_whole_sentence(translation_db, prefix) -> None:
+    database, ids = translation_db
+    text = f"{prefix} population increased."
+    _page_text(database, text)
+    deepseek = FakeDeepSeek()
+    subject = service(translation_db, deepseek=deepseek)
+    subject.process_task(subject.submit("session", request(ids, text=prefix)).id)
+    expanded = subject.process_task(subject.submit("session", request(ids, text=text)).id)
+    assert expanded.reuse_details["mode"] == "fresh"
+    assert len(deepseek.calls) == 2
+    assert deepseek.calls[-1].verified_text == text
+
+
+def test_changed_negation_is_not_translated_by_pasting_cached_words(translation_db) -> None:
+    database, ids = translation_db
+    _page_text(database, "The result was not significant.")
+    deepseek = FakeDeepSeek()
+    subject = service(translation_db, deepseek=deepseek)
+    subject.process_task(subject.submit("session", request(ids, text="significant.")).id)
+    second = subject.process_task(subject.submit("session", request(ids, text="not significant.")).id)
+    assert len(deepseek.calls) == 2
+    assert deepseek.calls[-1].verified_text == "not significant."
+    assert second.reuse_details["mode"] == "fresh"
+
+
+def test_successful_new_fragment_survives_later_failure(translation_db) -> None:
+    database, ids = translation_db
+    text = "First sentence. Cached sentence. Last sentence."
+    _page_text(database, text)
+    deepseek = FakeDeepSeek()
+    subject = service(translation_db, deepseek=deepseek)
+    subject.process_task(subject.submit("session", request(ids, text="Cached sentence.")).id)
+    deepseek.error_sequence = [None, "deepseek_authorization_failed"]
+    failed = subject.process_task(subject.submit("session", request(ids, text=text)).id)
+    assert failed.status == "failed"
+    assert failed.reuse_details["cloud_requested"] is True
+    assert len(deepseek.calls) == 3
+    retry = subject.process_task(subject.submit("session", request(ids, text=text)).id)
+    assert retry.status == "completed"
+    assert len(deepseek.calls) == 4
+    assert deepseek.calls[-1].verified_text == "Last sentence."
+
+
+def test_translation_memory_separates_document_page_model_and_language(translation_db) -> None:
+    database, ids = translation_db
+    subject = service(translation_db)
+    task = subject.process_task(subject.submit("session", request(ids)).id)
+    repo = TranslationRepository(database, lambda: datetime.now(UTC))
+    assert repo.memories(task, "deepseek", task.model)
+    assert not repo.memories(replace(task, document_id=uuid4()), "deepseek", task.model)
+    assert not repo.memories(replace(task, physical_page=2), "deepseek", task.model)
+    assert not repo.memories(task, "deepseek", "another-model")
+    assert not repo.memories(task, "qwen", task.model)
+
+
+def test_queued_translation_rejects_changed_parse_before_cache_hit(translation_db) -> None:
+    database, ids = translation_db
+    subject = service(translation_db)
+    subject.process_task(subject.submit("session", request(ids)).id)
+    queued = subject.submit("session", request(ids))
+    _page_text(database, "Changed page containing selected words")
+    assert subject.process_task(queued.id).status == "failed"
+
+
+
+def test_mid_word_selection_with_pdf_ligatures_aligns_cleanly() -> None:
+    from literature_workbench.features.translation.repository import align_selection_to_candidate
+
+    candidate = "The low template threshold decides whether a DNA pro\ufb01le is uploaded as aF."
+    selection = "he low template threshold decides whether a DNA profile is uploaded as a"
+    aligned = align_selection_to_candidate(candidate, selection)
+    assert aligned is not None
+    matched_text, pos = aligned
+    assert pos == 1
+    assert "pro\ufb01le" in matched_text

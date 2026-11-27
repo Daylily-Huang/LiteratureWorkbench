@@ -1,3 +1,4 @@
+import { cleanPdfCopyText } from "./copyText";
 import {
   MAX_TRANSLATION_CODE_POINTS,
   viewportPointToPdfPoint,
@@ -6,9 +7,14 @@ import {
 } from "./selection";
 
 
-const MAX_VISIBLE_RECTS = 200;
+const MAX_VISIBLE_RECTS = 1000;
 const MAX_CONTEXT_CODE_POINTS = 500;
 const SELECTION_HINT = "请在同一栏选择一句或一段";
+// Same-line spans listed far apart in the content stream are column neighbours,
+// not line mates. Out-of-order suffix spans observed in real PDFs sit within a
+// few nodes of their line; two-column layouts put the other column dozens of
+// nodes away.
+const MAX_LINE_BRIDGE_DISTANCE = 8;
 
 
 export type VisualFragmentSeed = {
@@ -128,8 +134,12 @@ function sameVisualLine(
   const horizontalGap = Math.max(a.left, b.left) - Math.min(a.right, b.right);
   if (horizontalGap > Math.max(36, minimumHeight * 2.5)) return false;
   // PDF content streams can list a right-side suffix after the next visual line.
-  // A small non-overlapping gap is still unambiguous even when source order differs.
-  if (horizontalGap >= -2) return true;
+  // A small non-overlapping gap is still unambiguous when the text nodes sit
+  // close together in the content stream. Distant nodes with the same small
+  // gap are almost always two physical columns separated by a narrow gutter
+  // (justified text can end within a few pixels of the next column), so they
+  // must never collapse into one visual line.
+  if (horizontalGap >= -2) return sourceDistance <= MAX_LINE_BRIDGE_DISTANCE;
   if (sourceDistance !== 1) return false;
 
   // PDF.js can give adjacent styled spans bounds which overlap heavily because
@@ -301,6 +311,26 @@ function joinSlices(
   return normalizeWhitespace(value);
 }
 
+function clipboardSlices(fragments: VisualFragment[], slices: string[]): string {
+  let value = "";
+  let previous: VisualFragment | undefined;
+  for (let i = 0; i < fragments.length; i += 1) {
+    const current = fragments[i]!;
+    const slice = slices[i] ?? "";
+    if (!slice) continue;
+    if (previous) {
+      if (previous.region !== current.region) value += "\n\n";
+      else if (previous.line !== current.line) {
+        const gap = current.bounds.top - previous.bounds.bottom;
+        value += gap > Math.max(previous.bounds.height, current.bounds.height) * .8 ? "\n\n" : "\n";
+      } else value += separator(previous, current);
+    }
+    value += slice;
+    previous = current;
+  }
+  return value.trim();
+}
+
 
 function mergeRects(rects: DOMRect[]): DOMRect[] {
   const ordered = [...rects].sort((first, second) => (
@@ -312,10 +342,12 @@ function mergeRects(rects: DOMRect[]): DOMRect[] {
   for (const rect of ordered) {
     const previous = merged[merged.length - 1];
     if (previous !== undefined) {
+      const minHeight = Math.max(1, Math.min(previous.height, rect.height));
       const verticalOverlap = overlap(previous.top, previous.bottom, rect.top, rect.bottom);
-      const sameLine = verticalOverlap >= Math.min(previous.height, rect.height) * 0.6;
+      const sameLine = verticalOverlap >= minHeight * 0.55;
       const gap = rect.left - previous.right;
-      if (sameLine && gap >= -1 && gap <= 2) {
+      const maxWordGap = Math.max(24, minHeight * 1.8);
+      if (sameLine && gap >= -minHeight * 0.6 && gap <= maxWordGap) {
         const left = Math.min(previous.left, rect.left);
         const top = Math.min(previous.top, rect.top);
         const right = Math.max(previous.right, rect.right);
@@ -465,6 +497,7 @@ export function resolveVisualSelection(
     measured.push(...fragment.measure(from, to).filter((rect) => rect.width > 0 && rect.height > 0));
   }
   const selectedText = joinSlices(chosen, slices);
+  const rawText = clipboardSlices(chosen, slices);
   const clientRects = mergeRects(measured);
   if (selectedText === "" || clientRects.length === 0 || clientRects.length > MAX_VISIBLE_RECTS) {
     return { selected: null, hint: SELECTION_HINT };
@@ -509,6 +542,8 @@ export function resolveVisualSelection(
       ...options.metadata,
       pdfPage: options.page,
       text: selectedText,
+      rawText,
+      copyText: cleanPdfCopyText(rawText, ordered.map(fragment => fragment.node.data).join("\n")),
       contextBefore,
       contextAfter,
       rects,
@@ -619,12 +654,28 @@ function hitsAtPoint(
   ));
   for (const fragment of ordered) {
     const distance = rectDistance(fragment.bounds, x, y);
-    const maximumDistance = strict ? Math.max(6, fragment.bounds.height * 0.5) : 24;
+    const maximumDistance = strict ? Math.max(6, fragment.bounds.height * 0.5) : 48;
     if (distance > maximumDistance) continue;
     if (hits.some((hit) => hit.node === fragment.node)) continue;
     hits.push({
       node: fragment.node,
       offset: measuredOffset(fragment, x, y),
+      clientX: x,
+      clientY: y,
+    });
+  }
+  if (!strict && hits.length === 0 && ordered.length > 0) {
+    const byLine = [...index.fragments].sort((first, second) => {
+      const dy1 = Math.max(first.bounds.top - y, 0, y - first.bounds.bottom);
+      const dy2 = Math.max(second.bounds.top - y, 0, y - second.bounds.bottom);
+      const dx1 = Math.max(first.bounds.left - x, 0, x - first.bounds.right);
+      const dx2 = Math.max(second.bounds.left - x, 0, x - second.bounds.right);
+      return (dy1 * 8 + dx1) - (dy2 * 8 + dx2);
+    });
+    const nearest = byLine[0]!;
+    hits.push({
+      node: nearest.node,
+      offset: measuredOffset(nearest, x, y),
       clientX: x,
       clientY: y,
     });

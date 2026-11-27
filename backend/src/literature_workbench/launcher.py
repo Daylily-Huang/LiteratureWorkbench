@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hmac
+import hashlib
 import json
 import os
 import secrets
-import socket
 import subprocess
 import sys
 import time
@@ -39,11 +39,13 @@ from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.features.library.scanner import LibraryScanner
 from literature_workbench.features.models.qwen_local import QwenLocalClient
 from literature_workbench.features.models.qwen_process import QwenProcessError, QwenProcessManager
+from literature_workbench.features.parser.normalizer import ParseRunRepository
 from literature_workbench.features.parser.worker import ParseWorkerService
 from literature_workbench.features.settings.repository import SettingsRepository
 from literature_workbench.features.translation.repository import TranslationRepository
 from literature_workbench.features.translation.service import TranslationService
 from literature_workbench.platform.windows.acl import TrustedRuntimeRoot, secure_owner_directory
+from literature_workbench.platform.windows.loopback import DEFAULT_PORT as DEFAULT_PORT, reserve_address
 from literature_workbench.platform.windows.credentials import SecretStore, create_windows_secret_store
 from literature_workbench.platform.windows.filesystem import SafeWindowsFileInspector
 from literature_workbench.security.local_session import LocalSession
@@ -57,7 +59,6 @@ from literature_workbench.worker import (
 )
 
 
-DEFAULT_PORT = 58380
 _CONTROL_BOOTSTRAP = "/__literature_workbench/bootstrap"
 _CONTROL_STOP = "/__literature_workbench/stop"
 _MANIFEST_NAME = "launcher.json"
@@ -270,6 +271,22 @@ def lookup_parent_pid(pid: int) -> int | None:
         return None
 
 
+def owns_listening_port(expected: ProcessIdentity, port: int) -> bool:
+    """Fail closed if the exact supervisor no longer owns the loopback listener."""
+    try:
+        process = psutil.Process(expected.pid)
+        if not _same_identity(expected, lookup_process_identity(expected.pid)):
+            return False
+        return any(
+            connection.status == psutil.CONN_LISTEN
+            and connection.laddr.ip == "127.0.0.1"
+            and connection.laddr.port == port
+            for connection in process.net_connections(kind="tcp")
+        )
+    except (psutil.Error, OSError):
+        return False
+
+
 def lookup_command_line(pid: int) -> tuple[str, ...] | None:
     try:
         return tuple(psutil.Process(pid).cmdline())
@@ -369,6 +386,7 @@ def reuse_running_instance(
     health_probe: HealthProbe = _health_probe,
     control_request: ControlRequest = _control_request,
     browser_open: BrowserOpen = webbrowser.open,
+    port_owner_check: Callable[[ProcessIdentity, int], bool] = owns_listening_port,
 ) -> bool:
     try:
         manifest = _read_manifest(manifest_path)
@@ -378,7 +396,11 @@ def reuse_running_instance(
             manifest.worker, worker
         ):
             return False
+        if not port_owner_check(manifest.supervisor, manifest.port):
+            return False
         if not health_probe(f"http://127.0.0.1:{manifest.port}/api/health"):
+            return False
+        if not port_owner_check(manifest.supervisor, manifest.port):
             return False
         bootstrap_token = control_request(
             manifest.port, manifest.control_token, "bootstrap"
@@ -401,6 +423,7 @@ def stop_running_instance(
     qwen_manager_factory: Callable[[Path], QwenProcessManager] = QwenProcessManager,
     exact_stopper: Callable[[ProcessIdentity], None] | None = None,
     timeout_seconds: float = 60.0,
+    port_owner_check: Callable[[ProcessIdentity, int], bool] = owns_listening_port,
 ) -> bool:
     try:
         manifest = _read_manifest(manifest_path)
@@ -409,7 +432,11 @@ def stop_running_instance(
         ):
             return False
         qwen_manager = qwen_manager_factory(manifest_path.parent.parent / "qwen")
-        healthy = health_probe(f"http://127.0.0.1:{manifest.port}/api/health")
+        healthy = (
+            port_owner_check(manifest.supervisor, manifest.port)
+            and health_probe(f"http://127.0.0.1:{manifest.port}/api/health")
+            and port_owner_check(manifest.supervisor, manifest.port)
+        )
         forced = not healthy
         if healthy:
             control_request(manifest.port, manifest.control_token, "stop")
@@ -586,7 +613,7 @@ def create_desktop_app(
 
     @app.get("/", include_in_schema=False)
     def spa_root() -> FileResponse:
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": "no-store"})
 
     @app.get("/{requested_path:path}", include_in_schema=False)
     def spa_fallback(requested_path: str) -> FileResponse:
@@ -599,20 +626,9 @@ def create_desktop_app(
             raise HTTPException(status_code=404) from None
         if candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": "no-store"})
 
     return app
-
-
-def _choose_port(default: int = DEFAULT_PORT) -> int:
-    for port in (default, 0):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            try:
-                probe.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-            return int(probe.getsockname()[1])
-    raise RuntimeError("loopback_port_unavailable")
 
 
 def _worker_python() -> str:
@@ -631,7 +647,7 @@ def _worker_runtime_python() -> str:
 
 
 def _spawn_worker(
-    log_path: Path, generation: str, token: str
+    log_path: Path, generation: str, token: str, data_root: Path | None = None,
 ) -> subprocess.Popen[bytes]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log = log_path.open("ab")
@@ -644,6 +660,7 @@ def _spawn_worker(
                 "_worker",
                 generation,
                 token,
+                *([str(data_root)] if data_root is not None else []),
             ],
             stdin=subprocess.DEVNULL,
             stdout=log,
@@ -676,6 +693,7 @@ def wait_for_worker_ready(
     parent_lookup: ParentLookup = lookup_parent_pid,
     cmdline_lookup: CommandLineLookup = lookup_command_line,
     timeout_seconds: float = 15.0,
+    data_root: Path | None = None,
 ) -> ProcessIdentity:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
@@ -700,7 +718,7 @@ def wait_for_worker_ready(
                 and parent_lookup(ready.worker.pid) == expected_worker.pid
                 and _same_executable(ready.worker.executable, expected_child_executable)
                 and command is not None
-                and len(command) == 6
+                and len(command) == (7 if data_root is not None else 6)
                 and _same_executable(command[0], expected_child_executable)
                 and command[1:5]
                 == (
@@ -710,6 +728,7 @@ def wait_for_worker_ready(
                     generation,
                 )
                 and hmac.compare_digest(command[5], token)
+                and (data_root is None or command[6] == str(data_root))
             ):
                 return ready.worker
         time.sleep(0.05)
@@ -796,9 +815,20 @@ def _wait_until_healthy(port: int, thread: Thread, timeout_seconds: float = 15.0
     raise RuntimeError("loopback_server_not_ready")
 
 
-def _stop_owned_qwen(runtime_dir: Path) -> None:
+def _stop_owned_qwen(
+    runtime_dir: Path,
+    *,
+    exe_path: Path | None = None,
+    model_path: Path | None = None,
+    mmproj_path: Path | None = None,
+) -> None:
     try:
-        QwenProcessManager(runtime_dir).stop_owned()
+        QwenProcessManager(
+            runtime_dir,
+            exe_path=exe_path,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+        ).stop_owned()
     except QwenProcessError:
         raise RuntimeError("owned_qwen_cleanup_failed") from None
 
@@ -823,84 +853,95 @@ def run_supervisor(
     control_token = secrets.token_urlsafe(32)
     worker_token = secrets.token_urlsafe(32)
     generation = secrets.token_urlsafe(24)
-    session = LocalSession()
-    port = _choose_port()
-    app = create_desktop_app(settings, session, control_token, stop_event, web_dist)
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=port,
-            proxy_headers=False,
-            forwarded_allow_ips="",
-            log_config=None,
+    namespace = hashlib.sha256(str(settings.data_root).casefold().encode('utf-8')).hexdigest()[:16]
+    session = LocalSession(cookie_name=f'lw_recovery_{namespace}' if (settings.data_root.parent/'recovered-workspace.json').is_file() else 'lw_session')
+    with reserve_address(settings.data_root) as binding:
+        port = binding.port
+        app = create_desktop_app(settings, session, control_token, stop_event, web_dist)
+        server = uvicorn.Server(
+            uvicorn.Config(
+                app,
+                host="127.0.0.1",
+                port=port,
+                proxy_headers=False,
+                forwarded_allow_ips="",
+                log_config=None,
+            )
         )
-    )
-    server_thread = Thread(target=server.run, name="literature-workbench-api", daemon=True)
-    worker: subprocess.Popen[bytes] | None = None
-    worker_launcher_identity: ProcessIdentity | None = None
-    worker_identity: ProcessIdentity | None = None
-    supervisor_identity = lookup_process_identity(os.getpid())
-    if supervisor_identity is None:
-        raise RuntimeError("supervisor_identity_unavailable")
-    server_thread.start()
-    try:
-        _wait_until_healthy(port, server_thread)
-        WorkerBootstrap(
-            generation,
-            worker_token,
-            supervisor_identity,
-            session.session_generation,
-        ).write(bootstrap_path)
-        worker = _spawn_worker(runtime_dir / "worker.log", generation, worker_token)
-        worker_launcher_identity = _wait_for_identity(worker.pid)
-        worker_identity = wait_for_worker_ready(
-            ready_path,
-            generation=generation,
-            token=worker_token,
-            expected_worker=worker_launcher_identity,
-            expected_child_executable=_worker_runtime_python(),
-            child_alive=lambda: worker is not None and worker.poll() is None,
-        )
-        ready_path.unlink(missing_ok=True)
-        manifest = RuntimeManifest(
-            port=port,
-            supervisor=supervisor_identity,
-            worker=worker_identity,
-            control_token=control_token,
-            generation=generation,
-        )
-        _write_manifest(manifest_path, manifest)
-        browser_open(
-            f"http://127.0.0.1:{port}/bootstrap#{session.issue_bootstrap_token()}"
-        )
-        while not stop_event.wait(0.25):
-            if worker.poll() is not None:
-                raise RuntimeError("worker_exited")
-            if not server_thread.is_alive():
-                raise RuntimeError("loopback_server_failed")
-    finally:
-        server.should_exit = True
-        server_thread.join(timeout=10)
-        if worker is not None:
-            if (
-                worker_identity is not None
-                and worker_launcher_identity is not None
-                and not _same_identity(worker_launcher_identity, worker_identity)
-            ):
-                _stop_exact_identity(worker_identity)
-            _stop_exact_process(worker, worker_launcher_identity)
-        qwen_cleanup_failed = False
+        server_thread = Thread(target=server.run, kwargs={"sockets": [binding.listener]}, name="literature-workbench-api", daemon=True)
+        worker: subprocess.Popen[bytes] | None = None
+        worker_launcher_identity: ProcessIdentity | None = None
+        worker_identity: ProcessIdentity | None = None
+        supervisor_identity = lookup_process_identity(os.getpid())
+        if supervisor_identity is None:
+            raise RuntimeError("supervisor_identity_unavailable")
+        server_thread.start()
         try:
-            _stop_owned_qwen(settings.qwen_runtime_dir)
-        except RuntimeError:
-            qwen_cleanup_failed = True
-        bootstrap_path.unlink(missing_ok=True)
-        ready_path.unlink(missing_ok=True)
-        if not qwen_cleanup_failed:
-            manifest_path.unlink(missing_ok=True)
-        if qwen_cleanup_failed:
-            raise RuntimeError("owned_qwen_cleanup_failed") from None
+            _wait_until_healthy(port, server_thread)
+            WorkerBootstrap(
+                generation,
+                worker_token,
+                supervisor_identity,
+                session.session_generation,
+            ).write(bootstrap_path)
+            worker_root = settings.data_root if settings.data_root != AppSettings().data_root else None
+            worker = _spawn_worker(runtime_dir / "worker.log", generation, worker_token, worker_root)
+            worker_launcher_identity = _wait_for_identity(worker.pid)
+            worker_identity = wait_for_worker_ready(
+                ready_path,
+                generation=generation,
+                token=worker_token,
+                expected_worker=worker_launcher_identity,
+                expected_child_executable=_worker_runtime_python(),
+                child_alive=lambda: worker is not None and worker.poll() is None,
+                data_root=worker_root,
+            )
+            ready_path.unlink(missing_ok=True)
+            manifest = RuntimeManifest(
+                port=port,
+                supervisor=supervisor_identity,
+                worker=worker_identity,
+                control_token=control_token,
+                generation=generation,
+            )
+            _write_manifest(manifest_path, manifest)
+            binding.remember()
+            app.state.launch_address = binding.public()
+            browser_open(
+                f"http://127.0.0.1:{port}/bootstrap#{session.issue_bootstrap_token()}"
+            )
+            while not stop_event.wait(0.25):
+                if worker.poll() is not None:
+                    raise RuntimeError("worker_exited")
+                if not server_thread.is_alive():
+                    raise RuntimeError("loopback_server_failed")
+        finally:
+            server.should_exit = True
+            server_thread.join(timeout=10)
+            if worker is not None:
+                if (
+                    worker_identity is not None
+                    and worker_launcher_identity is not None
+                    and not _same_identity(worker_launcher_identity, worker_identity)
+                ):
+                    _stop_exact_identity(worker_identity)
+                _stop_exact_process(worker, worker_launcher_identity)
+            qwen_cleanup_failed = False
+            try:
+                _stop_owned_qwen(
+                    settings.qwen_runtime_dir,
+                    exe_path=settings.qwen_exe,
+                    model_path=settings.qwen_model,
+                    mmproj_path=settings.qwen_mmproj,
+                )
+            except RuntimeError:
+                qwen_cleanup_failed = True
+            bootstrap_path.unlink(missing_ok=True)
+            ready_path.unlink(missing_ok=True)
+            if not qwen_cleanup_failed:
+                manifest_path.unlink(missing_ok=True)
+            if qwen_cleanup_failed:
+                raise RuntimeError("owned_qwen_cleanup_failed") from None
 
 
 def run_bound_worker(
@@ -936,9 +977,17 @@ def run_bound_worker(
         translation_repository = TranslationRepository(database, queue_clock)
         translation_repository.expire_other_sessions(bootstrap.session_generation)
         queue.requeue_expired()
+        orphaned_runs = ParseRunRepository(database).fail_orphaned_runs()
+        if orphaned_runs:
+            print(f"literature-workbench: failed {orphaned_runs} orphaned parse run(s)")
         inspector = SafeWindowsFileInspector()
         trusted_root = TrustedImportRoot.create(settings.data_root)
-        qwen_process = QwenProcessManager(settings.qwen_runtime_dir)
+        qwen_process = QwenProcessManager(
+            settings.qwen_runtime_dir,
+            exe_path=settings.qwen_exe,
+            model_path=settings.qwen_model,
+            mmproj_path=settings.qwen_mmproj,
+        )
         library_repository = LibraryRepository(database, queue)
         scanner = LibraryScanner(
             database,
@@ -1055,7 +1104,25 @@ def build_argument_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("start")
     subparsers.add_parser("stop")
+    for command in ("start-recovery", "stop-recovery"):
+        subparsers.add_parser(command).add_argument("workspace", type=Path)
     return parser
+
+
+def open_recovered_workspace(data_root: Path) -> None:
+    from literature_workbench.features.backups import plain_path
+    from literature_workbench.features.recovery import validate_workspace
+    data_root = validate_workspace(data_root)
+    runtime = plain_path(data_root/'runtime/launcher')
+    runtime.mkdir(parents=True, exist_ok=True)
+    executable = Path(_worker_python())
+    windowless = executable.with_name('pythonw.exe')
+    if windowless.is_file():
+        executable = windowless
+    with plain_path(runtime/'recovery-start.log').open('ab') as log:
+        subprocess.Popen([str(executable), '-m', 'literature_workbench.launcher', 'start-recovery', str(data_root)],
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -1063,13 +1130,17 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise SystemExit("Literature Workbench launcher supports Windows only")
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] == ["_worker"]:
-        if len(arguments) != 3 or len(arguments[1]) < 16 or len(arguments[2]) < 32:
+        if len(arguments) not in {3, 4} or len(arguments[1]) < 16 or len(arguments[2]) < 32:
             raise SystemExit("invalid internal worker capability")
-        run_bound_worker(AppSettings(), arguments[1], arguments[2])
+        settings = AppSettings(data_root=Path(arguments[3])) if len(arguments) == 4 else AppSettings()
+        run_bound_worker(settings, arguments[1], arguments[2])
         return
     args = build_argument_parser().parse_args(arguments)
     settings = AppSettings()
-    if args.command == "start":
+    if args.command in {'start-recovery', 'stop-recovery'}:
+        from literature_workbench.features.recovery import validate_workspace
+        settings = AppSettings(data_root=validate_workspace(args.workspace))
+    if args.command in {"start", "start-recovery"}:
         start(settings, _project_web_dist())
     else:
         _, manifest_path = _runtime_paths(settings)

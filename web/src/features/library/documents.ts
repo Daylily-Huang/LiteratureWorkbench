@@ -3,6 +3,8 @@ export type DocumentListItem = {
   filename: string;
   relative_folder: string;
   authorization_source: string;
+  library_id?: string;
+  library_name?: string;
 };
 
 export type DocumentApi = {
@@ -88,11 +90,12 @@ export const browserDocumentApi: DocumentApi = {
           document.content_id !== null &&
           (document.status === "candidate_pdf" || document.status === "valid_pdf"),
         )
-        .map(({ document_id, filename, relative_folder, cloud_policy }) => ({
+        .map(({ document_id, filename, relative_folder, cloud_policy, library_id, library_name }) => ({
           document_id,
           filename,
           relative_folder,
           authorization_source: cloud_policy.authorization_source,
+          ...(typeof library_id === "string" && typeof library_name === "string" ? { library_id, library_name } : {}),
         }));
     } catch (error) {
       if (error instanceof DocumentApiError) throw error;

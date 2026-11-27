@@ -39,7 +39,7 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
-addopts = "--strict-markers"
+addopts = "-m 'not live_library and not live_credentials and not live_qwen and not live_v01' --strict-markers"
 markers = [
   "live_library: read-only checks against the real approved PDF library",
   "live_credentials: isolated test entry in Windows Credential Manager",

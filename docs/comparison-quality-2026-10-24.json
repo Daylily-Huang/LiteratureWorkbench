@@ -1,0 +1,1376 @@
+{
+  "evaluated_utc": "2026-10-24T09:37:36.183791+00:00",
+  "budget": {
+    "budget_cny": "1",
+    "maximum_calls": 2,
+    "attempts": [
+      {
+        "attempt": 1,
+        "input_bytes": 120537,
+        "reserved_upper_cny": "0.291122",
+        "started_utc": "2026-10-24T09:17:29.081506+00:00",
+        "request_sha256": "5c7dea3585d28247dfbe848e1547e06cb79bbbced7053f34cecd096136490b0c",
+        "http_status": 200,
+        "usage": {
+          "prompt_tokens": 30528,
+          "completion_tokens": 1506,
+          "total_tokens": 32034,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 30528
+        },
+        "returned_model": "deepseek-flash",
+        "finish_reason": "stop",
+        "usage_peak_estimate_cny": "0.073104"
+      },
+      {
+        "attempt": 2,
+        "input_bytes": 167663,
+        "reserved_upper_cny": "0.385374",
+        "started_utc": "2026-10-24T09:23:02.585517+00:00",
+        "request_sha256": "711190be9e97adc4975dc057689a9f87fcf0311ff7ac5b57d29dfb313145f1de",
+        "http_status": 200,
+        "usage": {
+          "prompt_tokens": 42963,
+          "completion_tokens": 1049,
+          "total_tokens": 44012,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 42963
+        },
+        "returned_model": "deepseek-flash",
+        "finish_reason": "stop",
+        "usage_peak_estimate_cny": "0.094318"
+      }
+    ],
+    "gold_sha256": "d23d15f91d901ebe3981b1127afab1d1a870fb250c7836f077b01175513bbaf1"
+  },
+  "peak_usage_estimate_cny": "0.167422",
+  "reserved_worst_case_cny": "0.676496",
+  "gold": {
+    "locked_before_model_call": true,
+    "locked_utc": "2026-10-24T09:16:03.750656+00:00",
+    "review_method": "作者先阅读解析页并目视原PDF第1页，锁定8项可溯源核验点；这是小规模软件验收，不是独立专家金标准。",
+    "facts": [
+      {
+        "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+        "field": "subject",
+        "physical_page": 1,
+        "expected_fact": "瑞士中部松鸡Tetrao urogallus；2009年早春",
+        "excerpt": "the capercaillie Tetrao OPEN ACCESS urogallus, based on droppings",
+        "source_sha256": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4"
+      },
+      {
+        "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+        "field": "sample",
+        "physical_page": 1,
+        "expected_fact": "两次采样、八个森林斑块；不可被标题One Field Sample误导为一次现场采样",
+        "excerpt": "droppings collected on two sampling occasions in eight forest frag- ments in central Switzerland",
+        "source_sha256": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4"
+      },
+      {
+        "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+        "field": "sample",
+        "physical_page": 1,
+        "expected_fact": "识别127个基因型；137.3是模型估计的种群量，不是观察样本量",
+        "excerpt": "A total of 127 capercaillie genotypes were identified (77 males, 46 females",
+        "source_sha256": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4"
+      },
+      {
+        "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+        "field": "results",
+        "physical_page": 1,
+        "expected_fact": "种群量后验均值137.3，95%CRI 130–147；保留数量及区间含义",
+        "excerpt": "137.3 capercaillies (posterior sd 4.2, 95% CRI 130–147)",
+        "source_sha256": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4"
+      },
+      {
+        "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+        "field": "subject",
+        "physical_page": 1,
+        "expected_fact": "加州内华达山脉骡鹿O.hemionus；2013和2014年",
+        "excerpt": "We used fecal DNA samples in conjunction with SCR to estimate density, sex ratio, and habitat correlates to density for a mule deer (O. hemionus) population across a large ( 500 km2) area in the central Sierra Nevada Range, California, USA during 2013 and 2014.",
+        "source_sha256": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5"
+      },
+      {
+        "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+        "field": "sample",
+        "physical_page": 1,
+        "expected_fact": "411为基因分型样本数，不可写成411只独立鹿；24样线、4个30平方公里点位",
+        "excerpt": "We surveyed 24 random transects within 4 30-km2 sites representative of the study area. Based on 411 samples genotyped",
+        "source_sha256": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5"
+      },
+      {
+        "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+        "field": "results",
+        "physical_page": 1,
+        "expected_fact": "2013密度5.0，2014密度5.1鹿/平方公里；不可当总数量或互换年份",
+        "excerpt": "Using SCR, we estimated density at 5.0 (95% CI ¼ 2.3–7.8) deer/km2 in 2013 and 5.1 (95% CI ¼ 3.1–7.2) deer/km2 in 2014.",
+        "source_sha256": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5"
+      },
+      {
+        "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+        "field": "results",
+        "physical_page": 1,
+        "expected_fact": "非空间CR密度平均高约60%，比较发生在鹿论文内部，不是两论文相互矛盾",
+        "excerpt": "In comparison, non-spatial CR analysis produced density estimates on average 60% higher, likely reﬂecting bias resulting from use of the commonly employed mean maximum recapture distance (MMRD) to estimate effective sampling area.",
+        "source_sha256": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5"
+      }
+    ],
+    "documents": [
+      {
+        "id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+        "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+        "path": "D:\\black-muntjac-project\\papers\\Capwire\\Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+        "sha256": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+        "pages": 16,
+        "characters": 54254
+      },
+      {
+        "id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+        "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+        "path": "D:\\black-muntjac-project\\papers\\SECR\\Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+        "sha256": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+        "pages": 12,
+        "characters": 62698
+      }
+    ]
+  },
+  "gold_results": [
+    {
+      "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+      "field": "subject",
+      "physical_page": 1,
+      "expected_fact": "瑞士中部松鸡Tetrao urogallus；2009年早春",
+      "excerpt": "the capercaillie Tetrao OPEN ACCESS urogallus, based on droppings",
+      "source_sha256": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+      "verdict": "blocked_empty",
+      "scope": "先锁定的事实核对点，不代表该单元格所有扩展归纳均获科学验证。"
+    },
+    {
+      "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+      "field": "sample",
+      "physical_page": 1,
+      "expected_fact": "两次采样、八个森林斑块；不可被标题One Field Sample误导为一次现场采样",
+      "excerpt": "droppings collected on two sampling occasions in eight forest frag- ments in central Switzerland",
+      "source_sha256": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+      "verdict": "blocked_empty",
+      "scope": "先锁定的事实核对点，不代表该单元格所有扩展归纳均获科学验证。"
+    },
+    {
+      "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+      "field": "sample",
+      "physical_page": 1,
+      "expected_fact": "识别127个基因型；137.3是模型估计的种群量，不是观察样本量",
+      "excerpt": "A total of 127 capercaillie genotypes were identified (77 males, 46 females",
+      "source_sha256": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+      "verdict": "blocked_empty",
+      "scope": "先锁定的事实核对点，不代表该单元格所有扩展归纳均获科学验证。"
+    },
+    {
+      "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+      "field": "results",
+      "physical_page": 1,
+      "expected_fact": "种群量后验均值137.3，95%CRI 130–147；保留数量及区间含义",
+      "excerpt": "137.3 capercaillies (posterior sd 4.2, 95% CRI 130–147)",
+      "source_sha256": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+      "verdict": "consistent_in_this_example",
+      "scope": "先锁定的事实核对点，不代表该单元格所有扩展归纳均获科学验证。"
+    },
+    {
+      "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+      "field": "subject",
+      "physical_page": 1,
+      "expected_fact": "加州内华达山脉骡鹿O.hemionus；2013和2014年",
+      "excerpt": "We used fecal DNA samples in conjunction with SCR to estimate density, sex ratio, and habitat correlates to density for a mule deer (O. hemionus) population across a large ( 500 km2) area in the central Sierra Nevada Range, California, USA during 2013 and 2014.",
+      "source_sha256": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+      "verdict": "consistent_in_this_example",
+      "scope": "先锁定的事实核对点，不代表该单元格所有扩展归纳均获科学验证。"
+    },
+    {
+      "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+      "field": "sample",
+      "physical_page": 1,
+      "expected_fact": "411为基因分型样本数，不可写成411只独立鹿；24样线、4个30平方公里点位",
+      "excerpt": "We surveyed 24 random transects within 4 30-km2 sites representative of the study area. Based on 411 samples genotyped",
+      "source_sha256": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+      "verdict": "consistent_in_this_example",
+      "scope": "先锁定的事实核对点，不代表该单元格所有扩展归纳均获科学验证。"
+    },
+    {
+      "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+      "field": "results",
+      "physical_page": 1,
+      "expected_fact": "2013密度5.0，2014密度5.1鹿/平方公里；不可当总数量或互换年份",
+      "excerpt": "Using SCR, we estimated density at 5.0 (95% CI ¼ 2.3–7.8) deer/km2 in 2013 and 5.1 (95% CI ¼ 3.1–7.2) deer/km2 in 2014.",
+      "source_sha256": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+      "verdict": "consistent_in_this_example",
+      "scope": "先锁定的事实核对点，不代表该单元格所有扩展归纳均获科学验证。"
+    },
+    {
+      "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+      "field": "results",
+      "physical_page": 1,
+      "expected_fact": "非空间CR密度平均高约60%，比较发生在鹿论文内部，不是两论文相互矛盾",
+      "excerpt": "In comparison, non-spatial CR analysis produced density estimates on average 60% higher, likely reﬂecting bias resulting from use of the commonly employed mean maximum recapture distance (MMRD) to estimate effective sampling area.",
+      "source_sha256": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+      "verdict": "consistent_in_this_example",
+      "scope": "先锁定的事实核对点，不代表该单元格所有扩展归纳均获科学验证。"
+    }
+  ],
+  "semantic_review": [
+    {
+      "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+      "field": "subject",
+      "value": "",
+      "source_pages": [],
+      "verdict": "blocked_empty",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+      "field": "sample",
+      "value": "",
+      "source_pages": [],
+      "verdict": "blocked_empty",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+      "field": "method",
+      "value": "",
+      "source_pages": [],
+      "verdict": "blocked_empty",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+      "field": "assumptions",
+      "value": "假设种群在约2周采样期内闭合，将两次采样合并为各单元遇率；活动中心位置先验与亚单元面积成正比；未捕获个体性别视为潜变量",
+      "source_pages": [
+        6,
+        6,
+        6
+      ],
+      "verdict": "consistent_in_sample_author_check",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+      "field": "results",
+      "value": "SCR估计总种群137.3只（后验sd 4.2，95% CRI 130–147），雄79.6只（77–83）、雌57.7只（51–67），性比0.58（0.54–0.61）；雄检出率97%、雌80%",
+      "source_pages": [
+        1,
+        8,
+        8
+      ],
+      "verdict": "consistent_in_sample_author_check",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+      "field": "limitations",
+      "value": "基因分析成本仍较高；作者指出需更多年份数据以确认偏雄的性别比，因为性比可能有明显时间变化",
+      "source_pages": [
+        12,
+        12
+      ],
+      "verdict": "consistent_in_sample_author_check",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+      "field": "subject",
+      "value": "美国加州内华达山脉中部太平洋鹿群的骡鹿（Odocoileus hemionus，含加州骡鹿与哥伦比亚黑尾鹿）夏季分布区",
+      "source_pages": [
+        2,
+        2,
+        1
+      ],
+      "verdict": "consistent_in_sample_author_check",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+      "field": "sample",
+      "value": "2013–2014年在4个30 km2站点、共24条随机样带采集粪便；收集883份，411份在8个以上位点成功基因分型，鉴定209个个体（85雄、124雌）",
+      "source_pages": [
+        1,
+        6,
+        6
+      ],
+      "verdict": "consistent_in_sample_author_check",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+      "field": "method",
+      "value": "用10个微卫星位点与Y染色体性别标记分型，SCR模型（SECR程序，指数衰减、样带每200 m计数探测器）估计密度与性比，并与用MMRD的非空间CR比较",
+      "source_pages": [
+        4,
+        4,
+        5
+      ],
+      "verdict": "consistent_in_sample_author_check",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+      "field": "assumptions",
+      "value": "SCR与CR模型均假设种群闭合；2013年全部4次采样检验拒绝闭合，故仅用第2–4次，2014年未拒绝闭合",
+      "source_pages": [
+        4,
+        7,
+        7
+      ],
+      "verdict": "consistent_in_sample_author_check",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+      "field": "results",
+      "value": "SCR密度2013年5.0只/km2（95% CI 2.3–7.8）、2014年5.1只/km2（3.1–7.2）；性比62（41–93）与65（45–94）雄/100雌；非空间CR密度平均高约60%",
+      "source_pages": [
+        1,
+        7,
+        9
+      ],
+      "verdict": "consistent_in_sample_author_check",
+      "note": "对应原PDF/引句仅做本例核对，非独立专家评价。"
+    },
+    {
+      "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+      "field": "limitations",
+      "value": "作者指出无法实证验证SCR估计的准确性，建议未来以已知种群（如圈养鹿群）比较；并建议非空间CR仅作粗略指数",
+      "source_pages": [
+        10,
+        10
+      ],
+      "verdict": "condition_omitted_review_required",
+      "note": "建议非空间CR仅作指数的原文条件为采样未连续覆盖整个分布区；AI值省略了条件，必须结合展开的原句。"
+    }
+  ],
+  "final_table": {
+    "question": "请逐篇用中文提取六个维度。每项归纳的全部事实和数字必须由所选原文片段编号完全支持；明确DNA样本数、独立个体数与种群估计量的区别，结果保留年份、单位和区间。依据不足则留空。",
+    "model": "deepseek-v4-flash",
+    "created_at": "2026-10-24T09:28:04.993801+00:00",
+    "fields": {
+      "subject": "研究对象",
+      "sample": "样本量与采样设计",
+      "method": "方法与指标",
+      "assumptions": "关键假设与适用条件",
+      "results": "主要结果",
+      "limitations": "作者指出的局限"
+    },
+    "rows": [
+      {
+        "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+        "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+        "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+        "cells": {
+          "subject": {
+            "status": "unverified",
+            "value": "",
+            "citations": [],
+            "validation_issue": "comparison_unsupported_number"
+          },
+          "sample": {
+            "status": "unverified",
+            "value": "",
+            "citations": [],
+            "validation_issue": "comparison_unsupported_number"
+          },
+          "method": {
+            "status": "unverified",
+            "value": "",
+            "citations": [],
+            "validation_issue": "comparison_unsupported_number"
+          },
+          "assumptions": {
+            "status": "supported",
+            "value": "假设种群在约2周采样期内闭合，将两次采样合并为各单元遇率；活动中心位置先验与亚单元面积成正比；未捕获个体性别视为潜变量",
+            "citations": [
+              {
+                "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                "physical_page": 6,
+                "excerpt": "h of the 78 sample subunits in a subjectively systematic fashion, as described above. We developed a model in which each of these 78 subunits is regarded as a potential encounter location (effective “traps”), the location of which is character- ized by its centroid. Thus, we constructed spatial encounter histories by associating each encounter observation with one of the 78 sample subunits. We assumed the population was closed over the 2 week sample period and pooled the two samples into a single plot-specific encounter frequency for each individual, say yij for individual i and plot j. For numerical rea- sons, we standardized the metric coordinates by dividing them by 5000. Individuals may be captured an arbitrary number of times in each sample subunit and so, unlike in traditional capture-recapture studies, the observations in this case are counts with no natural upper-bound. As such, we develop models based on the assumption that yij has a Pois- son distribution with mean λij, which",
+                "rects": []
+              },
+              {
+                "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                "physical_page": 6,
+                "excerpt": "8 sample subunits (i.e., the centroids) in proportion to the surface of the sample unit. Because sample subunits have variable surfaces, we assumed that the prior density of activity centers was in proportion to the surface of each subunit. In the model, this was parameterized by assuming that si is a categorical random variable: si~Categoricalðp1. . .p78Þ where: X pj ¼ expðAj= AjÞ j is the probability of si occurring in subunit j. Thus, the prior for the distribution of the locations of the individual home-range centers was proportional to the size of each area, Aj. Our basic model embodies the assumption that the encounter frequency of individual i in survey subunit j is proportional to the distance between the centroid of the subunit and the activity center. In particular, the logarithm of the expected frequency for the subunit, in which individual i has its home range center, is precisely β0. In our analysis we allowed the parameters β0 and β1 to be sex-specific. Because sex is uno",
+                "rects": []
+              },
+              {
+                "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                "physical_page": 6,
+                "excerpt": "ch individual i has its home range center, is precisely β0. In our analysis we allowed the parameters β0 and β1 to be sex-specific. Because sex is unobserved for individuals that were not captured, we regarded sex as a latent variable with a population proportion to be estimated. Similarly, four individuals could not be sexed. Bayesian analysis excels at doing calculations with latent PLOS ONE | DOI:10.1371/journal.pone.0129020 June 18, 2015 6 / 16",
+                "rects": []
+              }
+            ],
+            "validation_issue": null
+          },
+          "results": {
+            "status": "supported",
+            "value": "SCR估计总种群137.3只（后验sd 4.2，95% CRI 130–147），雄79.6只（77–83）、雌57.7只（51–67），性比0.58（0.54–0.61）；雄检出率97%、雌80%",
+            "citations": [
+              {
+                "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                "physical_page": 1,
+                "excerpt": "ndi- Citation: Mollet P, Kéry M, Gardner B, Pasinelli G, Royle JA (2015) Estimating Population Size for vidually identify birds. We estimated sex-dependent detection probabilities and population Capercaillie (Tetrao urogallus L.) with Spatial size using a modern spatial capture-recapture (SCR) model for the data from pooled sur- Capture-Recapture Models Based on Genotypes veys. A total of 127 capercaillie genotypes were identified (77 males, 46 females, and 4 of from One Field Sample. PLoS ONE 10(6): e0129020. unknown sex). The SCR model yielded atotal population size estimate (posterior mean) ofdoi:10.1371/journal.pone.0129020 137.3 capercaillies (posterior sd 4.2, 95% CRI 130–147). The observed sex ratio was Academic Editor: Rob Slotow, University of skewed towards males (0.63). The posterior mean of the sex ratio under the SCR modelKwaZulu-Natal, SOUTH AFRICA was 0.58 (posterior sd 0.02, 95% CRI 0.54–0.61), suggesting a male-biased sex ratio in our Received: July 15, 2014 study area",
+                "rects": []
+              },
+              {
+                "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                "physical_page": 8,
+                "excerpt": "io A total of 127 capercaillies were identified: 77 males, 46 females and 4 of unknown sex. Fitting the traditional (non-spatial) CMR model M0 to the raw detection data the estimate of total population size (posterior mean) was 137.0 (posterior sd 4.5, 95% CRI 130–147). On fitting the spatial capture-recapture model (see posterior summaries in Table 2), we estimate a total popu- lation size (posterior mean) in the study area of 137.3 capercaillies (posterior sd 4.2, 95% CRI 130–147, Fig 3a). Population size was largest in fragments 5 and 4 respectively (Fig 4). The number of males was estimated at 79.6 (posterior sd 1.6, 95% CRI 77–83; Fig 3b) and that of females at 57.7 (posterior sd 4.1, 95% CRI 51–67; Fig 3c). Based on our model, 97% of all males were detected at least once (77/79.6), but only 80% of females (46/57.7) were ever detected. Accordingly, there was much more uncertainty in the population size estimate of females. The observed adult sex ratio in our sample was male-skewed",
+                "rects": []
+              },
+              {
+                "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                "physical_page": 8,
+                "excerpt": "d. Accordingly, there was much more uncertainty in the population size estimate of females. The observed adult sex ratio in our sample was male-skewed (62.6% males observed). The estimated population sex ratio (posterior mean and sd) was 0.58 (0.02, 95% CRI 0.54– 0.61), slightly lower than observed due to the apparent sex difference in encounter rate (see below). That the posterior distribution did not overlap 0.5 (Fig 3d) represents strong evidence for a male-biased sex ratio in this population. PLOS ONE | DOI:10.1371/journal.pone.0129020 June 18, 2015 8 / 16",
+                "rects": []
+              }
+            ],
+            "validation_issue": null
+          },
+          "limitations": {
+            "status": "supported",
+            "value": "基因分析成本仍较高；作者指出需更多年份数据以确认偏雄的性别比，因为性比可能有明显时间变化",
+            "citations": [
+              {
+                "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                "physical_page": 12,
+                "excerpt": "to confirm the male-biased sex ratio, because sex ratios may show considerable temporal variation (e.g. [53]). 4.2 Simulation study to investigate effects of reduced sample size The main disadvantages of the method developed in our study are the still considerable costs of the genetic analyses that might prevent the approach's regular application. However, our dilu- tion simulation suggested that field and lab efforts might be reduced by up to 25%, yielding a sample only 75% of the size of our actual data set (n = 466 droppings), and estimates of total population size and of sex ratio that still appeared sufficiently accurate to us would still have resulted. This result could not have been anticipated without collecting and analyzing a high number of droppings, but may suggest considerable savings of time and money for repeated inventories of this or similar populations 4.3 The statistical model and possible extensions One advantage of our model as implemented in the Bayesian framework",
+                "rects": []
+              },
+              {
+                "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                "physical_page": 12,
+                "excerpt": "sampling at a substantially increased intensity. Donald [49] found an increase in adult sex ratio skew towards males with IUCN threat sta- tus categories. Our findings are in line with this general relationship, as capercaillie is consid- ered endangered in Switzerland [50]. In NW Spain, too, Morán et al. [51] found such a sex ratio skewed towards males in a highly endangered population of the subspecies T.u. cantabri- cus. However, the mechanisms underlying this relationship are not clear. Regardless of the mechanism, the male-skewed sex ratio found in our study could be critical because theoretical models suggest that in polygynous species, as for example in the capercaillie, extinction risk is lowest when the adult sex ratio is female-skewed [52]. We acknowledge, however, that data from additional years are needed from our population to confirm the male-biased sex ratio, because sex ratios may show considerable temporal variation (e.g. [53]). 4.2 Simulation study to investigate eff",
+                "rects": []
+              }
+            ],
+            "validation_issue": null
+          }
+        }
+      },
+      {
+        "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+        "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+        "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+        "cells": {
+          "subject": {
+            "status": "supported",
+            "value": "美国加州内华达山脉中部太平洋鹿群的骡鹿（Odocoileus hemionus，含加州骡鹿与哥伦比亚黑尾鹿）夏季分布区",
+            "citations": [
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 2,
+                "excerpt": "integrated framework for modeling density composed of California mule and Columbian black-tailed as a function of spatial and habitat variables (Royle et al. deer (mule deer). The population’s winter and summer 2013, Efford and Fewster 2013), which facilitates inferences ranges covered approximately 1,000 km2 in El Dorado about wildlife-habitat relationships and the extrapolation of County, California and a southern portion of Placer County, models to obtain estimates of density beyond the sampling California (Hinz et al. 1981). The winter range was located sites; the latter advantage is especially important when in the foothills west of the summer range at 600–1,500 m in density is highly heterogeneous. elevation. In the summer, individuals migrated up-slope to Our objectives were to apply SCR methods to population- between 1,600 m and 2,500 m in elevation where meadows wide deer abundance estimation using noninvasive genetic containing grasses and forbs provided important forage. sam",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 2,
+                "excerpt": ",500 m in elevation where meadows wide deer abundance estimation using noninvasive genetic containing grasses and forbs provided important forage. sampling, and to compare these estimates to those from non- Our study area encompassed only the summer range of the spatial CR. We conducted this study on the summer range of Paciﬁc deer herd. Although we refer herein to the migratory the Paciﬁc deer herd, a partially migratory mule deer (O. h. portion of the population as the population, we note that the 2 The Journal of Wildlife Management 9999()",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 1,
+                "excerpt": "or deer (Odocoileus spp.), the use of closed-population, capture- recapture (CR) methods, in conjunction with noninvasive DNA sampling, has become increasingly practical, but, up to now, these methods have been used in a non-spatial modeling framework, which has limited their utility for population-level inferences. In particular, extrapolation of plot-level CR abundance estimates to the population required the use of multipliers of unknown reliability and potential bias. Spatially explicit capture-recapture (SCR) models provide an integrated framework for directly estimating density as a function of spatial and habitat variables at landscape scales. We used fecal DNA samples in conjunction with SCR to estimate density, sex ratio, and habitat correlates to density for a mule deer (O. hemionus) population across a large ( 500 km2) area in the central Sierra Nevada Range, California, USA during 2013 and 2014. We surveyed 24 random transects within 4 30-km2 sites representative of the stu",
+                "rects": []
+              }
+            ],
+            "validation_issue": null
+          },
+          "sample": {
+            "status": "supported",
+            "value": "2013–2014年在4个30 km2站点、共24条随机样带采集粪便；收集883份，411份在8个以上位点成功基因分型，鉴定209个个体（85雄、124雌）",
+            "citations": [
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 1,
+                "excerpt": "or deer (Odocoileus spp.), the use of closed-population, capture- recapture (CR) methods, in conjunction with noninvasive DNA sampling, has become increasingly practical, but, up to now, these methods have been used in a non-spatial modeling framework, which has limited their utility for population-level inferences. In particular, extrapolation of plot-level CR abundance estimates to the population required the use of multipliers of unknown reliability and potential bias. Spatially explicit capture-recapture (SCR) models provide an integrated framework for directly estimating density as a function of spatial and habitat variables at landscape scales. We used fecal DNA samples in conjunction with SCR to estimate density, sex ratio, and habitat correlates to density for a mule deer (O. hemionus) population across a large ( 500 km2) area in the central Sierra Nevada Range, California, USA during 2013 and 2014. We surveyed 24 random transects within 4 30-km2 sites representative of the stu",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 6,
+                "excerpt": "Table 1. Numbers of deer pellet samples collected, samples successfully genotyped (i.e., at 8 loci), individuals identified, individual males, individual females, and recaptures (recap) used in non-spatial capture-recapture (CR) and spatially explicit capture-recapture (SCR) analyses during summers 2013 and 2014 in El Dorado County, California, USA. Year No. samples No. genotypes No. individuals No. M No. F No. SCR recapa No. CR recapa 2013 477 158 107 41 66 51 27 2014 406 253 134b 53b 81b 119 74 Total 883 411 209c 85c 124c 170 101 a Recaptures refer to number of samples representing recaptures (i.e., not no. individuals recaptured). Larger numbers of SCR than CR recaptures are due to multiple captures of an individual in one sampling occasion, which we used separately in SCR but collapsed into a single capture event in CR. b Number of individuals identiﬁed in 2014 include 32 of the individuals (9 M, 23 F) initially sampled in 2013. c Numbers of individuals reﬂect actual numbers of ind",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 6,
+                "excerpt": "dividuals identiﬁed in 2014 include 32 of the individuals (9 M, 23 F) initially sampled in 2013. c Numbers of individuals reﬂect actual numbers of individuals sampled (i.e., we did not double count them if we sampled them in both years). where bN i represented the estimated number of deer on Based on these parameters and the polymorphism contained transect i and bAi represented the effective sampling area of in the data set, allelematch identiﬁed 4 allele mismatches as that transect. We assumed the effective sampling area, bAi, the optimal number to allow for 2 genotypes to be assigned to was the same for all transects, i, and estimated it as the actual the same individual. Using this criterion ( 4 allele sampling area (i.e., 1,200 m 2 m ¼ 2,400 m2) plus a buffer mismatches), we identiﬁed 209 unique individuals from strip equal in width to the average of the maximum distances the 411 successfully genotyped samples. between sampling locations of each individual (i.e., the We estimated t",
+                "rects": []
+              }
+            ],
+            "validation_issue": null
+          },
+          "method": {
+            "status": "supported",
+            "value": "用10个微卫星位点与Y染色体性别标记分型，SCR模型（SECR程序，指数衰减、样带每200 m计数探测器）估计密度与性比，并与用MMRD的非空间CR比较",
+            "citations": [
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 4,
+                "excerpt": "iently concentrated DNA samples. We geno- siblings (PIDSibs; the probability of 2 sibling genotypes typed 10 microsatellite markers and a sex-typing marker matching) for each locus and for the entire multi-locus assay from a highly conserved portion of the Y chromosome and (Paetkau and Strobeck 1994, Waits et al. 2001). used an ABI 3730 (Applied Biosystems, Grand Island, NY, We calculated sex ratio directly from the genotypes (i.e., M: USA) and internal size standards (500-LIZ; Applied F). We estimated the 95% conﬁdence limits for this ratio by Biosystems) for electrophoresis, with alleles scored manually ﬁrst calculating proportions (p) of samples that were male, using electropherograms visualized in Program STRand estimating 95% conﬁdence limits for these proportions based (version 2.4.89; Toonen and Hughes 2001). We attempted on Zar’s (1999) method using the relationship between the F to genotype each DNA sample in 2 independent and binomial distributions, and then transforming thes",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 4,
+                "excerpt": "ulti- (AICc; Hurvich and Tsai 1989) for null models using locus genotypes from the consensus genotypes, we used the exponential and half-normal distributions. allelematch package in R, which uses a dissimilarity matrix We input sampling transects as a series of count detectors from pairwise comparisons among multi-locus genotypes to spaced every 200 m along each transect. This type of detector 4 The Journal of Wildlife Management 9999()",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 5,
+                "excerpt": "re with results from SCR, we estimated abundance used the data from both years for analyses but allowed g0 and ^D to vary by sampling year. To reduce the number of using traditional, non-spatial CR. Because only 1 capture per individual can be considered in a particular sampling occasion parameters, we kept s constant between years, assuming that (a limitation of the standard CR approach), we collapsed the scale of movement was the same in both years. multiple captures of the same individual within a sampling To test for heterogeneous density across the sampling area occasion into a single capture event. We used Huggins closed and explore deer-habitat relationships, we considered the capture models in Program MARK (Huggins 1989, White inﬂuence of variables that previous studies have shown and Burnham 1999) to estimate abundance at each transect. inﬂuence space use by deer (Johnson et al. 2000, Stewart et al. We selected ﬁnal models based on AICc (Burnham and2002, Marshal et al. 2006, L",
+                "rects": []
+              }
+            ],
+            "validation_issue": null
+          },
+          "assumptions": {
+            "status": "supported",
+            "value": "SCR与CR模型均假设种群闭合；2013年全部4次采样检验拒绝闭合，故仅用第2–4次，2014年未拒绝闭合",
+            "citations": [
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 4,
+                "excerpt": "(1999) method using the relationship between the F to genotype each DNA sample in 2 independent and binomial distributions, and then transforming these polymerase chain reactions (PCRs). We conducted all conﬁdence limits to ratios (i.e., p/[1 p]; Lounsberry et al. PCR sets with 2 negative PCR controls to detect potential 2015). contamination. For each sample, we built consensus genotypes from all Spatial Capture-Recapture Analysis replicate genotypes ( 4). To reduce error owing to allelic Both SCR and closed population CR models assume that dropout from low quality fecal DNA samples, we excluded populations are closed (i.e., no births, deaths, immigration, or samples with <8 successfully ampliﬁed microsatellite loci emigration).To testforsigniﬁcantviolations ofthepopulation (Lounsberry et al. 2015). We estimated the genotyping error closure assumption, we used the Stanley–Burnham test for rate attributed to allelic dropout as the average across closure (Stanley and Burnham 1999), using",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 7,
+                "excerpt": "approximately 2 (range ¼ 1–13) captures/individual. The sex with CWHR, and negatively correlated with slope. The ratio estimated directly from genotyped individuals across the homogeneous density models that varied the sex ratio (i.e., study area was 62 (95% CI ¼ 41–93) males/100 females in pmix) by year and g0 by sex were also highly supported. 2013 and 65 (95% CI ¼ 45–94) males/100 females in 2014. We projected the model-averaged estimates of density onto the entire study area in both years, enabling estimation of theSpatial Capture-Recapture Estimates number of deer in the summer-range population (Fig. 3).In 2013, we rejected the assumption of population closure We estimated density of the study area at ^D ¼ 5.0 (95%based on the Stanley–Burnham test applied to all 4 sampling 5.1 (95% CI ¼ 3.1–occasions (x24 ¼ 18.14, P ¼ 0.001). The analysis using only CI ¼ 2.3–7.8) deer/km2 in 2013 and ^D ¼ 7.2) deer/km2 in 2014. Corresponding ^N estimates for theoccasions 1–3 also exhibited signiﬁc",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 7,
+                "excerpt": "lysis using only CI ¼ 2.3–7.8) deer/km2 in 2013 and ^D ¼ 7.2) deer/km2 in 2014. Corresponding ^N estimates for theoccasions 1–3 also exhibited signiﬁcant violations of closure entire 512-km2 study area were 2,573 (95% CI ¼ 1,167–(x22 ¼ 7.36, P ¼ 0.025), but the analysis based on occasions 3978) deer in 2013 and 2,626 (95% CI ¼ 1,573–3,679) deer2–4 did not (x22 ¼ 3.34, P ¼ 0.189). Therefore, we used in 2014. The precision of these annual estimates wasoccasions 2–4 for all SCR and CR analyses of 2013 data. In expressed in terms of the coefﬁcient of variation in 20132014, the assumption of population closure was not rejected (CV ¼ 0.28) and 2014 (CV ¼ 0.20).based on the Stanley–Burnham test (x22 ¼ 1.26, P ¼ 0.53). Modeled without covariates, the exponential decay Capture-Recapture Estimates function was more highly supported than the half-normal In 2013, the models that were well supported were the null function (DAICc ¼ 19.44); therefore, we used it in all (M0) model and the model that v",
+                "rects": []
+              }
+            ],
+            "validation_issue": null
+          },
+          "results": {
+            "status": "supported",
+            "value": "SCR密度2013年5.0只/km2（95% CI 2.3–7.8）、2014年5.1只/km2（3.1–7.2）；性比62（41–93）与65（45–94）雄/100雌；非空间CR密度平均高约60%",
+            "citations": [
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 1,
+                "excerpt": "the central Sierra Nevada Range, California, USA during 2013 and 2014. We surveyed 24 random transects within 4 30-km2 sites representative of the study area. Based on 411 samples genotyped at a sex marker and 8–10 microsatellite loci, the sex-ratio for the study area was 62 (95% CI ¼ 41–93) males/100 females in 2013 and 65 (95% CI ¼ 45–94) males/100 females in 2014. Using SCR, we estimated density at 5.0 (95% CI ¼ 2.3–7.8) deer/km2 in 2013 and 5.1 (95% CI ¼ 3.1–7.2) deer/km2 in 2014. In comparison, non-spatial CR analysis produced density estimates on average 60% higher, likely reﬂecting bias resulting from use of the commonly employed mean maximum recapture distance (MMRD) to estimate effective sampling area. The SCR models indicated that density was effectively homogeneous throughout the study area, with no strong relationship to habitat correlates. Altogether, these results demonstrate the utility of noninvasive fecal DNA methods in a SCR framework for estimation of abundance and d",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 7,
+                "excerpt": "approximately 2 (range ¼ 1–13) captures/individual. The sex with CWHR, and negatively correlated with slope. The ratio estimated directly from genotyped individuals across the homogeneous density models that varied the sex ratio (i.e., study area was 62 (95% CI ¼ 41–93) males/100 females in pmix) by year and g0 by sex were also highly supported. 2013 and 65 (95% CI ¼ 45–94) males/100 females in 2014. We projected the model-averaged estimates of density onto the entire study area in both years, enabling estimation of theSpatial Capture-Recapture Estimates number of deer in the summer-range population (Fig. 3).In 2013, we rejected the assumption of population closure We estimated density of the study area at ^D ¼ 5.0 (95%based on the Stanley–Burnham test applied to all 4 sampling 5.1 (95% CI ¼ 3.1–occasions (x24 ¼ 18.14, P ¼ 0.001). The analysis using only CI ¼ 2.3–7.8) deer/km2 in 2013 and ^D ¼ 7.2) deer/km2 in 2014. Corresponding ^N estimates for theoccasions 1–3 also exhibited signiﬁc",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 9,
+                "excerpt": "violation of the The 2 primary analytical approaches employed here, SCR population-closure assumption, which was associated with and non-spatial CR, produced reasonably precise estimates the early-season sampling occasions, possibly reﬂecting of abundance and density. However, the arbitrary use of excessive births or migratory movements early in June. In MMRD was expected to underestimate effective sampling contrast, we found no signiﬁcant violations of the closure area and, therefore, overestimate density (Wilson and assumption for the latter-season runs in 2013 and all analyses Anderson 1985, Parmenter et al. 2003, Ivan et al. 2013). in 2014 (for which transect runs began later in the year). Our Correspondingly, we found that our CR density estimates ﬁndings suggest that sampling efforts were most likely to were on average approximately 60% higher than the SCR satisfy closure assumptions if begun in late June or early July estimates, implying that our per-transect MMRD-estimated Tabl",
+                "rects": []
+              }
+            ],
+            "validation_issue": null
+          },
+          "limitations": {
+            "status": "supported",
+            "value": "作者指出无法实证验证SCR估计的准确性，建议未来以已知种群（如圈养鹿群）比较；并建议非空间CR仅作粗略指数",
+            "citations": [
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 10,
+                "excerpt": "ovide estimates of abundance for deer populations that that we had no way of empirically verifying the accuracy of were sufﬁciently precise for most management purposes. The the SCR estimates. Future studies comparing results from utility of the SCR approach as part of regional monitoring SCR against known population abundance, for example in programs ultimately depends on cost, which currently can captive populations of deer, would therefore be useful for this range anywhere from $25,000 to $90,000 for a seasonal purpose. estimate, depending on the scale of the study (i.e., no. of The SCR approach provides an integrated framework for transects, sites, sampling occasions, and fecal samples habitat modeling, which can enhance the robustness of analyzed). For long-term monitoring purposes, SCR density and abundance estimates to environmental hetero- methods can be used at varying intervals, rather than every geneity and enable inferences about deer-habitat relation- year. Increasing the",
+                "rects": []
+              },
+              {
+                "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                "physical_page": 10,
+                "excerpt": "effective sampling area (0.91 km2) likewise needed to be 60% partially migratory, future studies should explore the larger (i.e., 1.5 km2) to arrive at density estimates similar to application of these methods across a population’s winter those from SCR. Therefore, we reiterate the recommenda- range, during the months when migrants and residents are tion by Lounsberry et al. (2015) that application of CR both present. estimates should be taken solely as approximate indices of MANAGEMENT IMPLICATIONSabundance when sampling is not continuous over the population range, and in such cases, recommend that SCR be Our ﬁndings demonstrated that noninvasive fecal DNA- applied to obtain relatively unbiased estimates of density based methods and SCR could be applied over a large region (Efford and Fewster 2013). An important caveat, however, is to provide estimates of abundance for deer populations that that we had no way of empirically verifying the accuracy of were sufﬁciently precise for most m",
+                "rects": []
+              }
+            ],
+            "validation_issue": null
+          }
+        }
+      }
+    ],
+    "coverage": {
+      "reading_mode": "full_text",
+      "coverage": [
+        {
+          "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+          "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+          "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+          "parse_run_id": "4306bd08-7b12-40af-964c-03e3b2549af8",
+          "total_pages": 16,
+          "supplied_pages": 16,
+          "text_characters": 53833
+        },
+        {
+          "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+          "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+          "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+          "parse_run_id": "8b6149bc-0168-4935-8585-5e3ac7bfb7f5",
+          "total_pages": 12,
+          "supplied_pages": 12,
+          "text_characters": 62385
+        }
+      ],
+      "source_versions": {
+        "df6a5fc9-f014-4eb8-a033-f70e0c42c781": "f56daf13625618db6777173b39f27a4abfdf29176b93120d3bf38eb08df2d1a6",
+        "83dcd8b0-fea6-41aa-8959-288a2b7808ed": "75eb9875d2a0e4ecb303f2fb4f32b5a562c02e692386b1bbec47d6e3d3fb3306"
+      },
+      "request_bytes": 167663,
+      "max_request_bytes": 262144,
+      "text_only": true,
+      "cache_status": "miss",
+      "api_call_required": true,
+      "context_kind": "full_text",
+      "analysis_count": 0,
+      "cached_at": null,
+      "plan_id": "fe3c54d61d7ff1acbe746753c2fb6fe29c3e1547ca8ac2347b817ee809cd9c4b",
+      "source_modes": {
+        "df6a5fc9-f014-4eb8-a033-f70e0c42c781": "full_text",
+        "83dcd8b0-fea6-41aa-8959-288a2b7808ed": "full_text"
+      },
+      "evidence_pages": 0,
+      "estimated_upper_cny": "0.385374",
+      "max_output_tokens": 6000,
+      "pricing_basis": "2026-10-24官网高峰单价上限估算，含输入字节与输出上限；非账单实扣。",
+      "fields": {
+        "subject": "研究对象",
+        "sample": "样本量与采样设计",
+        "method": "方法与指标",
+        "assumptions": "关键假设与适用条件",
+        "results": "主要结果",
+        "limitations": "作者指出的局限"
+      }
+    },
+    "cache_saved": true,
+    "source_versions": {
+      "df6a5fc9-f014-4eb8-a033-f70e0c42c781": "f56daf13625618db6777173b39f27a4abfdf29176b93120d3bf38eb08df2d1a6",
+      "83dcd8b0-fea6-41aa-8959-288a2b7808ed": "75eb9875d2a0e4ecb303f2fb4f32b5a562c02e692386b1bbec47d6e3d3fb3306"
+    },
+    "text_only": true,
+    "verified_cells": 9,
+    "unverified_cells": 3
+  },
+  "raw_model_response1": {
+    "id": "f181b6e3-eb99-4ab2-a8c5-e59a0c527d2f",
+    "object": "chat.completion",
+    "created": 1792833450,
+    "model": "deepseek-flash",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"cells\":[{\"document\":\"d1\",\"field\":\"subject\",\"status\":\"supported\",\"value\":\"濒危且隐蔽的森林松鸡——松鸡（Tetrao urogallus），瑞士中东部研究区8个林地块。\",\"evidence\":[{\"ref\":\"[d1 p1]\",\"quote\":\"We conducted a survey of an endangered and cryptic forest grouse, the capercaillie Tetrao urogallus, based on droppings collected on two sampling occasions in eight forest fragments in central Switzerland in early spring 2009.\"}]},{\"document\":\"d1\",\"field\":\"sample\",\"status\":\"supported\",\"value\":\"2009年早春两次采样；586份粪便分析，466份属松鸡并保留；共识别127只个体（77雄、46雌、4未知性别）；实际466次检测/127只。\",\"evidence\":[{\"ref\":\"[d1 p7]\",\"quote\":\"In total, 586 droppings were analyzed, of which 69 could not be genotyped, either because DNA could not be extracted or because of poor amplification of several loci in the PCR; of the remaining droppings, 51 were determined to belong to black grouse (Tetrao tetrix). This left us with 466 capercaillie droppings to be used in subsequent analyses.\"}]},{\"document\":\"d1\",\"field\":\"method\",\"status\":\"supported\",\"value\":\"非损伤粪便基因分型（微卫星+CHD性别鉴定），用空间捕获-再捕获（SCR）模型，以78个亚单元质心为“陷阱”，估计性别与片段特异种群量及性比；另拟合非空间M0作比较。\",\"evidence\":[{\"ref\":\"[d1 p6]\",\"quote\":\"We developed a model in which each of these 78 subunits is regarded as a potential encounter location (effective “traps”), the location of which is characterized by its centroid.\"}]},{\"document\":\"d1\",\"field\":\"assumptions\",\"status\":\"supported\",\"value\":\"假设2周采样期内种群封闭，并将两次采样合并为每个体的样地遭遇频数。\",\"evidence\":[{\"ref\":\"[d1 p6]\",\"quote\":\"We assumed the population was closed over the 2 week sample period and pooled the two samples into a single plot-specific encounter frequency for each individual, say yij for individual i and plot j.\"}]},{\"document\":\"d1\",\"field\":\"results\",\"status\":\"supported\",\"value\":\"SCR估计总种群量后验均值137.3只（sd 4.2，95% CRI 130–147）；雄79.6只、雌57.7只；估计性比0.58（0.54–0.61），雄性偏倚；非空间M0估计137.0。\",\"evidence\":[{\"ref\":\"[d1 p8]\",\"quote\":\"On fitting the spatial capture-recapture model (see posterior summaries in Table 2), we estimate a total popu- lation size (posterior mean) in the study area of 137.3 capercaillies (posterior sd 4.2, 95% CRI 130–147, Fig 3a).\"}]},{\"document\":\"d1\",\"field\":\"limitations\",\"status\":\"supported\",\"value\":\"作者指出遗传分析成本仍相当高；并承认需更多年份数据确认雄性偏倚性比，因性比可能有明显时间变异。\",\"evidence\":[{\"ref\":\"[d1 p12]\",\"quote\":\"We acknowledge, however, that data from additional years are needed from our population to confirm the male-biased sex ratio, because sex ratios may show considerable temporal variation\"}]},{\"document\":\"d2\",\"field\":\"subject\",\"status\":\"supported\",\"value\":\"美国加州内华达山脉中部太平洋鹿群的骡鹿（Odocoileus hemionus）夏季分布区，研究区512 km²。\",\"evidence\":[{\"ref\":\"[d2 p2]\",\"quote\":\"The study area covered 512 km2 and was located on the western slopes of the central Sierra Nevada\"}]},{\"document\":\"d2\",\"field\":\"sample\",\"status\":\"supported\",\"value\":\"2013与2014年夏季在4个30 km²站点、24条样带采集粪便；883份样本，411份成功基因分型（≥8位点），识别209只个体（85雄、124雌）；2014年含32只2013年已采样个体。\",\"evidence\":[{\"ref\":\"[d2 p6]\",\"quote\":\"We collected 883 samples, including 477 pellet groups in 2013 and 406 in 2014 (Table 1). After eliminating samples with <8 (out of 10) ampliﬁed loci 411 samples remained for analyses\"}]},{\"document\":\"d2\",\"field\":\"method\",\"status\":\"supported\",\"value\":\"粪便DNA微卫星分型与性别标记；SCR（SECR，极大似然，指数衰减、计数探测器）直接估计密度，并以栖息地协变量建模；另用非空间Huggins CR（MMRD缓冲）比较。\",\"evidence\":[{\"ref\":\"[d2 p4]\",\"quote\":\"We estimated deer density using SECR, an R program that applies maximum likelihood estimators to SCR analyses (Efford et al. 2005, 2009).\"}]},{\"document\":\"d2\",\"field\":\"assumptions\",\"status\":\"supported\",\"value\":\"SCR与闭群CR均假设种群封闭（无出生、死亡、迁入迁出）；作者用Stanley–Burnham检验并因2013年违反封闭而仅用第2–4次采样。\",\"evidence\":[{\"ref\":\"[d2 p4]\",\"quote\":\"Both SCR and closed population CR models assume that populations are closed (i.e., no births, deaths, immigration, or emigration).\"}]},{\"document\":\"d2\",\"field\":\"results\",\"status\":\"supported\",\"value\":\"SCR密度2013年5.0只/km²（95% CI 2.3–7.8），2014年5.1只/km²（3.1–7.2）；性比2013年62雄/100雌（41–93），2014年65（45–94）；非空间CR密度平均高约60%。\",\"evidence\":[{\"ref\":\"[d2 p1]\",\"quote\":\"Using SCR, we estimated density at 5.0 (95% CI ¼ 2.3–7.8) deer/km2 in 2013 and 5.1 (95% CI ¼ 3.1–7.2) deer/km2 in 2014.\"}]},{\"document\":\"d2\",\"field\":\"limitations\",\"status\":\"supported\",\"value\":\"作者指出无法实证验证SCR估计的准确性，建议未来在圈养鹿群等已知种群量条件下比较；并提及粪便DNA-SCR成本约25,000–90,000美元/季节。\",\"evidence\":[{\"ref\":\"[d2 p10]\",\"quote\":\"An important caveat, however, is that we had no way of empirically verifying the accuracy of the SCR estimates. Future studies comparing results from SCR against known population abundance, for example in captive populations of deer, would therefore be useful for this purpose.\"}]}]}"
+        },
+        "logprobs": null,
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 30528,
+      "completion_tokens": 1506,
+      "total_tokens": 32034,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 30528
+    },
+    "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501"
+  },
+  "raw_model_response2": {
+    "id": "9106397d-5871-4f1b-83a3-16038c8a13b4",
+    "object": "chat.completion",
+    "created": 1792833783,
+    "model": "deepseek-flash",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"cells\":[{\"document\":\"d1\",\"field\":\"subject\",\"status\":\"supported\",\"value\":\"瑞士中东部森林中濒危、隐蔽的松鸡（Tetrao urogallus），研究区含8个彼此相距2–6 km的森林片段，松鸡分布面积1,769 ha\",\"evidence\":[\"d1p1s1\",\"d1p2s2\",\"d1p3s1\"]},{\"document\":\"d1\",\"field\":\"sample\",\"status\":\"supported\",\"value\":\"2009年早春在8个森林片段做2次采样，44个单元中39个被调查；分析586份粪便，466份属松鸡，鉴定出127个基因型（77雄、46雌、4未知性别），共466次检出\",\"evidence\":[\"d1p1s1\",\"d1p4s3\",\"d1p7s4\",\"d1p8s3\"]},{\"document\":\"d1\",\"field\":\"method\",\"status\":\"supported\",\"value\":\"用12个微卫星位点（后保留9个）与CHD基因性别鉴定，基于78个亚单元作为“陷阱”的贝叶斯空间捕获-重捕获（SCR）模型，并与非空间M0模型比较\",\"evidence\":[\"d1p5s1\",\"d1p6s2\",\"d1p7s1\"]},{\"document\":\"d1\",\"field\":\"assumptions\",\"status\":\"supported\",\"value\":\"假设种群在约2周采样期内闭合，将两次采样合并为各单元遇率；活动中心位置先验与亚单元面积成正比；未捕获个体性别视为潜变量\",\"evidence\":[\"d1p6s2\",\"d1p6s4\",\"d1p6s5\"]},{\"document\":\"d1\",\"field\":\"results\",\"status\":\"supported\",\"value\":\"SCR估计总种群137.3只（后验sd 4.2，95% CRI 130–147），雄79.6只（77–83）、雌57.7只（51–67），性比0.58（0.54–0.61）；雄检出率97%、雌80%\",\"evidence\":[\"d1p1s2\",\"d1p8s4\",\"d1p8s5\"]},{\"document\":\"d1\",\"field\":\"limitations\",\"status\":\"supported\",\"value\":\"基因分析成本仍较高；作者指出需更多年份数据以确认偏雄的性别比，因为性比可能有明显时间变化\",\"evidence\":[\"d1p12s3\",\"d1p12s2\"]},{\"document\":\"d2\",\"field\":\"subject\",\"status\":\"supported\",\"value\":\"美国加州内华达山脉中部太平洋鹿群的骡鹿（Odocoileus hemionus，含加州骡鹿与哥伦比亚黑尾鹿）夏季分布区\",\"evidence\":[\"d2p2s7\",\"d2p2s8\",\"d2p1s2\"]},{\"document\":\"d2\",\"field\":\"sample\",\"status\":\"supported\",\"value\":\"2013–2014年在4个30 km2站点、共24条随机样带采集粪便；收集883份，411份在8个以上位点成功基因分型，鉴定209个个体（85雄、124雌）\",\"evidence\":[\"d2p1s2\",\"d2p6s1\",\"d2p6s2\"]},{\"document\":\"d2\",\"field\":\"method\",\"status\":\"supported\",\"value\":\"用10个微卫星位点与Y染色体性别标记分型，SCR模型（SECR程序，指数衰减、样带每200 m计数探测器）估计密度与性比，并与用MMRD的非空间CR比较\",\"evidence\":[\"d2p4s3\",\"d2p4s8\",\"d2p5s3\"]},{\"document\":\"d2\",\"field\":\"assumptions\",\"status\":\"supported\",\"value\":\"SCR与CR模型均假设种群闭合；2013年全部4次采样检验拒绝闭合，故仅用第2–4次，2014年未拒绝闭合\",\"evidence\":[\"d2p4s4\",\"d2p7s1\",\"d2p7s2\"]},{\"document\":\"d2\",\"field\":\"results\",\"status\":\"supported\",\"value\":\"SCR密度2013年5.0只/km2（95% CI 2.3–7.8）、2014年5.1只/km2（3.1–7.2）；性比62（41–93）与65（45–94）雄/100雌；非空间CR密度平均高约60%\",\"evidence\":[\"d2p1s3\",\"d2p7s1\",\"d2p9s2\"]},{\"document\":\"d2\",\"field\":\"limitations\",\"status\":\"supported\",\"value\":\"作者指出无法实证验证SCR估计的准确性，建议未来以已知种群（如圈养鹿群）比较；并建议非空间CR仅作粗略指数\",\"evidence\":[\"d2p10s2\",\"d2p10s1\"]}]}"
+        },
+        "logprobs": null,
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 42963,
+      "completion_tokens": 1049,
+      "total_tokens": 44012,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 42963
+    },
+    "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501"
+  },
+  "source_excerpts_for_response2": {
+    "d1p1s1": {
+      "id": "d1p1s1",
+      "ref": "[d1 p1]",
+      "text": "RESEARCH ARTICLE Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture- Recapture Models Based on Genotypes from One Field Sample Pierre Mollet1*, Marc Kéry1, Beth Gardner2, Gilberto Pasinelli1, J. Andrew Royle3 1 Swiss Ornithological Institute, Seerose 1, CH-6204, Sempach, Switzerland, 2 North Carolina State University, Raleigh, North Carolina, 27695, United States of America, 3 U. S. Geological Survey, Patuxent Wildlife Research Center, Laurel, Maryland, 20708, United States of America a11111 * pierre.mollet@vogelwarte.ch Abstract We conducted a survey of an endangered and cryptic forest grouse, the capercaillie Tetrao OPEN ACCESS urogallus, based on droppings collected on two sampling occasions in eight forest frag- ments in central Switzerland in early spring 2009. We used genetic analyses to sex and indi- Citation: Mollet P, Kéry M, Gardner B, Pasinelli G, Royle JA (2015) Estimating Population Size for vidually identify birds. We estimated sex-depe",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p1s2": {
+      "id": "d1p1s2",
+      "ref": "[d1 p1]",
+      "text": "ndi- Citation: Mollet P, Kéry M, Gardner B, Pasinelli G, Royle JA (2015) Estimating Population Size for vidually identify birds. We estimated sex-dependent detection probabilities and population Capercaillie (Tetrao urogallus L.) with Spatial size using a modern spatial capture-recapture (SCR) model for the data from pooled sur- Capture-Recapture Models Based on Genotypes veys. A total of 127 capercaillie genotypes were identified (77 males, 46 females, and 4 of from One Field Sample. PLoS ONE 10(6): e0129020. unknown sex). The SCR model yielded atotal population size estimate (posterior mean) ofdoi:10.1371/journal.pone.0129020 137.3 capercaillies (posterior sd 4.2, 95% CRI 130–147). The observed sex ratio was Academic Editor: Rob Slotow, University of skewed towards males (0.63). The posterior mean of the sex ratio under the SCR modelKwaZulu-Natal, SOUTH AFRICA was 0.58 (posterior sd 0.02, 95% CRI 0.54–0.61), suggesting a male-biased sex ratio in our Received: July 15, 2014 study area",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p2s2": {
+      "id": "d1p2s2",
+      "ref": "[d1 p2]",
+      "text": "to capture-recapture models to jointly estimate the number and the locations of individuals’ activity centers in spatial capture-recapture (SCR) models [11,12,13,14]. These models show promise for improving inferences from sparse encounter his- tory data because they more fully utilize the encounter data compared to classical non-spatial models which typically produce encounter histories by collapsing over space. The capercaillie (Tetrao urogallus L.) is a rare and elusive species of great conservation con- cern in much of Europe. Reliable information about population status and trends of this species is very hard to obtain in a way that is not potentially harmful to relict populations of this extremely shy species. In Switzerland, capercaillie abundance has traditionally been estimated from lek-based counts of males, observations of the species away from leks and indirect evi- dence of presence such as droppings, tracks and feathers [15,16]. Based on the assumption of an even adult se",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p3s1": {
+      "id": "d1p3s1",
+      "ref": "[d1 p3]",
+      "text": "Capercaillie: Population Size Estimation with a Single Field Sample Fig 1. Geographical location of our study area (black rectangle) in Central-Eastern Switzerland. Dark shading shows the current capercaillie distribution range in Switzerland. doi:10.1371/journal.pone.0129020.g001 2009, more than 1,200 opportunistic observations of capercaillie have been made and regis- tered in databases of the Swiss Ornithological Institute and in data collections of local species experts. In the study area, the capercaillie inhabits eight spatially distinct fragments that are between 2 and 6 km from one another (Fig 2). Within each of these fragments, we defined the capercaillie distribution area considered in this study as follows: around all capercaillie obser- vations made between 1978 and 2009, we drew buffers of 500 m width in a GIS and dissolved their borders to create a single polygon. Single observation points whose 500 m-buffers did not interfere with the buffer of any other point were cons",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p4s3": {
+      "id": "d1p4s3",
+      "ref": "[d1 p4]",
+      "text": "sion, respec- tively, to ensure independent surveys. Five spatial units could not be sampled because of time constraints, resulting in a total of 39 units sampled. Detection probability of the dark-colored droppings is much higher on snow-covered than on snow-free surfaces. To standardize detec- tion probability as much as possible, fieldwork was carried out when the entire study site was still completely covered with snow. Access to fragment 6 (Fig 2) is possible only in late spring. Sampling there started on 20 April, and the three units in fragment 6 could be sampled only once, because rapid snow melting towards the end of April precluded repetition of sampling. To increase the spatial resolution of the analysis, the surveyed 39 units were divided up into two parts, each with approx. half of the area, resulting in 78 subunits to which each capercaillie detections were assigned. This division was done in the GIS-system, drawing a line by hand across every unit. PLOS ONE | DOI:10.1371",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p5s1": {
+      "id": "d1p5s1",
+      "ref": "[d1 p5]",
+      "text": "Capercaillie: Population Size Estimation with a Single Field Sample 2.2 DNA extraction and genotyping Extraction of DNA and genotyping of samples were done by Ecogenics GmbH in Zürich- Schlieren, Switzerland, following exactly the method described by Jacob et al. [24]. Ten nuclear microsatellite loci developed for the capercaillie [24,27] and two additional nuclear microsatellite loci, BG15 and BG18, developed for the black grouse (Tetrao tetrix L.; [28]) have been amplified. Details on forward and reverse primer sequences and repeat motifs are given in Jacob et al. [24]. The twelve microsatellite loci were amplified in four multiplex- PCRs, each containing three primer pairs differing in their fluorescent labeling dyes (FAM, HEX, NED; Applied Biosystems). A fragment of the chromo-helicase-DNA-binding (CHD) gene using the primer pair P2 and P8 of Griffiths et al. [29] was amplified to sex the individual. Loci that could not be scored after eight PCR replicates were coded as missing val",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p6s2": {
+      "id": "d1p6s2",
+      "ref": "[d1 p6]",
+      "text": "h of the 78 sample subunits in a subjectively systematic fashion, as described above. We developed a model in which each of these 78 subunits is regarded as a potential encounter location (effective “traps”), the location of which is character- ized by its centroid. Thus, we constructed spatial encounter histories by associating each encounter observation with one of the 78 sample subunits. We assumed the population was closed over the 2 week sample period and pooled the two samples into a single plot-specific encounter frequency for each individual, say yij for individual i and plot j. For numerical rea- sons, we standardized the metric coordinates by dividing them by 5000. Individuals may be captured an arbitrary number of times in each sample subunit and so, unlike in traditional capture-recapture studies, the observations in this case are counts with no natural upper-bound. As such, we develop models based on the assumption that yij has a Pois- son distribution with mean λij, which",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p6s4": {
+      "id": "d1p6s4",
+      "ref": "[d1 p6]",
+      "text": "8 sample subunits (i.e., the centroids) in proportion to the surface of the sample unit. Because sample subunits have variable surfaces, we assumed that the prior density of activity centers was in proportion to the surface of each subunit. In the model, this was parameterized by assuming that si is a categorical random variable: si~Categoricalðp1. . .p78Þ where: X pj ¼ expðAj= AjÞ j is the probability of si occurring in subunit j. Thus, the prior for the distribution of the locations of the individual home-range centers was proportional to the size of each area, Aj. Our basic model embodies the assumption that the encounter frequency of individual i in survey subunit j is proportional to the distance between the centroid of the subunit and the activity center. In particular, the logarithm of the expected frequency for the subunit, in which individual i has its home range center, is precisely β0. In our analysis we allowed the parameters β0 and β1 to be sex-specific. Because sex is uno",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p6s5": {
+      "id": "d1p6s5",
+      "ref": "[d1 p6]",
+      "text": "ch individual i has its home range center, is precisely β0. In our analysis we allowed the parameters β0 and β1 to be sex-specific. Because sex is unobserved for individuals that were not captured, we regarded sex as a latent variable with a population proportion to be estimated. Similarly, four individuals could not be sexed. Bayesian analysis excels at doing calculations with latent PLOS ONE | DOI:10.1371/journal.pone.0129020 June 18, 2015 6 / 16",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p7s1": {
+      "id": "d1p7s1",
+      "ref": "[d1 p7]",
+      "text": "Capercaillie: Population Size Estimation with a Single Field Sample variables. Hence, it was very easy to estimate unknown sex as an unobserved categorical indi- vidual covariate, or a latent variable. Home-range centers, si, are similar latent variables or ran- dom effects, and tallying up their number per fragment is trivial in a Bayesian analysis and enables one to estimate population size per fragment. For comparison with the SCR model we also analyzed the individual, binary detection/non- detection data for the two occasions under a traditional, non-spatial capture-recapture model. Specifically, we used model M0 which assumes constant detection probability among all indi- viduals and occasions [41]. For both the spatial and the non-spatial capture-recapture model we chose a Bayesian analysis which was carried out in WinBUGS [42,43] using the R package R2WinBUGS [44]. We used a formulation of both models based on data augmentation [45] which facilitates implementation of the model ",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p7s4": {
+      "id": "d1p7s4",
+      "ref": "[d1 p7]",
+      "text": "ecific permission to work with living animals. Geographical coordinates of capercaillie distribution hotspots, particularly leks, are highly sensitive information, so we did not publish them. Results 3.1 Genotyping success In total, 586 droppings were analyzed, of which 69 could not be genotyped, either because DNA could not be extracted or because of poor amplification of several loci in the PCR; of the remaining droppings, 51 were determined to belong to black grouse (Tetrao tetrix). This left us with 466 capercaillie droppings to be used in subsequent analyses. 3.2 Probability of identity and genetic diversity The cumulative discriminatory power of the 12 loci to identify individual genotypes was very high (PI = 5.0582e-10 and PISib = 1.3403e-04). Two loci deviated from HW expectations after Bonferroni correction (Table 1). The power of each of these two loci to contribute to a unique genotype was relatively low (Table 1). PI and PIsib calculated without these two loci remained PLOS",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p8s3": {
+      "id": "d1p8s3",
+      "ref": "[d1 p8]",
+      "text": "cted heterozygosity and calculated from allele frequencies [31], PI = probability of identity, PIsib = probability of identity considering the possible presence of siblings (see [30]), FNull = Frequency of null alleles per locus; negative values indicate excess of observed heterozygote genotypes. doi:10.1371/journal.pone.0129020.t001 high (4.5039e-09 and 3.9130e-04). Finally, the cumulative discriminatory power of the 8 least informative loci to identify individual genotypes was 1.5308E-05 for PI and 6.6087E-03 for PIsib, respectively, and thus below the 0.01 usually recommended for population size estimates [30]. All 12 loci were polymorphic (Table 1). The mean number of observed alleles (A) and mean allelic richness (R) were very similar (6.17 and 6.15) as were mean Ho and mean He (0.618 and 0.636). 3.3 Population size and adult sex ratio A total of 127 capercaillies were identified: 77 males, 46 females and 4 of unknown sex. Fitting the traditional (non-spatial) CMR model M0 to the ",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p8s4": {
+      "id": "d1p8s4",
+      "ref": "[d1 p8]",
+      "text": "io A total of 127 capercaillies were identified: 77 males, 46 females and 4 of unknown sex. Fitting the traditional (non-spatial) CMR model M0 to the raw detection data the estimate of total population size (posterior mean) was 137.0 (posterior sd 4.5, 95% CRI 130–147). On fitting the spatial capture-recapture model (see posterior summaries in Table 2), we estimate a total popu- lation size (posterior mean) in the study area of 137.3 capercaillies (posterior sd 4.2, 95% CRI 130–147, Fig 3a). Population size was largest in fragments 5 and 4 respectively (Fig 4). The number of males was estimated at 79.6 (posterior sd 1.6, 95% CRI 77–83; Fig 3b) and that of females at 57.7 (posterior sd 4.1, 95% CRI 51–67; Fig 3c). Based on our model, 97% of all males were detected at least once (77/79.6), but only 80% of females (46/57.7) were ever detected. Accordingly, there was much more uncertainty in the population size estimate of females. The observed adult sex ratio in our sample was male-skewed",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p8s5": {
+      "id": "d1p8s5",
+      "ref": "[d1 p8]",
+      "text": "d. Accordingly, there was much more uncertainty in the population size estimate of females. The observed adult sex ratio in our sample was male-skewed (62.6% males observed). The estimated population sex ratio (posterior mean and sd) was 0.58 (0.02, 95% CRI 0.54– 0.61), slightly lower than observed due to the apparent sex difference in encounter rate (see below). That the posterior distribution did not overlap 0.5 (Fig 3d) represents strong evidence for a male-biased sex ratio in this population. PLOS ONE | DOI:10.1371/journal.pone.0129020 June 18, 2015 8 / 16",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p12s2": {
+      "id": "d1p12s2",
+      "ref": "[d1 p12]",
+      "text": " sampling at a substantially increased intensity. Donald [49] found an increase in adult sex ratio skew towards males with IUCN threat sta- tus categories. Our findings are in line with this general relationship, as capercaillie is consid- ered endangered in Switzerland [50]. In NW Spain, too, Morán et al. [51] found such a sex ratio skewed towards males in a highly endangered population of the subspecies T.u. cantabri- cus. However, the mechanisms underlying this relationship are not clear. Regardless of the mechanism, the male-skewed sex ratio found in our study could be critical because theoretical models suggest that in polygynous species, as for example in the capercaillie, extinction risk is lowest when the adult sex ratio is female-skewed [52]. We acknowledge, however, that data from additional years are needed from our population to confirm the male-biased sex ratio, because sex ratios may show considerable temporal variation (e.g. [53]). 4.2 Simulation study to investigate eff",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d1p12s3": {
+      "id": "d1p12s3",
+      "ref": "[d1 p12]",
+      "text": "to confirm the male-biased sex ratio, because sex ratios may show considerable temporal variation (e.g. [53]). 4.2 Simulation study to investigate effects of reduced sample size The main disadvantages of the method developed in our study are the still considerable costs of the genetic analyses that might prevent the approach's regular application. However, our dilu- tion simulation suggested that field and lab efforts might be reduced by up to 25%, yielding a sample only 75% of the size of our actual data set (n = 466 droppings), and estimates of total population size and of sex ratio that still appeared sufficiently accurate to us would still have resulted. This result could not have been anticipated without collecting and analyzing a high number of droppings, but may suggest considerable savings of time and money for repeated inventories of this or similar populations 4.3 The statistical model and possible extensions One advantage of our model as implemented in the Bayesian framework",
+      "filename": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf"
+    },
+    "d2p1s2": {
+      "id": "d2p1s2",
+      "ref": "[d2 p1]",
+      "text": "or deer (Odocoileus spp.), the use of closed-population, capture- recapture (CR) methods, in conjunction with noninvasive DNA sampling, has become increasingly practical, but, up to now, these methods have been used in a non-spatial modeling framework, which has limited their utility for population-level inferences. In particular, extrapolation of plot-level CR abundance estimates to the population required the use of multipliers of unknown reliability and potential bias. Spatially explicit capture-recapture (SCR) models provide an integrated framework for directly estimating density as a function of spatial and habitat variables at landscape scales. We used fecal DNA samples in conjunction with SCR to estimate density, sex ratio, and habitat correlates to density for a mule deer (O. hemionus) population across a large ( 500 km2) area in the central Sierra Nevada Range, California, USA during 2013 and 2014. We surveyed 24 random transects within 4 30-km2 sites representative of the stu",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p1s3": {
+      "id": "d2p1s3",
+      "ref": "[d2 p1]",
+      "text": "the central Sierra Nevada Range, California, USA during 2013 and 2014. We surveyed 24 random transects within 4 30-km2 sites representative of the study area. Based on 411 samples genotyped at a sex marker and 8–10 microsatellite loci, the sex-ratio for the study area was 62 (95% CI ¼ 41–93) males/100 females in 2013 and 65 (95% CI ¼ 45–94) males/100 females in 2014. Using SCR, we estimated density at 5.0 (95% CI ¼ 2.3–7.8) deer/km2 in 2013 and 5.1 (95% CI ¼ 3.1–7.2) deer/km2 in 2014. In comparison, non-spatial CR analysis produced density estimates on average 60% higher, likely reﬂecting bias resulting from use of the commonly employed mean maximum recapture distance (MMRD) to estimate effective sampling area. The SCR models indicated that density was effectively homogeneous throughout the study area, with no strong relationship to habitat correlates. Altogether, these results demonstrate the utility of noninvasive fecal DNA methods in a SCR framework for estimation of abundance and d",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p2s7": {
+      "id": "d2p2s7",
+      "ref": "[d2 p2]",
+      "text": "integrated framework for modeling density composed of California mule and Columbian black-tailed as a function of spatial and habitat variables (Royle et al. deer (mule deer). The population’s winter and summer 2013, Efford and Fewster 2013), which facilitates inferences ranges covered approximately 1,000 km2 in El Dorado about wildlife-habitat relationships and the extrapolation of County, California and a southern portion of Placer County, models to obtain estimates of density beyond the sampling California (Hinz et al. 1981). The winter range was located sites; the latter advantage is especially important when in the foothills west of the summer range at 600–1,500 m in density is highly heterogeneous. elevation. In the summer, individuals migrated up-slope to Our objectives were to apply SCR methods to population- between 1,600 m and 2,500 m in elevation where meadows wide deer abundance estimation using noninvasive genetic containing grasses and forbs provided important forage. sam",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p2s8": {
+      "id": "d2p2s8",
+      "ref": "[d2 p2]",
+      "text": ",500 m in elevation where meadows wide deer abundance estimation using noninvasive genetic containing grasses and forbs provided important forage. sampling, and to compare these estimates to those from non- Our study area encompassed only the summer range of the spatial CR. We conducted this study on the summer range of Paciﬁc deer herd. Although we refer herein to the migratory the Paciﬁc deer herd, a partially migratory mule deer (O. h. portion of the population as the population, we note that the 2 The Journal of Wildlife Management 9999()",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p4s3": {
+      "id": "d2p4s3",
+      "ref": "[d2 p4]",
+      "text": "iently concentrated DNA samples. We geno- siblings (PIDSibs; the probability of 2 sibling genotypes typed 10 microsatellite markers and a sex-typing marker matching) for each locus and for the entire multi-locus assay from a highly conserved portion of the Y chromosome and (Paetkau and Strobeck 1994, Waits et al. 2001). used an ABI 3730 (Applied Biosystems, Grand Island, NY, We calculated sex ratio directly from the genotypes (i.e., M: USA) and internal size standards (500-LIZ; Applied F). We estimated the 95% conﬁdence limits for this ratio by Biosystems) for electrophoresis, with alleles scored manually ﬁrst calculating proportions (p) of samples that were male, using electropherograms visualized in Program STRand estimating 95% conﬁdence limits for these proportions based (version 2.4.89; Toonen and Hughes 2001). We attempted on Zar’s (1999) method using the relationship between the F to genotype each DNA sample in 2 independent and binomial distributions, and then transforming thes",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p4s4": {
+      "id": "d2p4s4",
+      "ref": "[d2 p4]",
+      "text": "(1999) method using the relationship between the F to genotype each DNA sample in 2 independent and binomial distributions, and then transforming these polymerase chain reactions (PCRs). We conducted all conﬁdence limits to ratios (i.e., p/[1 p]; Lounsberry et al. PCR sets with 2 negative PCR controls to detect potential 2015). contamination. For each sample, we built consensus genotypes from all Spatial Capture-Recapture Analysis replicate genotypes ( 4). To reduce error owing to allelic Both SCR and closed population CR models assume that dropout from low quality fecal DNA samples, we excluded populations are closed (i.e., no births, deaths, immigration, or samples with <8 successfully ampliﬁed microsatellite loci emigration).To testforsigniﬁcantviolations ofthepopulation (Lounsberry et al. 2015). We estimated the genotyping error closure assumption, we used the Stanley–Burnham test for rate attributed to allelic dropout as the average across closure (Stanley and Burnham 1999), using",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p4s8": {
+      "id": "d2p4s8",
+      "ref": "[d2 p4]",
+      "text": "ulti- (AICc; Hurvich and Tsai 1989) for null models using locus genotypes from the consensus genotypes, we used the exponential and half-normal distributions. allelematch package in R, which uses a dissimilarity matrix We input sampling transects as a series of count detectors from pairwise comparisons among multi-locus genotypes to spaced every 200 m along each transect. This type of detector 4 The Journal of Wildlife Management 9999()",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p5s3": {
+      "id": "d2p5s3",
+      "ref": "[d2 p5]",
+      "text": "re with results from SCR, we estimated abundance used the data from both years for analyses but allowed g0 and ^D to vary by sampling year. To reduce the number of using traditional, non-spatial CR. Because only 1 capture per individual can be considered in a particular sampling occasion parameters, we kept s constant between years, assuming that (a limitation of the standard CR approach), we collapsed the scale of movement was the same in both years. multiple captures of the same individual within a sampling To test for heterogeneous density across the sampling area occasion into a single capture event. We used Huggins closed and explore deer-habitat relationships, we considered the capture models in Program MARK (Huggins 1989, White inﬂuence of variables that previous studies have shown and Burnham 1999) to estimate abundance at each transect. inﬂuence space use by deer (Johnson et al. 2000, Stewart et al. We selected ﬁnal models based on AICc (Burnham and2002, Marshal et al. 2006, L",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p6s1": {
+      "id": "d2p6s1",
+      "ref": "[d2 p6]",
+      "text": "Table 1. Numbers of deer pellet samples collected, samples successfully genotyped (i.e., at 8 loci), individuals identified, individual males, individual females, and recaptures (recap) used in non-spatial capture-recapture (CR) and spatially explicit capture-recapture (SCR) analyses during summers 2013 and 2014 in El Dorado County, California, USA. Year No. samples No. genotypes No. individuals No. M No. F No. SCR recapa No. CR recapa 2013 477 158 107 41 66 51 27 2014 406 253 134b 53b 81b 119 74 Total 883 411 209c 85c 124c 170 101 a Recaptures refer to number of samples representing recaptures (i.e., not no. individuals recaptured). Larger numbers of SCR than CR recaptures are due to multiple captures of an individual in one sampling occasion, which we used separately in SCR but collapsed into a single capture event in CR. b Number of individuals identiﬁed in 2014 include 32 of the individuals (9 M, 23 F) initially sampled in 2013. c Numbers of individuals reﬂect actual numbers of ind",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p6s2": {
+      "id": "d2p6s2",
+      "ref": "[d2 p6]",
+      "text": "dividuals identiﬁed in 2014 include 32 of the individuals (9 M, 23 F) initially sampled in 2013. c Numbers of individuals reﬂect actual numbers of individuals sampled (i.e., we did not double count them if we sampled them in both years). where bN i represented the estimated number of deer on Based on these parameters and the polymorphism contained transect i and bAi represented the effective sampling area of in the data set, allelematch identiﬁed 4 allele mismatches as that transect. We assumed the effective sampling area, bAi, the optimal number to allow for 2 genotypes to be assigned to was the same for all transects, i, and estimated it as the actual the same individual. Using this criterion ( 4 allele sampling area (i.e., 1,200 m 2 m ¼ 2,400 m2) plus a buffer mismatches), we identiﬁed 209 unique individuals from strip equal in width to the average of the maximum distances the 411 successfully genotyped samples. between sampling locations of each individual (i.e., the We estimated t",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p7s1": {
+      "id": "d2p7s1",
+      "ref": "[d2 p7]",
+      "text": "approximately 2 (range ¼ 1–13) captures/individual. The sex with CWHR, and negatively correlated with slope. The ratio estimated directly from genotyped individuals across the homogeneous density models that varied the sex ratio (i.e., study area was 62 (95% CI ¼ 41–93) males/100 females in pmix) by year and g0 by sex were also highly supported. 2013 and 65 (95% CI ¼ 45–94) males/100 females in 2014. We projected the model-averaged estimates of density onto the entire study area in both years, enabling estimation of theSpatial Capture-Recapture Estimates number of deer in the summer-range population (Fig. 3).In 2013, we rejected the assumption of population closure We estimated density of the study area at ^D ¼ 5.0 (95%based on the Stanley–Burnham test applied to all 4 sampling 5.1 (95% CI ¼ 3.1–occasions (x24 ¼ 18.14, P ¼ 0.001). The analysis using only CI ¼ 2.3–7.8) deer/km2 in 2013 and ^D ¼ 7.2) deer/km2 in 2014. Corresponding ^N estimates for theoccasions 1–3 also exhibited signiﬁc",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p7s2": {
+      "id": "d2p7s2",
+      "ref": "[d2 p7]",
+      "text": "lysis using only CI ¼ 2.3–7.8) deer/km2 in 2013 and ^D ¼ 7.2) deer/km2 in 2014. Corresponding ^N estimates for theoccasions 1–3 also exhibited signiﬁcant violations of closure entire 512-km2 study area were 2,573 (95% CI ¼ 1,167–(x22 ¼ 7.36, P ¼ 0.025), but the analysis based on occasions 3978) deer in 2013 and 2,626 (95% CI ¼ 1,573–3,679) deer2–4 did not (x22 ¼ 3.34, P ¼ 0.189). Therefore, we used in 2014. The precision of these annual estimates wasoccasions 2–4 for all SCR and CR analyses of 2013 data. In expressed in terms of the coefﬁcient of variation in 20132014, the assumption of population closure was not rejected (CV ¼ 0.28) and 2014 (CV ¼ 0.20).based on the Stanley–Burnham test (x22 ¼ 1.26, P ¼ 0.53). Modeled without covariates, the exponential decay Capture-Recapture Estimates function was more highly supported than the half-normal In 2013, the models that were well supported were the null function (DAICc ¼ 19.44); therefore, we used it in all (M0) model and the model that v",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p9s2": {
+      "id": "d2p9s2",
+      "ref": "[d2 p9]",
+      "text": "violation of the The 2 primary analytical approaches employed here, SCR population-closure assumption, which was associated with and non-spatial CR, produced reasonably precise estimates the early-season sampling occasions, possibly reﬂecting of abundance and density. However, the arbitrary use of excessive births or migratory movements early in June. In MMRD was expected to underestimate effective sampling contrast, we found no signiﬁcant violations of the closure area and, therefore, overestimate density (Wilson and assumption for the latter-season runs in 2013 and all analyses Anderson 1985, Parmenter et al. 2003, Ivan et al. 2013). in 2014 (for which transect runs began later in the year). Our Correspondingly, we found that our CR density estimates ﬁndings suggest that sampling efforts were most likely to were on average approximately 60% higher than the SCR satisfy closure assumptions if begun in late June or early July estimates, implying that our per-transect MMRD-estimated Tabl",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p10s1": {
+      "id": "d2p10s1",
+      "ref": "[d2 p10]",
+      "text": "effective sampling area (0.91 km2) likewise needed to be 60% partially migratory, future studies should explore the larger (i.e., 1.5 km2) to arrive at density estimates similar to application of these methods across a population’s winter those from SCR. Therefore, we reiterate the recommenda- range, during the months when migrants and residents are tion by Lounsberry et al. (2015) that application of CR both present. estimates should be taken solely as approximate indices of MANAGEMENT IMPLICATIONSabundance when sampling is not continuous over the population range, and in such cases, recommend that SCR be Our ﬁndings demonstrated that noninvasive fecal DNA- applied to obtain relatively unbiased estimates of density based methods and SCR could be applied over a large region (Efford and Fewster 2013). An important caveat, however, is to provide estimates of abundance for deer populations that that we had no way of empirically verifying the accuracy of were sufﬁciently precise for most m",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    },
+    "d2p10s2": {
+      "id": "d2p10s2",
+      "ref": "[d2 p10]",
+      "text": "ovide estimates of abundance for deer populations that that we had no way of empirically verifying the accuracy of were sufﬁciently precise for most management purposes. The the SCR estimates. Future studies comparing results from utility of the SCR approach as part of regional monitoring SCR against known population abundance, for example in programs ultimately depends on cost, which currently can captive populations of deer, would therefore be useful for this range anywhere from $25,000 to $90,000 for a seasonal purpose. estimate, depending on the scale of the study (i.e., no. of The SCR approach provides an integrated framework for transects, sites, sampling occasions, and fecal samples habitat modeling, which can enhance the robustness of analyzed). For long-term monitoring purposes, SCR density and abundance estimates to environmental hetero- methods can be used at varying intervals, rather than every geneity and enable inferences about deer-habitat relation- year. Increasing the ",
+      "filename": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf"
+    }
+  },
+  "offline_validation": {
+    "note": "Final-code offline replay of already paid response2; no further network calls. Initial paid response1 rejected. Response2 initially exceeded3 evidence IDs in one cell; final schema allows4 and rejects unsupported numeric cells individually, never presents them as findings.",
+    "receipt": {
+      "request_id": "5b8561c6-488e-4804-b530-810f739a10d4",
+      "status": "completed",
+      "cache_hit": false,
+      "error_code": null,
+      "result": {
+        "question": "请逐篇用中文提取六个维度。每项归纳的全部事实和数字必须由所选原文片段编号完全支持；明确DNA样本数、独立个体数与种群估计量的区别，结果保留年份、单位和区间。依据不足则留空。",
+        "model": "deepseek-v4-flash",
+        "created_at": "2026-10-24T09:28:04.993801+00:00",
+        "fields": {
+          "subject": "研究对象",
+          "sample": "样本量与采样设计",
+          "method": "方法与指标",
+          "assumptions": "关键假设与适用条件",
+          "results": "主要结果",
+          "limitations": "作者指出的局限"
+        },
+        "rows": [
+          {
+            "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+            "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+            "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+            "cells": {
+              "subject": {
+                "status": "unverified",
+                "value": "",
+                "citations": [],
+                "validation_issue": "comparison_unsupported_number"
+              },
+              "sample": {
+                "status": "unverified",
+                "value": "",
+                "citations": [],
+                "validation_issue": "comparison_unsupported_number"
+              },
+              "method": {
+                "status": "unverified",
+                "value": "",
+                "citations": [],
+                "validation_issue": "comparison_unsupported_number"
+              },
+              "assumptions": {
+                "status": "supported",
+                "value": "假设种群在约2周采样期内闭合，将两次采样合并为各单元遇率；活动中心位置先验与亚单元面积成正比；未捕获个体性别视为潜变量",
+                "citations": [
+                  {
+                    "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                    "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                    "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                    "physical_page": 6,
+                    "excerpt": "h of the 78 sample subunits in a subjectively systematic fashion, as described above. We developed a model in which each of these 78 subunits is regarded as a potential encounter location (effective “traps”), the location of which is character- ized by its centroid. Thus, we constructed spatial encounter histories by associating each encounter observation with one of the 78 sample subunits. We assumed the population was closed over the 2 week sample period and pooled the two samples into a single plot-specific encounter frequency for each individual, say yij for individual i and plot j. For numerical rea- sons, we standardized the metric coordinates by dividing them by 5000. Individuals may be captured an arbitrary number of times in each sample subunit and so, unlike in traditional capture-recapture studies, the observations in this case are counts with no natural upper-bound. As such, we develop models based on the assumption that yij has a Pois- son distribution with mean λij, which",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                    "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                    "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                    "physical_page": 6,
+                    "excerpt": "8 sample subunits (i.e., the centroids) in proportion to the surface of the sample unit. Because sample subunits have variable surfaces, we assumed that the prior density of activity centers was in proportion to the surface of each subunit. In the model, this was parameterized by assuming that si is a categorical random variable: si~Categoricalðp1. . .p78Þ where: X pj ¼ expðAj= AjÞ j is the probability of si occurring in subunit j. Thus, the prior for the distribution of the locations of the individual home-range centers was proportional to the size of each area, Aj. Our basic model embodies the assumption that the encounter frequency of individual i in survey subunit j is proportional to the distance between the centroid of the subunit and the activity center. In particular, the logarithm of the expected frequency for the subunit, in which individual i has its home range center, is precisely β0. In our analysis we allowed the parameters β0 and β1 to be sex-specific. Because sex is uno",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                    "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                    "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                    "physical_page": 6,
+                    "excerpt": "ch individual i has its home range center, is precisely β0. In our analysis we allowed the parameters β0 and β1 to be sex-specific. Because sex is unobserved for individuals that were not captured, we regarded sex as a latent variable with a population proportion to be estimated. Similarly, four individuals could not be sexed. Bayesian analysis excels at doing calculations with latent PLOS ONE | DOI:10.1371/journal.pone.0129020 June 18, 2015 6 / 16",
+                    "rects": []
+                  }
+                ],
+                "validation_issue": null
+              },
+              "results": {
+                "status": "supported",
+                "value": "SCR估计总种群137.3只（后验sd 4.2，95% CRI 130–147），雄79.6只（77–83）、雌57.7只（51–67），性比0.58（0.54–0.61）；雄检出率97%、雌80%",
+                "citations": [
+                  {
+                    "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                    "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                    "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                    "physical_page": 1,
+                    "excerpt": "ndi- Citation: Mollet P, Kéry M, Gardner B, Pasinelli G, Royle JA (2015) Estimating Population Size for vidually identify birds. We estimated sex-dependent detection probabilities and population Capercaillie (Tetrao urogallus L.) with Spatial size using a modern spatial capture-recapture (SCR) model for the data from pooled sur- Capture-Recapture Models Based on Genotypes veys. A total of 127 capercaillie genotypes were identified (77 males, 46 females, and 4 of from One Field Sample. PLoS ONE 10(6): e0129020. unknown sex). The SCR model yielded atotal population size estimate (posterior mean) ofdoi:10.1371/journal.pone.0129020 137.3 capercaillies (posterior sd 4.2, 95% CRI 130–147). The observed sex ratio was Academic Editor: Rob Slotow, University of skewed towards males (0.63). The posterior mean of the sex ratio under the SCR modelKwaZulu-Natal, SOUTH AFRICA was 0.58 (posterior sd 0.02, 95% CRI 0.54–0.61), suggesting a male-biased sex ratio in our Received: July 15, 2014 study area",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                    "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                    "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                    "physical_page": 8,
+                    "excerpt": "io A total of 127 capercaillies were identified: 77 males, 46 females and 4 of unknown sex. Fitting the traditional (non-spatial) CMR model M0 to the raw detection data the estimate of total population size (posterior mean) was 137.0 (posterior sd 4.5, 95% CRI 130–147). On fitting the spatial capture-recapture model (see posterior summaries in Table 2), we estimate a total popu- lation size (posterior mean) in the study area of 137.3 capercaillies (posterior sd 4.2, 95% CRI 130–147, Fig 3a). Population size was largest in fragments 5 and 4 respectively (Fig 4). The number of males was estimated at 79.6 (posterior sd 1.6, 95% CRI 77–83; Fig 3b) and that of females at 57.7 (posterior sd 4.1, 95% CRI 51–67; Fig 3c). Based on our model, 97% of all males were detected at least once (77/79.6), but only 80% of females (46/57.7) were ever detected. Accordingly, there was much more uncertainty in the population size estimate of females. The observed adult sex ratio in our sample was male-skewed",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                    "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                    "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                    "physical_page": 8,
+                    "excerpt": "d. Accordingly, there was much more uncertainty in the population size estimate of females. The observed adult sex ratio in our sample was male-skewed (62.6% males observed). The estimated population sex ratio (posterior mean and sd) was 0.58 (0.02, 95% CRI 0.54– 0.61), slightly lower than observed due to the apparent sex difference in encounter rate (see below). That the posterior distribution did not overlap 0.5 (Fig 3d) represents strong evidence for a male-biased sex ratio in this population. PLOS ONE | DOI:10.1371/journal.pone.0129020 June 18, 2015 8 / 16",
+                    "rects": []
+                  }
+                ],
+                "validation_issue": null
+              },
+              "limitations": {
+                "status": "supported",
+                "value": "基因分析成本仍较高；作者指出需更多年份数据以确认偏雄的性别比，因为性比可能有明显时间变化",
+                "citations": [
+                  {
+                    "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                    "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                    "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                    "physical_page": 12,
+                    "excerpt": "to confirm the male-biased sex ratio, because sex ratios may show considerable temporal variation (e.g. [53]). 4.2 Simulation study to investigate effects of reduced sample size The main disadvantages of the method developed in our study are the still considerable costs of the genetic analyses that might prevent the approach's regular application. However, our dilu- tion simulation suggested that field and lab efforts might be reduced by up to 25%, yielding a sample only 75% of the size of our actual data set (n = 466 droppings), and estimates of total population size and of sex ratio that still appeared sufficiently accurate to us would still have resulted. This result could not have been anticipated without collecting and analyzing a high number of droppings, but may suggest considerable savings of time and money for repeated inventories of this or similar populations 4.3 The statistical model and possible extensions One advantage of our model as implemented in the Bayesian framework",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+                    "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+                    "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+                    "physical_page": 12,
+                    "excerpt": "sampling at a substantially increased intensity. Donald [49] found an increase in adult sex ratio skew towards males with IUCN threat sta- tus categories. Our findings are in line with this general relationship, as capercaillie is consid- ered endangered in Switzerland [50]. In NW Spain, too, Morán et al. [51] found such a sex ratio skewed towards males in a highly endangered population of the subspecies T.u. cantabri- cus. However, the mechanisms underlying this relationship are not clear. Regardless of the mechanism, the male-skewed sex ratio found in our study could be critical because theoretical models suggest that in polygynous species, as for example in the capercaillie, extinction risk is lowest when the adult sex ratio is female-skewed [52]. We acknowledge, however, that data from additional years are needed from our population to confirm the male-biased sex ratio, because sex ratios may show considerable temporal variation (e.g. [53]). 4.2 Simulation study to investigate eff",
+                    "rects": []
+                  }
+                ],
+                "validation_issue": null
+              }
+            }
+          },
+          {
+            "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+            "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+            "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+            "cells": {
+              "subject": {
+                "status": "supported",
+                "value": "美国加州内华达山脉中部太平洋鹿群的骡鹿（Odocoileus hemionus，含加州骡鹿与哥伦比亚黑尾鹿）夏季分布区",
+                "citations": [
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 2,
+                    "excerpt": "integrated framework for modeling density composed of California mule and Columbian black-tailed as a function of spatial and habitat variables (Royle et al. deer (mule deer). The population’s winter and summer 2013, Efford and Fewster 2013), which facilitates inferences ranges covered approximately 1,000 km2 in El Dorado about wildlife-habitat relationships and the extrapolation of County, California and a southern portion of Placer County, models to obtain estimates of density beyond the sampling California (Hinz et al. 1981). The winter range was located sites; the latter advantage is especially important when in the foothills west of the summer range at 600–1,500 m in density is highly heterogeneous. elevation. In the summer, individuals migrated up-slope to Our objectives were to apply SCR methods to population- between 1,600 m and 2,500 m in elevation where meadows wide deer abundance estimation using noninvasive genetic containing grasses and forbs provided important forage. sam",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 2,
+                    "excerpt": ",500 m in elevation where meadows wide deer abundance estimation using noninvasive genetic containing grasses and forbs provided important forage. sampling, and to compare these estimates to those from non- Our study area encompassed only the summer range of the spatial CR. We conducted this study on the summer range of Paciﬁc deer herd. Although we refer herein to the migratory the Paciﬁc deer herd, a partially migratory mule deer (O. h. portion of the population as the population, we note that the 2 The Journal of Wildlife Management 9999()",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 1,
+                    "excerpt": "or deer (Odocoileus spp.), the use of closed-population, capture- recapture (CR) methods, in conjunction with noninvasive DNA sampling, has become increasingly practical, but, up to now, these methods have been used in a non-spatial modeling framework, which has limited their utility for population-level inferences. In particular, extrapolation of plot-level CR abundance estimates to the population required the use of multipliers of unknown reliability and potential bias. Spatially explicit capture-recapture (SCR) models provide an integrated framework for directly estimating density as a function of spatial and habitat variables at landscape scales. We used fecal DNA samples in conjunction with SCR to estimate density, sex ratio, and habitat correlates to density for a mule deer (O. hemionus) population across a large ( 500 km2) area in the central Sierra Nevada Range, California, USA during 2013 and 2014. We surveyed 24 random transects within 4 30-km2 sites representative of the stu",
+                    "rects": []
+                  }
+                ],
+                "validation_issue": null
+              },
+              "sample": {
+                "status": "supported",
+                "value": "2013–2014年在4个30 km2站点、共24条随机样带采集粪便；收集883份，411份在8个以上位点成功基因分型，鉴定209个个体（85雄、124雌）",
+                "citations": [
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 1,
+                    "excerpt": "or deer (Odocoileus spp.), the use of closed-population, capture- recapture (CR) methods, in conjunction with noninvasive DNA sampling, has become increasingly practical, but, up to now, these methods have been used in a non-spatial modeling framework, which has limited their utility for population-level inferences. In particular, extrapolation of plot-level CR abundance estimates to the population required the use of multipliers of unknown reliability and potential bias. Spatially explicit capture-recapture (SCR) models provide an integrated framework for directly estimating density as a function of spatial and habitat variables at landscape scales. We used fecal DNA samples in conjunction with SCR to estimate density, sex ratio, and habitat correlates to density for a mule deer (O. hemionus) population across a large ( 500 km2) area in the central Sierra Nevada Range, California, USA during 2013 and 2014. We surveyed 24 random transects within 4 30-km2 sites representative of the stu",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 6,
+                    "excerpt": "Table 1. Numbers of deer pellet samples collected, samples successfully genotyped (i.e., at 8 loci), individuals identified, individual males, individual females, and recaptures (recap) used in non-spatial capture-recapture (CR) and spatially explicit capture-recapture (SCR) analyses during summers 2013 and 2014 in El Dorado County, California, USA. Year No. samples No. genotypes No. individuals No. M No. F No. SCR recapa No. CR recapa 2013 477 158 107 41 66 51 27 2014 406 253 134b 53b 81b 119 74 Total 883 411 209c 85c 124c 170 101 a Recaptures refer to number of samples representing recaptures (i.e., not no. individuals recaptured). Larger numbers of SCR than CR recaptures are due to multiple captures of an individual in one sampling occasion, which we used separately in SCR but collapsed into a single capture event in CR. b Number of individuals identiﬁed in 2014 include 32 of the individuals (9 M, 23 F) initially sampled in 2013. c Numbers of individuals reﬂect actual numbers of ind",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 6,
+                    "excerpt": "dividuals identiﬁed in 2014 include 32 of the individuals (9 M, 23 F) initially sampled in 2013. c Numbers of individuals reﬂect actual numbers of individuals sampled (i.e., we did not double count them if we sampled them in both years). where bN i represented the estimated number of deer on Based on these parameters and the polymorphism contained transect i and bAi represented the effective sampling area of in the data set, allelematch identiﬁed 4 allele mismatches as that transect. We assumed the effective sampling area, bAi, the optimal number to allow for 2 genotypes to be assigned to was the same for all transects, i, and estimated it as the actual the same individual. Using this criterion ( 4 allele sampling area (i.e., 1,200 m 2 m ¼ 2,400 m2) plus a buffer mismatches), we identiﬁed 209 unique individuals from strip equal in width to the average of the maximum distances the 411 successfully genotyped samples. between sampling locations of each individual (i.e., the We estimated t",
+                    "rects": []
+                  }
+                ],
+                "validation_issue": null
+              },
+              "method": {
+                "status": "supported",
+                "value": "用10个微卫星位点与Y染色体性别标记分型，SCR模型（SECR程序，指数衰减、样带每200 m计数探测器）估计密度与性比，并与用MMRD的非空间CR比较",
+                "citations": [
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 4,
+                    "excerpt": "iently concentrated DNA samples. We geno- siblings (PIDSibs; the probability of 2 sibling genotypes typed 10 microsatellite markers and a sex-typing marker matching) for each locus and for the entire multi-locus assay from a highly conserved portion of the Y chromosome and (Paetkau and Strobeck 1994, Waits et al. 2001). used an ABI 3730 (Applied Biosystems, Grand Island, NY, We calculated sex ratio directly from the genotypes (i.e., M: USA) and internal size standards (500-LIZ; Applied F). We estimated the 95% conﬁdence limits for this ratio by Biosystems) for electrophoresis, with alleles scored manually ﬁrst calculating proportions (p) of samples that were male, using electropherograms visualized in Program STRand estimating 95% conﬁdence limits for these proportions based (version 2.4.89; Toonen and Hughes 2001). We attempted on Zar’s (1999) method using the relationship between the F to genotype each DNA sample in 2 independent and binomial distributions, and then transforming thes",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 4,
+                    "excerpt": "ulti- (AICc; Hurvich and Tsai 1989) for null models using locus genotypes from the consensus genotypes, we used the exponential and half-normal distributions. allelematch package in R, which uses a dissimilarity matrix We input sampling transects as a series of count detectors from pairwise comparisons among multi-locus genotypes to spaced every 200 m along each transect. This type of detector 4 The Journal of Wildlife Management 9999()",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 5,
+                    "excerpt": "re with results from SCR, we estimated abundance used the data from both years for analyses but allowed g0 and ^D to vary by sampling year. To reduce the number of using traditional, non-spatial CR. Because only 1 capture per individual can be considered in a particular sampling occasion parameters, we kept s constant between years, assuming that (a limitation of the standard CR approach), we collapsed the scale of movement was the same in both years. multiple captures of the same individual within a sampling To test for heterogeneous density across the sampling area occasion into a single capture event. We used Huggins closed and explore deer-habitat relationships, we considered the capture models in Program MARK (Huggins 1989, White inﬂuence of variables that previous studies have shown and Burnham 1999) to estimate abundance at each transect. inﬂuence space use by deer (Johnson et al. 2000, Stewart et al. We selected ﬁnal models based on AICc (Burnham and2002, Marshal et al. 2006, L",
+                    "rects": []
+                  }
+                ],
+                "validation_issue": null
+              },
+              "assumptions": {
+                "status": "supported",
+                "value": "SCR与CR模型均假设种群闭合；2013年全部4次采样检验拒绝闭合，故仅用第2–4次，2014年未拒绝闭合",
+                "citations": [
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 4,
+                    "excerpt": "(1999) method using the relationship between the F to genotype each DNA sample in 2 independent and binomial distributions, and then transforming these polymerase chain reactions (PCRs). We conducted all conﬁdence limits to ratios (i.e., p/[1 p]; Lounsberry et al. PCR sets with 2 negative PCR controls to detect potential 2015). contamination. For each sample, we built consensus genotypes from all Spatial Capture-Recapture Analysis replicate genotypes ( 4). To reduce error owing to allelic Both SCR and closed population CR models assume that dropout from low quality fecal DNA samples, we excluded populations are closed (i.e., no births, deaths, immigration, or samples with <8 successfully ampliﬁed microsatellite loci emigration).To testforsigniﬁcantviolations ofthepopulation (Lounsberry et al. 2015). We estimated the genotyping error closure assumption, we used the Stanley–Burnham test for rate attributed to allelic dropout as the average across closure (Stanley and Burnham 1999), using",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 7,
+                    "excerpt": "approximately 2 (range ¼ 1–13) captures/individual. The sex with CWHR, and negatively correlated with slope. The ratio estimated directly from genotyped individuals across the homogeneous density models that varied the sex ratio (i.e., study area was 62 (95% CI ¼ 41–93) males/100 females in pmix) by year and g0 by sex were also highly supported. 2013 and 65 (95% CI ¼ 45–94) males/100 females in 2014. We projected the model-averaged estimates of density onto the entire study area in both years, enabling estimation of theSpatial Capture-Recapture Estimates number of deer in the summer-range population (Fig. 3).In 2013, we rejected the assumption of population closure We estimated density of the study area at ^D ¼ 5.0 (95%based on the Stanley–Burnham test applied to all 4 sampling 5.1 (95% CI ¼ 3.1–occasions (x24 ¼ 18.14, P ¼ 0.001). The analysis using only CI ¼ 2.3–7.8) deer/km2 in 2013 and ^D ¼ 7.2) deer/km2 in 2014. Corresponding ^N estimates for theoccasions 1–3 also exhibited signiﬁc",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 7,
+                    "excerpt": "lysis using only CI ¼ 2.3–7.8) deer/km2 in 2013 and ^D ¼ 7.2) deer/km2 in 2014. Corresponding ^N estimates for theoccasions 1–3 also exhibited signiﬁcant violations of closure entire 512-km2 study area were 2,573 (95% CI ¼ 1,167–(x22 ¼ 7.36, P ¼ 0.025), but the analysis based on occasions 3978) deer in 2013 and 2,626 (95% CI ¼ 1,573–3,679) deer2–4 did not (x22 ¼ 3.34, P ¼ 0.189). Therefore, we used in 2014. The precision of these annual estimates wasoccasions 2–4 for all SCR and CR analyses of 2013 data. In expressed in terms of the coefﬁcient of variation in 20132014, the assumption of population closure was not rejected (CV ¼ 0.28) and 2014 (CV ¼ 0.20).based on the Stanley–Burnham test (x22 ¼ 1.26, P ¼ 0.53). Modeled without covariates, the exponential decay Capture-Recapture Estimates function was more highly supported than the half-normal In 2013, the models that were well supported were the null function (DAICc ¼ 19.44); therefore, we used it in all (M0) model and the model that v",
+                    "rects": []
+                  }
+                ],
+                "validation_issue": null
+              },
+              "results": {
+                "status": "supported",
+                "value": "SCR密度2013年5.0只/km2（95% CI 2.3–7.8）、2014年5.1只/km2（3.1–7.2）；性比62（41–93）与65（45–94）雄/100雌；非空间CR密度平均高约60%",
+                "citations": [
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 1,
+                    "excerpt": "the central Sierra Nevada Range, California, USA during 2013 and 2014. We surveyed 24 random transects within 4 30-km2 sites representative of the study area. Based on 411 samples genotyped at a sex marker and 8–10 microsatellite loci, the sex-ratio for the study area was 62 (95% CI ¼ 41–93) males/100 females in 2013 and 65 (95% CI ¼ 45–94) males/100 females in 2014. Using SCR, we estimated density at 5.0 (95% CI ¼ 2.3–7.8) deer/km2 in 2013 and 5.1 (95% CI ¼ 3.1–7.2) deer/km2 in 2014. In comparison, non-spatial CR analysis produced density estimates on average 60% higher, likely reﬂecting bias resulting from use of the commonly employed mean maximum recapture distance (MMRD) to estimate effective sampling area. The SCR models indicated that density was effectively homogeneous throughout the study area, with no strong relationship to habitat correlates. Altogether, these results demonstrate the utility of noninvasive fecal DNA methods in a SCR framework for estimation of abundance and d",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 7,
+                    "excerpt": "approximately 2 (range ¼ 1–13) captures/individual. The sex with CWHR, and negatively correlated with slope. The ratio estimated directly from genotyped individuals across the homogeneous density models that varied the sex ratio (i.e., study area was 62 (95% CI ¼ 41–93) males/100 females in pmix) by year and g0 by sex were also highly supported. 2013 and 65 (95% CI ¼ 45–94) males/100 females in 2014. We projected the model-averaged estimates of density onto the entire study area in both years, enabling estimation of theSpatial Capture-Recapture Estimates number of deer in the summer-range population (Fig. 3).In 2013, we rejected the assumption of population closure We estimated density of the study area at ^D ¼ 5.0 (95%based on the Stanley–Burnham test applied to all 4 sampling 5.1 (95% CI ¼ 3.1–occasions (x24 ¼ 18.14, P ¼ 0.001). The analysis using only CI ¼ 2.3–7.8) deer/km2 in 2013 and ^D ¼ 7.2) deer/km2 in 2014. Corresponding ^N estimates for theoccasions 1–3 also exhibited signiﬁc",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 9,
+                    "excerpt": "violation of the The 2 primary analytical approaches employed here, SCR population-closure assumption, which was associated with and non-spatial CR, produced reasonably precise estimates the early-season sampling occasions, possibly reﬂecting of abundance and density. However, the arbitrary use of excessive births or migratory movements early in June. In MMRD was expected to underestimate effective sampling contrast, we found no signiﬁcant violations of the closure area and, therefore, overestimate density (Wilson and assumption for the latter-season runs in 2013 and all analyses Anderson 1985, Parmenter et al. 2003, Ivan et al. 2013). in 2014 (for which transect runs began later in the year). Our Correspondingly, we found that our CR density estimates ﬁndings suggest that sampling efforts were most likely to were on average approximately 60% higher than the SCR satisfy closure assumptions if begun in late June or early July estimates, implying that our per-transect MMRD-estimated Tabl",
+                    "rects": []
+                  }
+                ],
+                "validation_issue": null
+              },
+              "limitations": {
+                "status": "supported",
+                "value": "作者指出无法实证验证SCR估计的准确性，建议未来以已知种群（如圈养鹿群）比较；并建议非空间CR仅作粗略指数",
+                "citations": [
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 10,
+                    "excerpt": "ovide estimates of abundance for deer populations that that we had no way of empirically verifying the accuracy of were sufﬁciently precise for most management purposes. The the SCR estimates. Future studies comparing results from utility of the SCR approach as part of regional monitoring SCR against known population abundance, for example in programs ultimately depends on cost, which currently can captive populations of deer, would therefore be useful for this range anywhere from $25,000 to $90,000 for a seasonal purpose. estimate, depending on the scale of the study (i.e., no. of The SCR approach provides an integrated framework for transects, sites, sampling occasions, and fecal samples habitat modeling, which can enhance the robustness of analyzed). For long-term monitoring purposes, SCR density and abundance estimates to environmental hetero- methods can be used at varying intervals, rather than every geneity and enable inferences about deer-habitat relation- year. Increasing the",
+                    "rects": []
+                  },
+                  {
+                    "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+                    "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+                    "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+                    "physical_page": 10,
+                    "excerpt": "effective sampling area (0.91 km2) likewise needed to be 60% partially migratory, future studies should explore the larger (i.e., 1.5 km2) to arrive at density estimates similar to application of these methods across a population’s winter those from SCR. Therefore, we reiterate the recommenda- range, during the months when migrants and residents are tion by Lounsberry et al. (2015) that application of CR both present. estimates should be taken solely as approximate indices of MANAGEMENT IMPLICATIONSabundance when sampling is not continuous over the population range, and in such cases, recommend that SCR be Our ﬁndings demonstrated that noninvasive fecal DNA- applied to obtain relatively unbiased estimates of density based methods and SCR could be applied over a large region (Efford and Fewster 2013). An important caveat, however, is to provide estimates of abundance for deer populations that that we had no way of empirically verifying the accuracy of were sufﬁciently precise for most m",
+                    "rects": []
+                  }
+                ],
+                "validation_issue": null
+              }
+            }
+          }
+        ],
+        "coverage": {
+          "reading_mode": "full_text",
+          "coverage": [
+            {
+              "document_id": "df6a5fc9-f014-4eb8-a033-f70e0c42c781",
+              "display_name": "Estimating Population Size for Capercaillie (Tetrao urogallus L.) with Spatial Capture-Recapture Models Based on Genotypes from One Field Sample.pdf",
+              "content_id": "405e45d560b091e9365ce88afb79e2268e47a977af968d050346c87791bc8aa4",
+              "parse_run_id": "4306bd08-7b12-40af-964c-03e3b2549af8",
+              "total_pages": 16,
+              "supplied_pages": 16,
+              "text_characters": 53833
+            },
+            {
+              "document_id": "83dcd8b0-fea6-41aa-8959-288a2b7808ed",
+              "display_name": "Noninvasive genetic spatial capture-recapture for estimating deer population abundance.pdf",
+              "content_id": "a3c6f31db55f2d118ab90862a82c0c924a848075ed4d28df12306d44241b9ec5",
+              "parse_run_id": "8b6149bc-0168-4935-8585-5e3ac7bfb7f5",
+              "total_pages": 12,
+              "supplied_pages": 12,
+              "text_characters": 62385
+            }
+          ],
+          "source_versions": {
+            "df6a5fc9-f014-4eb8-a033-f70e0c42c781": "f56daf13625618db6777173b39f27a4abfdf29176b93120d3bf38eb08df2d1a6",
+            "83dcd8b0-fea6-41aa-8959-288a2b7808ed": "75eb9875d2a0e4ecb303f2fb4f32b5a562c02e692386b1bbec47d6e3d3fb3306"
+          },
+          "request_bytes": 167663,
+          "max_request_bytes": 262144,
+          "text_only": true,
+          "cache_status": "miss",
+          "api_call_required": true,
+          "context_kind": "full_text",
+          "analysis_count": 0,
+          "cached_at": null,
+          "plan_id": "fe3c54d61d7ff1acbe746753c2fb6fe29c3e1547ca8ac2347b817ee809cd9c4b",
+          "source_modes": {
+            "df6a5fc9-f014-4eb8-a033-f70e0c42c781": "full_text",
+            "83dcd8b0-fea6-41aa-8959-288a2b7808ed": "full_text"
+          },
+          "evidence_pages": 0,
+          "estimated_upper_cny": "0.385374",
+          "max_output_tokens": 6000,
+          "pricing_basis": "2026-10-24官网高峰单价上限估算，含输入字节与输出上限；非账单实扣。",
+          "fields": {
+            "subject": "研究对象",
+            "sample": "样本量与采样设计",
+            "method": "方法与指标",
+            "assumptions": "关键假设与适用条件",
+            "results": "主要结果",
+            "limitations": "作者指出的局限"
+          }
+        },
+        "cache_saved": true,
+        "source_versions": {
+          "df6a5fc9-f014-4eb8-a033-f70e0c42c781": "f56daf13625618db6777173b39f27a4abfdf29176b93120d3bf38eb08df2d1a6",
+          "83dcd8b0-fea6-41aa-8959-288a2b7808ed": "75eb9875d2a0e4ecb303f2fb4f32b5a562c02e692386b1bbec47d6e3d3fb3306"
+        },
+        "text_only": true,
+        "verified_cells": 9,
+        "unverified_cells": 3
+      },
+      "source_changed": false
+    },
+    "repeat_cache_hit": true,
+    "new_question_modes": {
+      "df6a5fc9-f014-4eb8-a033-f70e0c42c781": "analysis_reuse",
+      "83dcd8b0-fea6-41aa-8959-288a2b7808ed": "analysis_reuse"
+    },
+    "expanded_modes": {
+      "df6a5fc9-f014-4eb8-a033-f70e0c42c781": "analysis_reuse",
+      "83dcd8b0-fea6-41aa-8959-288a2b7808ed": "analysis_reuse",
+      "8c14da45-9ca3-4aea-88c5-56b97bfc7909": "full_text"
+    },
+    "live_network_calls": 2,
+    "offline_replays": 1
+  },
+  "verdict": {
+    "workflow": "passed_with_source_guards",
+    "unattended_scientific_use": "NOT_ACCEPTED",
+    "reason": "真实模型出现不被引用支持的数值、错误位点数和条件省略；程序阻止3格进入事实表，剩余归纳仍须人工核对。"
+  },
+  "limits": [
+    "真实网络2次，无自动重试，无额外调用。",
+    "最终4依据上限/逐格拒绝规则仅回放已付费响应与受控测试，未再次联网验证最终提示词。",
+    "小样本2篇文献，不是模型总体准确率或独立专家金标准。",
+    "最终保留9格仅说明引句可定位且阿拉伯数字出现在依据中，不保证单位指代、全部语义或因果推理正确。",
+    "计费为按官网高峰单价估算，非服务商账单实扣；两个请求发生在隔离库，不加入正式图谱或研究笔记。"
+  ],
+  "pricing_source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+}

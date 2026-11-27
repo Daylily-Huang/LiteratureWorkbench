@@ -5,7 +5,7 @@ from pathlib import Path
 
 from literature_workbench.features.library.models import LibraryRoot
 from literature_workbench.features.library.repository import LibraryRepository
-from literature_workbench.platform.windows.filesystem import RootIdentity, SafeFileInspector
+from literature_workbench.platform.windows.filesystem import RootIdentity, SafeFileInspector, UnsafePath
 
 
 INITIAL_APPROVED_LIBRARY = Path(r"D:\black-muntjac-project\papers")
@@ -44,14 +44,17 @@ class LibraryRootService:
             authorization_source="native_picker_confirmed",
         )
 
-    def register_initial_approved_library(self) -> LibraryRoot:
-        identity = self._inspector.inspect_root_directory(INITIAL_APPROVED_LIBRARY)
-        self._reject_private_data_overlap(identity.canonical_path)
-        return self._repository.register(
-            identity,
-            recursive=True,
-            authorization_source="initial_user_approved",
-        )
+    def register_initial_approved_library(self) -> LibraryRoot | None:
+        try:
+            identity = self._inspector.inspect_root_directory(INITIAL_APPROVED_LIBRARY)
+            self._reject_private_data_overlap(identity.canonical_path)
+            return self._repository.register(
+                identity,
+                recursive=True,
+                authorization_source="initial_user_approved",
+            )
+        except (FileNotFoundError, OSError, UnsafePath, ValueError):
+            return None
 
     def _reject_private_data_overlap(self, candidate: Path) -> None:
         candidate_key = os.path.normcase(os.path.abspath(candidate))

@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Barrier, Event
 import sys
 from time import sleep
+from uuid import uuid4
 
 import fitz
 import pytest
@@ -23,6 +24,12 @@ from literature_workbench.features.library.import_service import (
 from literature_workbench.features.library.import_files import TrustedImportRoot
 from literature_workbench.features.library.repository import LibraryRepository
 from literature_workbench.features.library.scanner import LibraryScanner
+from literature_workbench.features.parser.models import StagedPdf
+from literature_workbench.features.parser.staging import (
+    open_current_source_for_content,
+    persist_structure_validation,
+    validate_staged_structure,
+)
 from literature_workbench.platform.windows.filesystem import SafeWindowsFileInspector
 from literature_workbench.worker import Worker
 from literature_workbench.worker import library_job_handlers
@@ -839,6 +846,85 @@ def test_same_content_imports_share_one_promotion_and_each_get_confirmation(
     assert {row["intent_id"] for row in confirmations} == {str(item.intent_id) for item in intents}
     assert len({row["document_id"] for row in confirmations}) == 1
     assert documents == 1
+
+
+@pytest.mark.parametrize("with_inspector", [True, False])
+@pytest.mark.parametrize("damage", [None, "confirmation", "intent", "root", "permission", "source"])
+def test_parsing_preserves_only_proven_import_authorization(
+    tmp_path: Path, database, with_inspector: bool, damage: str | None
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    service = ImportService(database, repository, _trusted(tmp_path), "generation-a", queue=queue)
+    validator = ImportValidator(database, queue, _trusted(tmp_path))
+    first = repository.create("generation-a", "first.pdf", len(body), "application/pdf")
+    asyncio.run(service.consume(first.intent_id, first.upload_token, _chunks(body)))
+    validator.validate_and_promote(first.intent_id)
+    assert repository.get(first.intent_id, "generation-a").status == "completed"
+    with database.connect() as connection:
+        row = connection.execute("SELECT content_sha256,path FROM documents").fetchone()
+    digest = row["content_sha256"]
+    inspector = SafeWindowsFileInspector()
+    source = open_current_source_for_content(database, inspector, digest)
+    try:
+        staged = StagedPdf(digest, uuid4(), Path(row["path"]), digest, None)
+        validation = validate_staged_structure(staged)
+        with database.transaction() as connection:
+            if damage == "confirmation":
+                connection.execute("UPDATE confirmed_imports SET final_path_key='wrong'")
+            elif damage == "intent":
+                connection.execute("UPDATE import_intents SET status='failed'")
+            elif damage == "root":
+                connection.execute("UPDATE libraries SET authorization_source='user'")
+            elif damage == "permission":
+                connection.execute("UPDATE libraries SET cloud_pdf_auto_allowed=0")
+            elif damage == "source":
+                connection.execute("UPDATE documents SET authorization_source='user'")
+        persist_structure_validation(
+            database, validation, source.identity,
+            inspector=inspector if with_inspector else None,
+        )
+    finally:
+        source.close()
+    with database.connect() as connection:
+        eligible = connection.execute("SELECT auto_cloud_eligible FROM documents").fetchone()[0]
+    assert eligible == int(damage is None)
+    if damage is None:
+        second = repository.create("generation-a", "second.pdf", len(body), "application/pdf")
+        asyncio.run(service.consume(second.intent_id, second.upload_token, _chunks(body)))
+        validator.validate_and_promote(second.intent_id)
+        assert repository.get(second.intent_id, "generation-a").status == "completed"
+        with database.connect() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+            assert connection.execute("SELECT COUNT(*) FROM confirmed_imports").fetchone()[0] == 2
+
+
+@pytest.mark.parametrize("binding_intact", [True, False])
+def test_reimport_repairs_legacy_eligibility_only_with_confirmation(
+    tmp_path: Path, database, binding_intact: bool
+) -> None:
+    repository = ImportIntentRepository(database, _now)
+    queue = TaskQueue(database, _now)
+    body = _valid_pdf()
+    service = ImportService(database, repository, _trusted(tmp_path), "generation-a", queue=queue)
+    validator = ImportValidator(database, queue, _trusted(tmp_path))
+    first = repository.create("generation-a", "first.pdf", len(body), "application/pdf")
+    asyncio.run(service.consume(first.intent_id, first.upload_token, _chunks(body)))
+    validator.validate_and_promote(first.intent_id)
+    with database.transaction() as connection:
+        connection.execute("UPDATE documents SET auto_cloud_eligible=0")
+        if not binding_intact:
+            connection.execute("UPDATE confirmed_imports SET final_path_key='wrong'")
+    second = repository.create("generation-a", "again.pdf", len(body), "application/pdf")
+    asyncio.run(service.consume(second.intent_id, second.upload_token, _chunks(body)))
+    validator.validate_and_promote(second.intent_id)
+    view = repository.get(second.intent_id, "generation-a")
+    assert view.status == ("completed" if binding_intact else "failed")
+    if not binding_intact:
+        assert view.error_code == "document_binding_conflict"
+    with database.connect() as connection:
+        assert connection.execute("SELECT auto_cloud_eligible FROM documents").fetchone()[0] == int(binding_intact)
 
 
 def test_existing_document_must_match_full_confirmed_import_binding(

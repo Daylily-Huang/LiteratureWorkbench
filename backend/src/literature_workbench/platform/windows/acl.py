@@ -16,6 +16,9 @@ from literature_workbench.platform.windows.filesystem import (
     OwnedFileHandle,
     Win32FileMetadataProvider,
 )
+from literature_workbench.platform.windows.powershell import (
+    default_powershell_candidates,
+)
 
 
 SYSTEM_SID = "S-1-5-18"
@@ -97,14 +100,24 @@ class DaclReader(Protocol):
 
 
 class PowerShellDaclReader:
-    def __init__(self, runner: AclCommandRunner) -> None:
+    def __init__(
+        self,
+        runner: AclCommandRunner,
+        *,
+        executables: tuple[str, ...] | None = None,
+    ) -> None:
         self._runner = runner
+        self._executables = (
+            tuple(executables)
+            if executables is not None
+            else default_powershell_candidates()
+        )
 
     def read(self, target: Path) -> DaclSnapshot:
         encoded_target = base64.b64encode(str(target).encode("utf-8")).decode("ascii")
         script = _DACL_SCRIPT.replace("__TARGET_B64__", encoded_target)
         result: AclCommandResult | None = None
-        for executable in ("pwsh.exe", "powershell.exe"):
+        for executable in self._executables:
             try:
                 result = self._runner.run(
                     [executable, "-NoProfile", "-Command", script]

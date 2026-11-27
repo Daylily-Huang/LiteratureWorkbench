@@ -167,6 +167,34 @@ def test_folder_dialog_normalizes_process_start_and_timeout_errors(error: BaseEx
     assert "private" not in str(exc_info.value)
 
 
+def test_folder_dialog_falls_back_to_absolute_powershell_when_path_is_stripped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected = r"C:\文献 库\论文"
+    pwsh_absolute = tmp_path / "PowerShell" / "7" / "pwsh.exe"
+    pwsh_absolute.parent.mkdir(parents=True)
+    pwsh_absolute.write_text("", encoding="utf-8")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    monkeypatch.setenv("SystemRoot", str(tmp_path / "no-system32-here"))
+
+    class StrippedPathDialogRunner(FakeDialogRunner):
+        def run(self, arguments: list[str]) -> CommandResult:
+            self.calls.append(arguments)
+            if arguments[0] in {"pwsh.exe", "powershell.exe"}:
+                raise OSError("not on PATH")
+            return CommandResult(0, selected + "\r\n", "")
+
+    runner = StrippedPathDialogRunner(CommandResult(0, "", ""))
+
+    assert FolderDialog(runner).select() == Path(selected)
+    assert [call[0] for call in runner.calls] == [
+        "pwsh.exe",
+        "powershell.exe",
+        str(pwsh_absolute),
+    ]
+
+
 def test_select_root_cancellation_returns_204_without_token_or_root(tmp_path: Path) -> None:
     session = LocalSession()
     with _client(tmp_path, session, FakeFolderDialog(result=None), FakeInspector()) as client:
@@ -345,8 +373,22 @@ def test_initial_approved_root_is_fixed_and_environment_override_is_ignored(
     library = service.register_initial_approved_library()
 
     assert inspector.inspected == [INITIAL_APPROVED_LIBRARY]
+    assert library is not None
     assert library.canonical_path == INITIAL_APPROVED_LIBRARY
     assert library.authorization_source == "initial_user_approved"
+
+
+def test_initial_approved_root_missing_fails_safely(tmp_path: Path) -> None:
+    database = Database.open(tmp_path / "library.db")
+    run_migrations(database)
+    inspector = FakeInspector(FileNotFoundError("not found"))
+    service = LibraryRootService(
+        LibraryRepository(database),
+        inspector,
+        private_data_root=tmp_path / "private-data",
+    )
+
+    assert service.register_initial_approved_library() is None
 
 
 def test_select_root_requires_central_session_and_csrf_policy(tmp_path: Path) -> None:

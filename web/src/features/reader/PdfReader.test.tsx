@@ -132,6 +132,27 @@ function setSelection(
 
 
 describe("PdfReader", () => {
+  it("reloads the PDF after a content version changes without resetting the reader", async () => {
+    const props = readerProps();
+    const view = render(<PdfReader {...props} initialPage={2} initialScale={1.5} />);
+    await screen.findByRole("toolbar", { name: "PDF 工具栏" });
+    await waitFor(() => expect(pdf.getDocument).toHaveBeenCalledTimes(1));
+    view.rerender(<PdfReader {...props} contentId="content-b" initialPage={2} initialScale={1.5} />);
+    await waitFor(() => expect(pdf.getDocument).toHaveBeenCalledTimes(2));
+    expect(screen.getByLabelText("缩放比例")).toHaveTextContent("150%");
+    expect(pdf.getDocument.mock.calls[1]?.[0].url).toBe("/api/documents/document-a/file");
+  });
+  it("restores the tab zoom and reports later zoom changes with the document identity", async () => {
+    const onScaleChange = vi.fn();
+    render(<PdfReader {...readerProps()} initialScale={1.5} onScaleChange={onScaleChange} />);
+    await screen.findByRole("toolbar", { name: "PDF 工具栏" });
+    expect(screen.getByLabelText("缩放比例")).toHaveTextContent("150%");
+    await waitFor(() => expect(onScaleChange).toHaveBeenLastCalledWith("document-a", 1.5));
+    fireEvent.click(screen.getByRole("button", { name: "放大" }));
+    expect(screen.getByLabelText("缩放比例")).toHaveTextContent("175%");
+    expect(onScaleChange).toHaveBeenLastCalledWith("document-a", 1.75);
+  });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -261,6 +282,7 @@ describe("PdfReader", () => {
     const pageInput = within(toolbar).getByRole("spinbutton", { name: "PDF 页码" });
 
     fireEvent.change(pageInput, { target: { value: "5" } });
+    fireEvent.keyDown(pageInput, { key: "Enter" });
 
     await waitFor(() => expect(within(toolbar).getByText("5 / 5")).toBeVisible());
     expect(within(toolbar).getByRole("button", { name: "上一页" })).toBeEnabled();
@@ -483,6 +505,38 @@ describe("PdfReader", () => {
 
     expect(onTranslateSelection).toHaveBeenCalledTimes(1);
     expect(onTranslateSelection.mock.calls[0]?.[0]).toMatchObject({ text: "selected" });
+  });
+
+  it("copies each reader's frozen selection and leaves native or editable text alone", async () => {
+    render(<><PdfReader {...readerProps()} onAnnotateSelection={vi.fn()} />
+      <PdfReader {...readerProps()} documentId="document-b" filename="other.pdf" /></>);
+    for (const [name, text] of [["paper.pdf", "left text"], ["other.pdf", "right text"]]) {
+      const reader = await screen.findByRole("region", { name: `阅读 ${name}` });
+      const page = within(reader).getByRole("region", { name: "PDF 第 1 页" });
+      const node = await renderedTextNode(page);
+      setSelection(node, node, text!, [{ left: 20, top: 20, right: 100, bottom: 40, width: 80, height: 20 }]);
+      fireEvent.pointerUp(page);
+      expect(document.activeElement).toBe(reader.querySelector(".pdf-reader__pages"));
+      const setData = vi.fn();
+      expect(fireEvent.copy(document.activeElement!, { clipboardData: { setData } })).toBe(false);
+      expect(setData).toHaveBeenCalledWith("text/plain", text);
+    }
+    const left = screen.getByRole("region", { name: "阅读 paper.pdf" });
+    const setData = vi.fn();
+    fireEvent.copy(left.querySelector(".pdf-reader__pages")!, { clipboardData: { setData } });
+    expect(setData).toHaveBeenCalledWith("text/plain", "left text");
+    setData.mockClear();
+    fireEvent.click(within(left).getByRole("button", { name: "评论" }));
+    fireEvent.copy(within(left).getByRole("textbox", { name: "评论内容" }), { clipboardData: { setData } });
+    expect(setData).not.toHaveBeenCalled();
+    const node = await renderedTextNode(within(left).getByRole("region", { name: "PDF 第 1 页" }));
+    setSelection(node, node, "native selection", []);
+    fireEvent.copy(left.querySelector(".pdf-reader__pages")!, { clipboardData: { setData } });
+    expect(setData).not.toHaveBeenCalled();
+    window.getSelection()?.removeAllRanges();
+    fireEvent.click(within(left).getByRole("button", { name: "取消" }));
+    fireEvent.copy(left.querySelector(".pdf-reader__pages")!, { clipboardData: { setData } });
+    expect(setData).not.toHaveBeenCalled();
   });
 
   it("preserves a frozen selection when the user opens the right-click menu", async () => {
@@ -796,7 +850,7 @@ describe("PdfReader", () => {
     }));
   });
 
-  it("does not reload the whole PDF for a same-document annotation version", async () => {
+  it("reloads an annotation version without closing the reader", async () => {
     const { rerender } = render(<PdfReader {...readerProps()} />);
     const toolbar = await screen.findByRole("toolbar", { name: "PDF 工具栏" });
     expect(toolbar).toBeVisible();
@@ -811,7 +865,7 @@ describe("PdfReader", () => {
 
     expect(screen.getByRole("toolbar", { name: "PDF 工具栏" })).toBeVisible();
     expect(screen.queryByText(/正在打开/)).not.toBeInTheDocument();
-    expect(pdf.getDocument).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(pdf.getDocument).toHaveBeenCalledTimes(2));
   });
 
   it("loads a new PDF when the document itself changes", async () => {
@@ -866,6 +920,38 @@ describe("PdfReader", () => {
       expect((reloadedPages as HTMLElement).scrollTop).toBe(420);
       expect((reloadedPages as HTMLElement).scrollLeft).toBe(35);
     });
-    expect(pdf.getDocument).toHaveBeenCalledTimes(1);
+    expect(pdf.getDocument).toHaveBeenCalledTimes(2);
+  });
+
+  it("calculates page index mathematically from scroll position and page heights", async () => {
+    const { findCurrentPageIndex } = await import("./PdfReader");
+    const pageSizes = [
+      { width: 600, height: 800 },
+      { width: 600, height: 800 },
+      { width: 600, height: 1000 },
+      { width: 600, height: 800 },
+    ];
+
+    // Page 0 (paddingTop 24 + height 800 + gap 24 = 848): targetOffset at 0 is 400 < 848
+    expect(findCurrentPageIndex(0, 800, pageSizes, 1)).toBe(0);
+    expect(findCurrentPageIndex(200, 800, pageSizes, 1)).toBe(0);
+
+    // Scrolled into page 1: center lands in page 1
+    expect(findCurrentPageIndex(848, 800, pageSizes, 1)).toBe(1);
+
+    // Scrolled into page 2 (height 1000)
+    expect(findCurrentPageIndex(1672, 800, pageSizes, 1)).toBe(2);
+
+    // Zoom scale 1.5
+    expect(findCurrentPageIndex(0, 800, pageSizes, 1.5)).toBe(0);
+    // Page 0 at 1.5 scale is 24 + 1200 + 24 = 1248
+    expect(findCurrentPageIndex(1248, 800, pageSizes, 1.5)).toBe(1);
+
+    // Explicit custom gap and padding
+    expect(findCurrentPageIndex(0, 800, pageSizes, 1, 16, 16)).toBe(0);
+    expect(findCurrentPageIndex(816, 800, pageSizes, 1, 16, 16)).toBe(1);
+
+    // Empty page sizes fallback
+    expect(findCurrentPageIndex(500, 800, [], 1)).toBe(0);
   });
 });

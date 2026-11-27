@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
+from uuid import UUID
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 
 from literature_workbench.api.app import create_app
 from literature_workbench.config import AppSettings
+from literature_workbench.features.annotations.service import AnnotationError, PdfAnnotationService
 from literature_workbench.platform.windows.filesystem import SafeWindowsFileInspector
 from literature_workbench.security.local_session import LocalSession
 
@@ -21,21 +28,24 @@ def _headers(session: LocalSession) -> dict[str, str]:
     return {"Origin": "http://testserver", "X-LW-CSRF": session.csrf_token}
 
 
-def _source_pdf(path: Path) -> None:
+def _source_pdf(path: Path, multipage: bool = False) -> None:
     with fitz.open() as document:
         page = document.new_page(width=400, height=500)
         page.insert_text((72, 90), "A precise sentence for annotation testing.")
         historical = page.add_highlight_annot(fitz.Rect(70, 72, 260, 96))
         historical.set_info(title="Other PDF editor", content="historical note")
         historical.update()
+        if multipage:
+            page = document.new_page(width=400, height=500)
+            page.insert_text((72, 90), "A second page for annotation testing.")
         document.save(path)
 
 
-def _registered_client(tmp_path: Path) -> tuple[TestClient, LocalSession, Path, str]:
+def _registered_client(tmp_path: Path, *, multipage: bool = False) -> tuple[TestClient, LocalSession, Path, str]:
     library = tmp_path / "library"
     library.mkdir()
     source = library / "paper.pdf"
-    _source_pdf(source)
+    _source_pdf(source, multipage=multipage)
     session = LocalSession()
     app = create_app(
         AppSettings(data_root=tmp_path / "data", allowed_hosts=("testserver",)),
@@ -68,6 +78,140 @@ def _annotation_request(detail: dict[str, object]) -> dict[str, object]:
         "color": "yellow",
         "comment": "",
     }
+
+
+def test_same_owned_mark_is_a_noop_but_different_comments_and_types_are_preserved(tmp_path: Path) -> None:
+    client, session, source, document_id = _registered_client(tmp_path)
+    try:
+        url = f"/api/documents/{document_id}/annotations"
+        detail = client.get(f"/api/documents/{document_id}").json()
+        body = _annotation_request(detail)
+        first = client.post(url, headers=_headers(session), json=body)
+        assert first.status_code == 201
+        current = client.get(url).json()
+        before = _hash(source)
+        body.update(document_version_id=current["current_document_version_id"], content_id=current["content_id"])
+        body["color"] = "green"
+        duplicate = client.post(url, headers=_headers(session), json=body)
+        assert duplicate.status_code == 201 and duplicate.json()["duplicate"] is True
+        assert duplicate.json()["annotation_id"] == first.json()["annotation_id"]
+        assert _hash(source) == before
+        assert len(client.get(url).json()["items"]) == len(current["items"])
+        for kind, comment in [("comment", "first note"), ("underline", ""), ("comment", "different note")]:
+            current = client.get(url).json()
+            body.update(document_version_id=current["current_document_version_id"], content_id=current["content_id"], type=kind, comment=comment)
+            assert client.post(url, headers=_headers(session), json=body).status_code == 201
+        current = client.get(url).json()
+        notes = [item["comment"] for item in current["items"] if item["type"] == "comment"]
+        assert notes == ["first note", "different note"]
+        assert len([item for item in current["items"] if item["owned"]]) == 4
+        before = _hash(source)
+        body.update(document_version_id=current["current_document_version_id"], content_id=current["content_id"])
+        assert client.post(url, headers=_headers(session), json=body).json()["duplicate"] is True
+        assert _hash(source) == before
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_reused_pdf_annotation_names_are_page_unique_and_ambiguous_legacy_ids_rejected(tmp_path: Path) -> None:
+    client, session, source, document_id = _registered_client(tmp_path, multipage=True)
+    try:
+        url = f"/api/documents/{document_id}/annotations"
+        detail = client.get(f"/api/documents/{document_id}").json()
+        body = _annotation_request(detail)
+        for page, comment in [(1, "first-page"), (2, "second-page-a"), (2, "second-page-b")]:
+            body.update(page=page, type="comment", comment=comment)
+            response = client.post(url, headers=_headers(session), json=body)
+            assert response.status_code == 201, response.text
+            identity = response.json()
+            body.update(document_version_id=identity["current_document_version_id"], content_id=identity["content_id"])
+        with fitz.open(source) as pdf:
+            names = [(page.number + 1, annot.info["id"]) for page in pdf for annot in (page.annots() or ())]
+        assert (1, "fitz-A1") in names and (2, "fitz-A1") in names
+        state = client.get(url).json()
+        owned = [x for x in state["items"] if x["owned"]]
+        assert len({x["annotation_id"] for x in state["items"]}) == len(state["items"])
+        target = next(x for x in owned if x["comment"] == "second-page-b")
+        before = _hash(source)
+        identity = {"document_version_id": state["current_document_version_id"], "content_id": state["content_id"]}
+        bad = client.patch(url + "/fitz-A1", headers=_headers(session), json={**identity, "comment": "wrong"})
+        assert bad.status_code == 409 and bad.json()["code"] == "annotation_ambiguous_id"
+        assert _hash(source) == before
+        edit = client.patch(url + "/" + target["annotation_id"], headers=_headers(session), json={**identity, "comment": "edited-second-page"})
+        assert edit.status_code == 200, edit.text
+        current = client.get(url).json()
+        assert {x["comment"] for x in current["items"] if x["owned"]} == {"first-page", "second-page-a", "edited-second-page"}
+        delete = client.request("DELETE", url + "/" + target["annotation_id"], headers=_headers(session), json={"document_version_id":current["current_document_version_id"],"content_id":current["content_id"]})
+        assert delete.status_code == 200
+        assert client.post(url + "/undo", headers=_headers(session)).status_code == 200
+        restored = client.get(url).json()
+        assert {x["comment"] for x in restored["items"] if x["owned"]} == {"first-page", "second-page-a", "edited-second-page"}
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_new_id_collision_with_legacy_name_is_rejected_and_unique_legacy_id_works() -> None:
+    with fitz.open() as document:
+        page = document.new_page()
+        first = page.add_highlight_annot(fitz.Rect(40, 40, 100, 55))
+        second = page.add_highlight_annot(fitz.Rect(40, 70, 100, 85))
+        second_id = PdfAnnotationService._annotation_id(page, second)
+        document.xref_set_key(first.xref, "NM", fitz.get_pdf_str(second_id))
+        with pytest.raises(AnnotationError, match="annotation_ambiguous_id"):
+            PdfAnnotationService._find_annotation(document, second_id)
+        _, found = PdfAnnotationService._find_annotation(document, "fitz-A1")
+        assert found.xref == second.xref
+
+
+def test_list_waits_for_restore_and_returns_matching_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, session, source, doc_id = _registered_client(tmp_path)
+    paused, release, reader_started = Event(), Event(), Event()
+    real_copy = shutil.copy2
+    try:
+        detail = client.get(f"/api/documents/{doc_id}").json()
+        created = client.post(
+            f"/api/documents/{doc_id}/annotations", headers=_headers(session),
+            json=_annotation_request(detail),
+        )
+        assert created.status_code == 201
+        service = client.app.state.annotation_service
+
+        def slow_restore(src: object, dst: object, **kwargs: object) -> object:
+            if Path(str(src)).name == "baseline.pdf" and Path(str(dst)).as_posix().removeprefix("//?/") == source.as_posix():
+                # Reproduce the partial-file window during a real restoration.
+                source.write_bytes(b"%PDF-incomplete")
+                paused.set()
+                assert release.wait(5)
+            return real_copy(src, dst, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(shutil, "copy2", slow_restore)
+
+        def read() -> dict[str, object]:
+            reader_started.set()
+            return service.list_annotations(UUID(doc_id))
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            restore = pool.submit(service.restore_baseline, UUID(doc_id), confirm_filename="paper.pdf")
+            try:
+                assert paused.wait(5)
+                listed = pool.submit(read)
+                assert reader_started.wait(5)
+                from concurrent.futures import TimeoutError
+
+                with pytest.raises(TimeoutError):
+                    listed.result(timeout=0.1)
+            finally:
+                release.set()
+            identity = restore.result(timeout=5)
+            result = listed.result(timeout=5)
+        assert result["current_document_version_id"] == identity["current_document_version_id"]
+        assert result["content_id"] == identity["content_id"]
+        assert all(not item["owned"] for item in result["items"])
+    finally:
+        release.set()
+        client.__exit__(None, None, None)
 
 
 def test_annotation_rejects_same_content_path_replacement(tmp_path: Path) -> None:
@@ -214,5 +358,261 @@ def test_annotation_rejects_stale_document_identity_without_touching_pdf(tmp_pat
         assert response.status_code == 409
         assert response.json() == {"code": "annotation_document_version_conflict"}
         assert _hash(source) == before
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_annotation_crash_journal_recovery(tmp_path: Path) -> None:
+    client, session, source, document_id = _registered_client(tmp_path)
+    try:
+        data_root = tmp_path / "data"
+        backup_root = data_root / ".annotation-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+
+        original_hash = _hash(source)
+        # Create a backup snapshot of original file
+        fake_snapshot = backup_root / "fake_snapshot.pdf"
+        fake_snapshot.write_bytes(source.read_bytes())
+
+        # Simulate corrupted / half-written file on disk
+        source.write_bytes(b"%PDF-corrupted-content")
+        assert _hash(source) != original_hash
+
+        # Write an orphaned crash journal
+        journal_file = backup_root / f"journal-{document_id}.json"
+        journal_file.write_text(
+            json.dumps({
+                "document_id": document_id,
+                "path": str(source),
+                "pre_hash": original_hash,
+                "backup_path": str(fake_snapshot),
+                "created_at": "2026-08-20T00:00:00Z",
+            }),
+            encoding="utf-8",
+        )
+
+        # Trigger recovery
+        client.app.state.annotation_service.reconcile_crashed_mutations()
+
+        # Target file restored to pre-mutation hash and journal cleaned up
+        assert _hash(source) == original_hash
+        assert not journal_file.exists()
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_atomic_mutation_rollback_on_db_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, session, source, document_id = _registered_client(tmp_path)
+    try:
+        original_hash = _hash(source)
+        detail = client.get(f"/api/documents/{document_id}").json()
+
+        service = client.app.state.annotation_service
+        def failing_record(*args: object, **kwargs: object) -> dict[str, object]:
+            raise RuntimeError("simulated_db_crash")
+        monkeypatch.setattr(service, "_record_version_and_mutation", failing_record)
+
+        with pytest.raises(RuntimeError, match="simulated_db_crash"):
+            service.create(
+                UUID(str(detail["document_id"])),
+                document_version_id=UUID(str(detail["current_document_version_id"])),
+                content_id=str(detail["content_id"]),
+                page_number=1,
+                annotation_type="highlight",
+                quads=[[72, 410, 260, 410, 72, 428, 260, 428]],
+                color="yellow",
+                comment="",
+            )
+
+        assert _hash(source) == original_hash
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_undo_rollback_on_db_error_preserves_current_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, session, source, document_id = _registered_client(tmp_path)
+    try:
+        detail = client.get(f"/api/documents/{document_id}").json()
+        service = client.app.state.annotation_service
+
+        # Perform mutation A -> B
+        service.create(
+            UUID(str(detail["document_id"])),
+            document_version_id=UUID(str(detail["current_document_version_id"])),
+            content_id=str(detail["content_id"]),
+            page_number=1,
+            annotation_type="highlight",
+            quads=[[72, 410, 260, 410, 72, 428, 260, 428]],
+            color="yellow",
+            comment="",
+        )
+        state_b_hash = _hash(source)
+
+        # Simulate failure during undo DB record
+        def failing_undo_record(*args: object, **kwargs: object) -> dict[str, object]:
+            raise RuntimeError("simulated_undo_db_crash")
+
+        monkeypatch.setattr(service, "_record_undo_version", failing_undo_record)
+
+        with pytest.raises(RuntimeError, match="simulated_undo_db_crash"):
+            service.undo(UUID(str(detail["document_id"])))
+
+        # Crucial invariant: if undo fails mid-way, source PDF must remain at State B
+        assert _hash(source) == state_b_hash
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_postcommit_pruning_failure_preserves_pdf_and_db_consistency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, session, source, doc_id = _registered_client(tmp_path)
+    try:
+        detail = client.get(f"/api/documents/{doc_id}").json()
+        service = client.app.state.annotation_service
+        original_hash = _hash(source)
+
+        def failing_prune(*args: object, **kwargs: object) -> None:
+            raise PermissionError("simulated locked old snapshot")
+
+        monkeypatch.setattr(service, "_prune_snapshots", failing_prune)
+
+        # Mutation must succeed even if pruning old snapshots encounters a lock/permission error
+        result = service.create(
+            UUID(doc_id),
+            document_version_id=UUID(detail["current_document_version_id"]),
+            content_id=detail["content_id"],
+            page_number=1,
+            annotation_type="highlight",
+            quads=[[72, 410, 260, 410, 72, 428, 260, 428]],
+            color="yellow",
+            comment="",
+        )
+        assert result["content_id"] != original_hash
+        assert _hash(source) == result["content_id"]
+
+        after = client.get(f"/api/documents/{doc_id}").json()
+        assert after["content_id"] == result["content_id"]
+
+        # Annotations read must return 200 without version conflict
+        annotations_resp = client.get(f"/api/documents/{doc_id}/annotations")
+        assert annotations_resp.status_code == 200
+        assert len(annotations_resp.json()["items"]) == 2
+
+        # Crash recovery journal must be clean
+        backup_root = tmp_path / "data" / ".annotation-backups"
+        assert not (backup_root / f"journal-{doc_id}.json").exists()
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_crash_recovery_preserves_externally_replaced_file(tmp_path: Path) -> None:
+    client, session, source, doc_id = _registered_client(tmp_path)
+    try:
+        service = client.app.state.annotation_service
+        backup_root = tmp_path / "data" / ".annotation-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        backup = backup_root / "snapshot.pdf"
+        backup.write_bytes(source.read_bytes())
+        before_hash = _hash(source)
+
+        # External editor replaces the file with a new file
+        replacement = source.with_name("replacement.pdf")
+        _source_pdf(replacement)
+        with fitz.open(replacement) as pdf:
+            pdf[0].insert_text((72, 150), "External edit that must survive")
+            pdf.saveIncr()
+        replacement.replace(source)
+        external_hash = _hash(source)
+        assert external_hash != before_hash
+
+        journal = backup_root / f"journal-{doc_id}.json"
+        journal.write_text(
+            json.dumps({
+                "document_id": doc_id,
+                "path": str(source),
+                "pre_hash": before_hash,
+                "backup_path": str(backup),
+            }),
+            encoding="utf-8",
+        )
+
+        service.reconcile_crashed_mutations()
+
+        # External replacement must NOT be overwritten!
+        assert _hash(source) == external_hash
+        assert backup.exists()
+        assert journal.exists()
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_crash_recovery_corrupted_backup_preserves_target_and_journal(tmp_path: Path) -> None:
+    client, session, source, doc_id = _registered_client(tmp_path)
+    try:
+        service = client.app.state.annotation_service
+        backup_root = tmp_path / "data" / ".annotation-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        backup = backup_root / "snapshot.pdf"
+        backup.write_bytes(b"%PDF-corrupted-snapshot-bytes")
+        before_hash = _hash(source)
+
+        # Corrupt file on disk
+        source.write_bytes(b"%PDF-half-written-on-disk")
+
+        journal = backup_root / f"journal-{doc_id}.json"
+        journal.write_text(
+            json.dumps({
+                "document_id": doc_id,
+                "path": str(source),
+                "pre_hash": before_hash,
+                "backup_path": str(backup),
+            }),
+            encoding="utf-8",
+        )
+
+        service.reconcile_crashed_mutations()
+
+        # Because backup hash != pre_hash, recovery must fail-closed and preserve journal
+        assert journal.exists()
+        assert source.read_bytes() == b"%PDF-half-written-on-disk"
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_crash_recovery_inactive_library_preserves_target_and_journal(tmp_path: Path) -> None:
+    client, session, source, doc_id = _registered_client(tmp_path)
+    try:
+        service = client.app.state.annotation_service
+        backup_root = tmp_path / "data" / ".annotation-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        backup = backup_root / "snapshot.pdf"
+        backup.write_bytes(source.read_bytes())
+        before_hash = _hash(source)
+
+        source.write_bytes(b"%PDF-half-written")
+
+        # Deactivate library in DB
+        with client.app.state.database.transaction() as conn:
+            conn.execute("UPDATE libraries SET status = 'disabled'")
+
+        journal = backup_root / f"journal-{doc_id}.json"
+        journal.write_text(
+            json.dumps({
+                "document_id": doc_id,
+                "path": str(source),
+                "pre_hash": before_hash,
+                "backup_path": str(backup),
+            }),
+            encoding="utf-8",
+        )
+
+        service.reconcile_crashed_mutations()
+
+        # Inactive library: cannot recover or overwrite
+        assert journal.exists()
+        assert source.read_bytes() == b"%PDF-half-written"
     finally:
         client.__exit__(None, None, None)

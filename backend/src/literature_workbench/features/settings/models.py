@@ -14,6 +14,7 @@ class PublicSettings(BaseModel):
     deepseek_model: str = "deepseek-v4-flash"
     qwen_fallback_enabled: bool = False
     default_translation_mode: TranslationMode = "online"
+    translation_glossary: str = ""
 
 
 class SettingsPatch(BaseModel):
@@ -27,6 +28,7 @@ class SettingsPatch(BaseModel):
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
     )
     qwen_fallback_enabled: bool | None = None
+    translation_glossary: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
     def reject_explicit_null(self) -> Self:
@@ -34,6 +36,7 @@ class SettingsPatch(BaseModel):
             "default_translation_mode",
             "deepseek_model",
             "qwen_fallback_enabled",
+            "translation_glossary",
         ):
             if field_name in self.model_fields_set and getattr(self, field_name) is None:
                 raise ValueError(f"{field_name} may be omitted but not null")

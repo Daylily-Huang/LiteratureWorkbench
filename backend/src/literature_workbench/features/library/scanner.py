@@ -8,6 +8,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from literature_workbench.platform.windows.paths import io_path, ordinary_path
 from uuid import UUID, uuid4
 
 from literature_workbench.db.database import Database
@@ -134,7 +135,7 @@ class LibraryScanner:
         for candidate in normalized.values():
             affected.append(candidate)
             try:
-                metadata = os.lstat(candidate)
+                metadata = os.lstat(io_path(candidate))
             except FileNotFoundError:
                 candidates.extend(self._active_peer_paths_for_missing(library, candidate))
                 continue
@@ -361,7 +362,7 @@ class LibraryScanner:
             directory = pending.pop()
             try:
                 with self._inspector.hold_directory_for_enumeration(directory, library):
-                    with os.scandir(directory) as entries:
+                    with os.scandir(io_path(directory)) as entries:
                         for entry in entries:
                             try:
                                 metadata = entry.stat(follow_symlinks=False)
@@ -370,15 +371,15 @@ class LibraryScanner:
                                 incomplete = True
                                 entry_path = getattr(entry, "path", None)
                                 if entry_path is not None:
-                                    incomplete_paths.append(Path(entry_path))
+                                    incomplete_paths.append(ordinary_path(Path(entry_path)))
                                 continue
                             attributes = int(getattr(metadata, "st_file_attributes", 0))
                             if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                                 unsafe_paths += 1
                                 incomplete = True
-                                incomplete_paths.append(Path(entry.path))
+                                incomplete_paths.append(ordinary_path(Path(entry.path)))
                                 continue
-                            path = Path(entry.path)
+                            path = ordinary_path(Path(entry.path))
                             if stat.S_ISDIR(metadata.st_mode):
                                 if recursive:
                                     pending.append(path)

@@ -41,8 +41,11 @@ def _authors(value: object) -> list[str] | None:
 
 def _serialize(row: sqlite3.Row) -> dict[str, Any]:
     content_id = None if row["content_sha256"] is None else str(row["content_sha256"])
+    root = Path(str(row["root_path"]))
     return {
         "document_id": str(row["id"]),
+        "library_id": str(row["library_id"]),
+        "library_name": f"{root.parent.name} / {root.name}" if root.parent.name else root.name,
         "current_document_version_id": row["current_document_version_id"],
         "content_id": content_id,
         "etag": content_id,

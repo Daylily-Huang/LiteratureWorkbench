@@ -88,3 +88,22 @@ test("opens the active path, marks the active PDF, and forwards clicks", async (
   await user.click(screen.getByRole("button", { name: "next.pdf" }));
   expect(onOpenDocument).toHaveBeenCalledWith("next");
 });
+
+test("counts all descendant papers rather than child folders", () => {
+  render(<DocumentTree activeDocumentId={null} documents={[
+    document("a", "a.pdf", "研究/方法"), document("b", "b.pdf", "研究/方法"),
+    document("c", "c.pdf", "研究/数据"),
+  ]} onOpenDocument={() => undefined} />);
+  expect(screen.getByText("研究").querySelector("small")).toHaveTextContent("3");
+});
+
+
+test("keeps same-named source folders separate by library identity", () => {
+  render(<DocumentTree activeDocumentId={null} expandAll documents={[
+    {...document("first", "same.pdf", "methods"), library_id:"one",library_name:"papers"},
+    {...document("second", "same.pdf", "methods"), library_id:"two",library_name:"papers"},
+  ]} onOpenDocument={()=>{}} />);
+  const roots=screen.getAllByText("papers");
+  expect(roots).toHaveLength(2);
+  for(const root of roots) expect(within(root.closest("details")!).getAllByRole("button")).toHaveLength(1);
+});

@@ -211,6 +211,7 @@ def test_unavailable_service_launches_only_fixed_assets_and_records_ownership(
         transport=httpx.MockTransport(handler),
         launcher=lambda args, log: launched.append((args, log)) or 321,
         identity_lookup=lambda pid: expected_identity(pid),
+        listener_owner=lambda host, port: expected_identity(321),
         clock=FakeClock(),
     )
     lease = manager.ensure_running()
@@ -259,6 +260,7 @@ def test_prelaunch_connect_timeout_is_treated_as_unavailable_service(
         transport=httpx.MockTransport(handler),
         launcher=lambda args, log: launches.append(args) or 321,
         identity_lookup=lambda pid: expected_identity(pid),
+        listener_owner=lambda host, port: expected_identity(321),
         clock=FakeClock(),
     )
 
@@ -350,19 +352,52 @@ def test_post_launch_not_ready_response_is_polled_until_ready(
             request=request,
         )
 
-    clock = FakeClock()
+        clock = FakeClock()
+        manager = QwenProcessManager(
+            tmp_path / "qwen",
+            transport=httpx.MockTransport(handler),
+            launcher=lambda args, log: 321,
+            identity_lookup=lambda pid: expected_identity(pid),
+            listener_owner=lambda host, port: expected_identity(321),
+            clock=clock,
+        )
+
+        lease = manager.ensure_running()
+
+        assert lease.borrowed is False
+        assert clock.now == 1.0
+
+
+def test_post_launch_listener_none_fails_closed(tmp_path: Path) -> None:
+    stops: list[int] = []
+    live = True
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            raise httpx.ConnectError("offline", request=request)
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+        return httpx.Response(200, json={"data": [{"id": EXPECTED_ALIAS}]}, request=request)
+
+    def stop(pid: int) -> None:
+        nonlocal live
+        stops.append(pid)
+        live = False
+
     manager = QwenProcessManager(
         tmp_path / "qwen",
         transport=httpx.MockTransport(handler),
         launcher=lambda args, log: 321,
-        identity_lookup=lambda pid: expected_identity(pid),
-        clock=clock,
+        identity_lookup=lambda pid: expected_identity(pid) if live else None,
+        listener_owner=lambda host, port: None,
+        stopper=stop,
     )
-
-    lease = manager.ensure_running()
-
-    assert lease.borrowed is False
-    assert clock.now == 1.0
+    with pytest.raises(QwenProcessError, match="qwen_port_identity_mismatch"):
+        manager.ensure_running()
+    assert stops == [321]
 
 
 @pytest.mark.parametrize("path", ["/health", "/v1/models"])
@@ -661,3 +696,51 @@ def test_startup_cleanup_keeps_evidence_when_exact_launched_process_survives(
         manager._cleanup_launched(identity)
 
     assert (runtime / "owned-process.json").exists()
+
+
+def test_ensure_running_serializes_concurrent_callers(tmp_path: Path) -> None:
+    import concurrent.futures
+
+    runtime = tmp_path / "qwen"
+    runtime.mkdir(parents=True)
+    launch_count = 0
+    launched_pid = 777
+    is_running = False
+
+    def fake_launcher(args: tuple[str, ...], log_path: Path) -> int:
+        nonlocal launch_count, is_running
+        time.sleep(0.05)
+        launch_count += 1
+        is_running = True
+        return launched_pid
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if not is_running:
+            raise httpx.ConnectError("not running", request=request)
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+        if request.url.path == "/v1/models":
+            return httpx.Response(
+                200, json={"data": [{"id": EXPECTED_ALIAS}]}, request=request
+            )
+        raise AssertionError(request.url)
+
+    manager = QwenProcessManager(
+        runtime,
+        transport=httpx.MockTransport(handler),
+        launcher=fake_launcher,
+        identity_lookup=lambda pid: expected_identity(pid),
+        listener_owner=lambda host, port: (
+            expected_identity(launched_pid) if is_running else None
+        ),
+    )
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(manager.ensure_running) for _ in range(5)]
+        for f in concurrent.futures.as_completed(futures):
+            results.append(f.result())
+
+    assert launch_count == 1
+    assert len(results) == 5
+    assert all(r.pid in (777, None) for r in results)

@@ -1,0 +1,54 @@
+{
+  "task": "inline comparison and resizable translation",
+  "created": "2026-10-19T11:03:48.1672314+08:00",
+  "files": [
+    {
+      "path": "web/src/app/Workbench.tsx",
+      "sha256": "324b3054a04f20ad2124924dce470e8f3e3da71da685660c8417f78703f80bbd"
+    },
+    {
+      "path": "web/src/app/Workbench.test.tsx",
+      "sha256": "af3a9defc26c63ca200b5cc5ba1831841de0bcdd662776b5f187d4050a60b230"
+    },
+    {
+      "path": "web/src/app/App.css",
+      "sha256": "1d84d83620ed0d5ec0fc095fe579334b01451c9ca6271d97f3c485db8dbd81b3"
+    },
+    {
+      "path": "web/src/features/reader/ComparisonPane.tsx",
+      "sha256": "2745d5f8e5d10109be33dfa0b3d48cdd34aa2d209481d2b319bf3d2edff4fa43"
+    },
+    {
+      "path": "web/src/features/reader/ComparisonPane.test.tsx",
+      "sha256": "0f5458520c64f060e962e098da0ebb4c1078b6a3f532a92b90732e329cc4ffbd"
+    },
+    {
+      "path": "web/src/features/reader/ResizableReadingSplit.tsx",
+      "sha256": "22ebdf720b795284bd1648a3424f8e1abc79840b3903746d33c21532b0cdeb64"
+    },
+    {
+      "path": "web/src/features/reader/PdfReader.tsx",
+      "sha256": "b19c646ef316122fb581bcb199d942d1b7d965329ecac8a0590cfa0e6ef9e0c3"
+    },
+    {
+      "path": "web/src/features/reader/SelectionOverlay.tsx",
+      "sha256": "30943320389580ba18ac60a736ec86796a85db61725b3124a03634192d182048"
+    },
+    {
+      "path": "web/src/features/reader/SelectionOverlay.test.tsx",
+      "sha256": "1723e1e6c8b03bd10d16cf9f0612e566b1fc80acacd2e74c26aff8baddb36838"
+    },
+    {
+      "path": "web/src/features/reader/ReaderTabs.tsx",
+      "sha256": "ded23f02bc32c8f07e9bc6de8a3667cd792b1be80642c4d425218a55b6963c34"
+    },
+    {
+      "path": "web/src/features/translation/TranslationPopover.tsx",
+      "sha256": "589eeab1c2c9f5a94d8618549eba48e2d9194a55590fb09107f36b88068358ff"
+    },
+    {
+      "path": "web/src/features/translation/TranslationPopover.test.tsx",
+      "sha256": "0d66b70d5390854a307d3f8fe38d99ba05ceaf567a6476fda4b6baadc1791298"
+    }
+  ]
+}

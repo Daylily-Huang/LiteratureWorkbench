@@ -1,0 +1,92 @@
+{
+  "candidate_manifest_sha256": "6bc7253fcc9704e285cae88b706e8e6396bff3dacfda13d3c90614162939fcdd",
+  "files": {
+    "web/src/app/Workbench.tsx": "2213DBC3FB57F092FC83FBB3822F9A281D0FCC3C1775721BCE5360D8BF7AF2AA",
+    "web/src/features/reader/ComparisonPane.tsx": "E2DC395AD07A78F42355A92FD6FBF55BB48DDABE27DFBDDFEF358F9A55F44FD7",
+    "web/src/features/research/AssistantPanel.tsx": "370F0A2F6236311A2A6550448AD24D4AC92B51EF62D987692E9993E9769473CE",
+    "web/src/features/reader/PdfReader.tsx": "C976B21CE26454E6B7DAE917B90B9A8192248022656F47305057D8EBB56865DD",
+    "web/src/features/research/ResearchNotebook.tsx": "3097C9273FC86C8549723A73F46C3C40D4A938C128A69D25396F63C0A6BC1C9D",
+    "web/src/features/research/ResearchStudio.test.tsx": "7AF5A6620729640BE1EA2C1D6FCD11B587BFCE966DB0DE9F21C1FF2FDC964641",
+    "web/src/features/research/EvidenceMatrix.test.tsx": "CF70979C666BF41027DA9B257BBF4AAA44D2513B1D37BCE1E6133AD44C30CA7C",
+    "web/src/features/research/RelationReview.tsx": "9D39BCDA2C3F29A51D711B9654331E7C3889F18CC7D98C9978BA5DFCCEBE9E24",
+    "backend/src/literature_workbench/features/research/service.py": "A42C6FA30908AABBEE951B8EBF8E9DAB82DF81198DCBEC33FAC76EEF2C029BA2",
+    "web/src/features/reader/SelectionOverlay.tsx": "7E51D0032DA473DFBB765DE866DD9CCC4B5397C3DA2BF04F277D47D229CECAB8",
+    "web/src/features/research/KnowledgeGraph.tsx": "2E23640B4195557EF12C7CCE1DAF4F082AE1341C81E340AE58CED8C83B416E55",
+    "web/src/features/research/comparisonPrompts.ts": "AEBA46E988B30238301C7DEE4B672B27D382088A066E677FA8155AA5297B3C2F",
+    "web/src/features/research/LinkedPdfPane.test.tsx": "02CB557A1FFA41C0508444B83E25F97F3A3293B5F40DC209781509FFFD1441CC",
+    "web/src/app/App.css": "C614302004B328ECEDE525716042452048F07DB45B164569C237351753FC962A",
+    "backend/src/literature_workbench/api/research.py": "1073ADE68420B0626C7C9D3EF4F64F64CAB5FCAD8DE524AEE48BB46D0EA92388",
+    "web/src/features/research/AssistantPanel.test.tsx": "49EE9E474D4DD402231FB09274254965C6A5F571E8E854018C6124EF618C7707",
+    "backend/tests/api/test_research.py": "B5DD94FAE152E0CE9D21C6AE3DF1C64D0AB6C0543A564DC8A31869589390C55B",
+    "web/src/features/research/ResearchStudio.tsx": "61C8642A379480AACB8C39915A0346AEBDC7601C3D2ED6C928FBB3D0D8C376E6",
+    "web/src/features/research/LinkedPdfPane.tsx": "EFC31DFFF6DD5E4E7741EDE5F9398611BF205F4751353A04D7A2C85C8EC4A1DB",
+    "web/src/features/research/EvidenceMatrix.tsx": "A3AC37B575FC2716A936443A18A9CAB119969CE695468097C5347047B560E726"
+  },
+  "independent_review": {
+    "result": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "backend_tests": 30,
+    "frontend_tests": 25
+  },
+  "production": {
+    "url": "http://127.0.0.1:55836",
+    "asset_checks": {
+      "index-Bz5cZcOz.js": true,
+      "PdfReader-DTJVKLW4.js": true,
+      "index-CWcgG3-H.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68
+  },
+  "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-research-solidify-20261022-223821.sqlite3",
+  "preserved_tables": {
+    "research_entries": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "reading_groups": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "document_relations": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "relation_analyses": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "relation_candidates": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "translation_cache": {
+      "count": 68,
+      "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+    }
+  },
+  "isolated_browser": {
+    "passed": true,
+    "selection_requires_submit": true,
+    "selection_context_saved": true,
+    "right_pane_follows": true,
+    "comparison_template_requires_submit": true,
+    "matrix_coverage": true,
+    "matrix_excerpt_version": true,
+    "proposal_not_in_graph": true,
+    "explicit_accept_only": true,
+    "graph_evidence_pair": true,
+    "changed_source_suppresses_rects": true,
+    "stale_selection_rejected": true,
+    "model_calls": 4,
+    "page_errors": []
+  }
+}

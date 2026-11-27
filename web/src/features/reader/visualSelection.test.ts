@@ -49,6 +49,23 @@ const metadata = {
 
 
 describe("visual PDF text selection", () => {
+  it("cleans the clipboard using line geometry without changing the source quotation", () => {
+    const fragments = [
+      seed("We identify individu-", rect(20, 100, 200)),
+      seed("als with long-", rect(20, 124, 140)),
+      seed("term tracking.", rect(20, 148, 140)),
+      seed("Another paragraph.", rect(20, 204, 180)),
+    ];
+    const captured = resolveVisualSelection(createVisualTextIndex(fragments), {
+      node: fragments[0]!.node, offset: 0, clientX: 20, clientY: 110,
+    }, {
+      node: fragments[3]!.node, offset: fragments[3]!.node.length, clientX: 200, clientY: 214,
+    }, { metadata, page: 1, pageBounds: rect(0, 0, 700, 600), transform: [1, 0, 0, -1, 0, 600], scale: 1 });
+    expect(captured.selected?.text).toBe("We identify individu- als with long- term tracking. Another paragraph.");
+    expect(captured.selected?.copyText).toBe("We identify individuals with long-term tracking.\n\nAnother paragraph.");
+    expect(captured.selected?.rawText).toContain("individu-\nals");
+  });
+
   it("uses visual column order when DOM order interleaves a sidebar and footer", () => {
     const sidebar = seed("Published: October 25, 2021", rect(190, 100, 180));
     const first = seed("Microsatellites are neutral,", rect(330, 100, 290));
@@ -343,7 +360,7 @@ describe("visual PDF text selection", () => {
     expect(captured.selected?.text).toContain(
       "data of the 25.2 hm² Wanglang forest dynamics plot in western Sichuan.",
     );
-    expect(captured.selected?.rects).toHaveLength(6);
+    expect(captured.selected?.rects).toHaveLength(5);
   });
 
   it("isolates the overlapping two-column geometry observed in the PNAS fixture", () => {
@@ -629,5 +646,154 @@ describe("visual PDF text selection", () => {
 
     expect(captured.selected?.text).toBe("right one right two");
     expect(captured.selected?.text).not.toContain("left");
+  });
+
+  it("keeps a narrow two-column gutter from bridging visual lines", () => {
+    // Real geometry from a two-column Nature Ecology & Evolution page whose
+    // justified left column ends only ~3.5px before the right column starts.
+    // The right column sits dozens of content-stream nodes away, so the small
+    // gutter gap must not merge the two columns into one visual line.
+    const left = [
+      seed("The Greater Annamites Ecoregion of Vietnam and Lao PDR", rect(500.2, 422.8, 457.2, 16)),
+      seed("the region’s ungulates is the widespread and intensive hunting,", rect(488.9, 506.8, 546.9, 16)),
+      seed("which supplies the thriving wildlife trade in Indochina", rect(488.9, 517.3, 449.2, 16)),
+      seed("6,7", rect(695.3, 517.3, 22.9, 16)),
+      seed(". Hunting", rect(701.8, 517.3, 74.2, 16)),
+      seed("of terrestrial mammals in the Annamites is primarily accomplished", rect(488.9, 527.7, 520.2, 16)),
+      seed("by the setting of indiscriminate wire snares", rect(488.9, 538.2, 372.4, 16)),
+      seed("8,9", rect(658.3, 538.3, 22.8, 16)),
+      seed(". Snaring is almost", rect(664.7, 538.2, 160.8, 16)),
+      seed(". Exceptionally high levels of snaring have", rect(582.7, 559.3, 336.3, 16)),
+      seed("and the large-antlered muntjac", rect(488.9, 580.2, 257.6, 16)),
+      seed("Muntiacus vuquangensis", rect(614.9, 580.2, 176.8, 16)),
+      seed(", to the", rect(707.5, 580.2, 76.2, 16)),
+      seed("brink of extinction", rect(488.9, 590.7, 153.7, 16)),
+    ];
+    const right = [
+      seed("tant consequence of the Gia Lai specimen", rect(750, 517.3, 520.8, 16)),
+      seed("the silver-backed chevrotain was still extant", rect(750, 527.7, 355.9, 16)),
+      seed("and Borissenko", rect(750, 548.8, 113, 16)),
+      seed("13 ", rect(808.1, 548.8, 28, 16)),
+      seed("and Meijaard et al.", rect(816, 548.8, 153.7, 16)),
+      seed("16 ", rect(886.5, 548.8, 28.1, 16)),
+      seed("called for follow-up surveys", rect(894.5, 548.8, 223, 16)),
+      seed("ver-backed", rect(750, 580.2, 79.6, 16)),
+      seed("Kuznetsov", rect(844, 580.2, 70.4, 16)),
+      seed("noted that,", rect(955.4, 580.2, 68, 16)),
+    ];
+    const index = createVisualTextIndex([...left, ...right]);
+
+    // Structural pinning: no left line may absorb right-column fragments.
+    const lineMembers = (line: number) => index.fragments.filter((f) => f.line === line);
+    const muntjacLine = index.byNode.get(left[11]!.node)!.line;
+    expect(lineMembers(muntjacLine).map((f) => f.node.data)).toEqual([
+      "and the large-antlered muntjac",
+      "Muntiacus vuquangensis",
+      ", to the",
+    ]);
+    const huntingLine = index.byNode.get(left[2]!.node)!.line;
+    expect(lineMembers(huntingLine).map((f) => f.node.data)).toEqual([
+      "which supplies the thriving wildlife trade in Indochina",
+      "6,7",
+      ". Hunting",
+    ]);
+
+    const captured = resolveVisualSelection(index, {
+      node: left[0]!.node,
+      offset: 0,
+      clientX: 502,
+      clientY: 430,
+    }, {
+      node: left[13]!.node,
+      offset: left[13]!.node.data.length,
+      clientX: 611,
+      clientY: 598,
+    }, {
+      metadata,
+      page: 1,
+      pageBounds: rect(431, 0, 595, 791),
+      transform: [1, 0, 0, -1, 0, 790.866],
+      scale: 1,
+    });
+
+    expect(captured.selected?.text).toContain("Snaring is almost");
+    expect(captured.selected?.text).toContain("Muntiacus vuquangensis");
+    expect(captured.selected?.text).toContain("brink of extinction");
+    expect(captured.selected?.text).not.toContain("tant consequence");
+    expect(captured.selected?.text).not.toContain("still extant");
+    expect(captured.selected?.text).not.toContain("ver-backed");
+    expect(captured.selected?.text).not.toContain("Kuznetsov");
+    expect(captured.selected?.text).not.toContain("Borissenko");
+
+    // A right-column drag still captures its own intact lines: the spans of the
+    // "and Borissenko … called for follow-up surveys" line chain through gaps
+    // between nodes that are close in the content stream.
+    const rightCapture = resolveVisualSelection(index, {
+      node: right[2]!.node,
+      offset: 0,
+      clientX: 752,
+      clientY: 556,
+    }, {
+      node: right[6]!.node,
+      offset: right[6]!.node.data.length,
+      clientX: 1110,
+      clientY: 556,
+    }, {
+      metadata,
+      page: 1,
+      pageBounds: rect(431, 0, 595, 791),
+      transform: [1, 0, 0, -1, 0, 790.866],
+      scale: 1,
+    });
+
+    expect(rightCapture.selected?.text).toContain("and Borissenko");
+    expect(rightCapture.selected?.text).toContain("called for follow-up surveys");
+    expect(rightCapture.selected?.text).not.toContain("Snaring");
+  });
+});
+
+
+describe("long multi-line selections with word-spaced PDF.js spans", () => {
+  it("merges same-line word spans into single line rects so 25-line abstracts never get cut off", () => {
+    const fragments: VisualFragmentSeed[] = [];
+    for (let row = 0; row < 25; row += 1) {
+      for (let col = 0; col < 12; col += 1) {
+        // 12 word spans per line, 6px spaces between words (300 total spans > old 200 rect cap!)
+        fragments.push(seed(`word${row}_${col}`, rect(40 + col * 48, 60 + row * 18, 42, 14), 5));
+      }
+    }
+    const index = createVisualTextIndex(fragments);
+    const first = fragments[0]!;
+    const last = fragments[fragments.length - 1]!;
+    const captured = resolveVisualSelection(
+      index,
+      { node: first.node, offset: 0, clientX: 40, clientY: 67 },
+      { node: last.node, offset: last.node.data.length, clientX: 610, clientY: 60 + 24 * 18 + 7 },
+      { metadata, page: 1, pageBounds: rect(0, 0, 700, 800), transform: [1, 0, 0, -1, 0, 800], scale: 1 },
+    );
+    expect(captured.hint).toBeNull();
+    expect(captured.selected).not.toBeNull();
+    expect(captured.selected?.rects.length).toBe(25);
+    expect(captured.selected?.text).toContain("word0_0");
+    expect(captured.selected?.text).toContain("word24_11");
+  });
+
+  it("keeps the selection alive when dragging slightly into the page margin", () => {
+    const lines = [
+      seed("First line of abstract text", rect(40, 100, 300, 16)),
+      seed("Second line of abstract text", rect(40, 120, 290, 16)),
+    ];
+    const index = createVisualTextIndex(lines);
+    const gesture: VisualSelectionGesture = {
+      index,
+      start: { node: lines[0]!.node, offset: 0, clientX: 40, clientY: 108 },
+      startCandidates: [{ node: lines[0]!.node, offset: 0, clientX: 40, clientY: 108 }],
+      ownerDocument: document,
+      options: { metadata, page: 1, pageBounds: rect(0, 0, 700, 800), transform: [1, 0, 0, -1, 0, 800], scale: 1 },
+    };
+    // Cursor drifts 80px into the right margin while dragging down
+    const captured = captureVisualSelection(gesture, 420, 128, false);
+    expect(captured.hint).toBeNull();
+    expect(captured.selected?.text).toBe("First line of abstract text Second line of abstract text");
   });
 });

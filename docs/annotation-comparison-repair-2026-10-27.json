@@ -1,0 +1,3130 @@
+{
+  "candidate": {
+    "files": {
+      "backend/src/literature_workbench/features/annotations/service.py": "95d407d79fabe1d2c26253f2cbe93b4c0d7d567aee7556fcac3d7a049412836f",
+      "backend/tests/annotations/test_annotations_api.py": "881bb9475c3100192c81f4f7ca982c88a2802c286bcb15384b8dc256063b7bd8",
+      "web/src/features/reader/PdfReader.tsx": "b4f8dc4a45b1184622a0a8c8ffb0c5a9263428c8981c8bc15889f51fedb27264",
+      "web/src/features/reader/PdfReader.test.tsx": "4b3f990a2d4f60b4f6dd27d6263c27588c4563287bf8d16de17e2ede6e21aed7",
+      "web/src/features/reader/useAnnotatedDocument.ts": "4647b047047980e7e3f1da94b0d0c6c3d4bbe6b7a98d478ea2c64de1011ee204",
+      "web/src/features/reader/ComparisonPane.tsx": "721a752d602307c8ade79f0fe66951ebecb5db1ad7e8095e4240e26fd999cdf4",
+      "web/src/features/annotations/annotations.ts": "f25ae0c533accaf2d36e1c4c1e2960afadf0a6bb93dda1186630f08c71dd038f",
+      "web/src/features/annotations/AnnotationOverlay.tsx": "362f25bd71976c248a0ac2325bd3abd176e2f16b65633ecce008b7c7f9ea8741",
+      "web/src/features/annotations/AnnotationOverlay.test.tsx": "c7ba9ea0cc2ba94f5aeef22e321103cc57f7340e69596583574839f3a055953e",
+      "web/src/features/research/StructuredComparison.tsx": "11dc55879ab59a29f7100042f0b753c6b776727bbb309c007f3e3d2fe837ca13",
+      "web/src/features/research/StructuredComparison.test.tsx": "95b50759ab584f6c2176249a7cc51e7ebbed44c69026db7b834f5db93076830d",
+      "web/src/app/Workbench.tsx": "ab97c5ef1390fa9e51e978209205a700def954e0d5060362f7ac2966405a7759",
+      "web/src/app/App.css": "6787c1305a11edd856339e54ad301fccc08e9d83d2ab689fdc1cb3e49ca5a13e"
+    },
+    "build": {
+      "index.html": "bb60b45d81e76c47445c4a005c7fc324945afb35ea9ba6415d1bb488f045e476",
+      "assets/cursor-editorTextHighlight-kG3uUOwL.svg": "c6252b0edcb68dac87557a027180fcbdbd93466841aa34792530f7cce54cec5d",
+      "assets/index-B6ozypgV.js": "49ad86fd28e9991d0ba8deb185dc31f345809a9d1c88f7eb7b9170267a23929b",
+      "assets/index-CCM1WgYj.css": "8c66ba786eda1943fbbf6d4211444a2e81deb215f23989fd052264ec6886c29b",
+      "assets/pdf.worker.min-DEtVeC4l.mjs": "2ab9e09667296dab1a618868b3ce6e6c23d5b8f48120ae7c5b34e7e335ed01fa",
+      "assets/PdfReader-C9QqYxXq.js": "42a114d6ee6a3c21bb9ab795dd53d024044395102848a06e329b71540524c31f",
+      "assets/PdfReader-CmDQCJDd.css": "8180ffdf9be61462f6dd702b6cc64c1a3e7d9656cd764b65068025e3974eccea",
+      "licenses/third-party.json": "b75139c16df7860b40afd5b508358cab80aca57efd114404d21fe08ec2cbac2d",
+      "licenses/pdfjs-dist/LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "licenses/react/LICENSE": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+      "licenses/react-dom/LICENSE": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+      "licenses/scheduler/LICENSE": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+      "pdfjs/cmaps/78-EUC-H.bcmap": "d92a261336dc18b8c03a46eb4d462382d33f4338fa195d303256b2031434c874",
+      "pdfjs/cmaps/78-EUC-V.bcmap": "61670bebc4e4827b67230c054fd0d820d6e30c3584d02e386804e62bbedc032a",
+      "pdfjs/cmaps/78-H.bcmap": "ece6415b853d61e1b2560165151407d35cf16e6556932b85a13ea75276b77402",
+      "pdfjs/cmaps/78-RKSJ-H.bcmap": "696b1f973c97623496703809eaaa5f9b40696c77540057413f4b826a08edfa7b",
+      "pdfjs/cmaps/78-RKSJ-V.bcmap": "53cb6d560ab377da48cf65d6dcacb0bdb31f13fab7066c580de38c12a73a7ff9",
+      "pdfjs/cmaps/78-V.bcmap": "289000f02fd34872b6975503217f33abae6bee676e7d28f640473a67c8db1712",
+      "pdfjs/cmaps/78ms-RKSJ-H.bcmap": "a2442595218f5f8bd8e1b42188e368587d876cfe0cc4cd87196f077c878f72e2",
+      "pdfjs/cmaps/78ms-RKSJ-V.bcmap": "f8ddceba96bfd9d3740bd1789ee30d1f47c78371520a8084f71f7df58f19be0b",
+      "pdfjs/cmaps/83pv-RKSJ-H.bcmap": "44040051ec818fe09b9703472bea72efd2759d5eeb5ff0d77c718d6bb5e6d1df",
+      "pdfjs/cmaps/90ms-RKSJ-H.bcmap": "c13e043e85ff715b75bb03801e8fd0fb8f3a75e4a48496faa6baaf92b5b48ba1",
+      "pdfjs/cmaps/90ms-RKSJ-V.bcmap": "499bb916ce1adbe4289b6e5811f4dc20eb238cdc2ffad20cf26ae56716885bab",
+      "pdfjs/cmaps/90msp-RKSJ-H.bcmap": "7b8b3b8bbf821702e9a4df9f3596ce292380c8c1b0925dedadbb4e4b2d80498b",
+      "pdfjs/cmaps/90msp-RKSJ-V.bcmap": "6296c2b5c07dca8128e96d5296d621a3268803d4fa0e5812a21e52fe2802aacb",
+      "pdfjs/cmaps/90pv-RKSJ-H.bcmap": "fb5103f03d3a34547e18d316e52b6d9b26e485c662999222f84d2ba54c2e4fa8",
+      "pdfjs/cmaps/90pv-RKSJ-V.bcmap": "7bcb5ad2ba55b9662ce379e16c2d9cc2b82d621a579807353741172e4af615c2",
+      "pdfjs/cmaps/Add-H.bcmap": "a2ffab28b990998181bcca9b0e914bb2207820f100ae31d5c469444892e5ad8e",
+      "pdfjs/cmaps/Add-RKSJ-H.bcmap": "b29f4b52e2465d0485856d5e69f1ba69927deb2848d8fd328c8035583b35bb7e",
+      "pdfjs/cmaps/Add-RKSJ-V.bcmap": "2aa2232c283a3f5d0997c2834a36cead0b79ce2657944cfeed08140c293460ff",
+      "pdfjs/cmaps/Add-V.bcmap": "25125d3b1be64e86b2df5b3344170b45a42bcaa0b46e43a34314ef73c166e542",
+      "pdfjs/cmaps/Adobe-CNS1-0.bcmap": "8c65be9d51a9f269a547dc12460707aaf4031ab67ebe8a2900f4b4cc6b3e450e",
+      "pdfjs/cmaps/Adobe-CNS1-1.bcmap": "73152bc1a59cc594b414ac6068be48e5512b96ae85920c40e32a99269fdb0c04",
+      "pdfjs/cmaps/Adobe-CNS1-2.bcmap": "a1b8d353bdef9584c820464e8f1c9e2013d64ebf433cba0aa831dddf515818c2",
+      "pdfjs/cmaps/Adobe-CNS1-3.bcmap": "2ffc0c75c79fafde506163d3c08c390d183251009f3fbf6ae50d1167d14b9570",
+      "pdfjs/cmaps/Adobe-CNS1-4.bcmap": "98a1f470c878c6b9691a4d7aef776af8ac9b55f5587c9fafa00547f3bf655716",
+      "pdfjs/cmaps/Adobe-CNS1-5.bcmap": "ddd6e29955eb8cb545f2ebd09c628c3bbda5023256eda1b728f743c75fb77829",
+      "pdfjs/cmaps/Adobe-CNS1-6.bcmap": "317bb2db71e0e5b7b0c47b75de1da915c2e22f65f0c0861507f9ca7ba238f8a2",
+      "pdfjs/cmaps/Adobe-CNS1-UCS2.bcmap": "e665837f2197c6bd08cd8955ad4d6932cee2398e2e328b25b00e6bfb3bd72af9",
+      "pdfjs/cmaps/Adobe-GB1-0.bcmap": "8b81cce8a11d510e505704953cfa4e4ab080c1a0cab991145a3512ee433946b9",
+      "pdfjs/cmaps/Adobe-GB1-1.bcmap": "0426983081788ec7202703e71f1efa4b860f75b936994236010b39d89251a81e",
+      "pdfjs/cmaps/Adobe-GB1-2.bcmap": "e67b37a83b160ab3831306a71a605893b24454ee81ac9b6123bf2d3984d268d5",
+      "pdfjs/cmaps/Adobe-GB1-3.bcmap": "aa299afc3e12a28726147305f191be28c7498078c8b182ece7886ac79cd99078",
+      "pdfjs/cmaps/Adobe-GB1-4.bcmap": "8fbd7d74c2ddb1350c1cecce54a73fde3f5453093d4bed445283ec0033d2097f",
+      "pdfjs/cmaps/Adobe-GB1-5.bcmap": "c22cb2fcff24112fa31dab2111bdc51957006576d31aad5a25e67793ac01428c",
+      "pdfjs/cmaps/Adobe-GB1-UCS2.bcmap": "20507620260c0c935c35afc1e70e5888aa7125d5ec7ffc03cef1959feb2c1641",
+      "pdfjs/cmaps/Adobe-Japan1-0.bcmap": "464f08905236f5703b1f5cf8358767c8b18e6bcc808840d081f1de2c7ab38134",
+      "pdfjs/cmaps/Adobe-Japan1-1.bcmap": "4c823848722187d1ffe75ae3f5f9126ccd2d7895a05fad14c919fb119e037008",
+      "pdfjs/cmaps/Adobe-Japan1-2.bcmap": "7810fb808e367e70429e90a9478fe6a3fdc3e214f25c7582ce9c2da6a242315c",
+      "pdfjs/cmaps/Adobe-Japan1-3.bcmap": "84deb1828711ad3d390c9899c38abce1bf619d65ff7bf1a326ec95acc45f08f8",
+      "pdfjs/cmaps/Adobe-Japan1-4.bcmap": "3f8a4f974919c2b8bae5d10175ffa2673be140481e00840542c85d48ef184067",
+      "pdfjs/cmaps/Adobe-Japan1-5.bcmap": "1d3ce4ff28d977f8cf37a912ae4ec811f4175c3167b1ec0b2567feec3e79e1db",
+      "pdfjs/cmaps/Adobe-Japan1-6.bcmap": "5609797b9401b30be72ef9645da62a87829f058c3be4b5c623383119f584b1d9",
+      "pdfjs/cmaps/Adobe-Japan1-UCS2.bcmap": "66c5d0dc4964f4093e77b194023f3a0f689324028ec8330e1e1d0570bcba7c2f",
+      "pdfjs/cmaps/Adobe-Korea1-0.bcmap": "dfb8c3874f0e5a8c3acf597d2c12d2b63e90bc5e4f0fce990ec4c56077d80b32",
+      "pdfjs/cmaps/Adobe-Korea1-1.bcmap": "62f277b7b1c441c007797ae707d5c37258d029ce4661a2b911e2e1ee35e6adc1",
+      "pdfjs/cmaps/Adobe-Korea1-2.bcmap": "1d77068af462f96d7ad28ad7e7d43eef6423c685b479d7dc25ff5df38db0380d",
+      "pdfjs/cmaps/Adobe-Korea1-UCS2.bcmap": "857b723088be97255053562bfa41bd1075a7f7910d3bab59a0645c8bbc7060ff",
+      "pdfjs/cmaps/B5-H.bcmap": "718ad0ffbef4c34f8f3f31292c462e519cd567a5511fc8b346c60010d64f4ef9",
+      "pdfjs/cmaps/B5-V.bcmap": "b5c37383517477620ced927b6b4ffd4f4cc6230d8051b5b46a21d6768e07f7d8",
+      "pdfjs/cmaps/B5pc-H.bcmap": "bab6028aead1d6149400e904ab10cfd319082d826473ed4c582c8eeed920f17e",
+      "pdfjs/cmaps/B5pc-V.bcmap": "41543142b9767f3b76133899fc8453282b01ad3c653acaeea42d78c5a7d08c63",
+      "pdfjs/cmaps/CNS-EUC-H.bcmap": "e8f89cd61e6486b948205da46499d659ed0aed949b7095fd3c8e95ffe2b0e7a9",
+      "pdfjs/cmaps/CNS-EUC-V.bcmap": "cae422bec2ac6dbe86bf921cec942bacd2d0b733ffcca5f91b3ba14e917025a0",
+      "pdfjs/cmaps/CNS1-H.bcmap": "e8487971ab20cd16f3de3e8ac56ec994b72b658ad113f2818239dfd5108f501a",
+      "pdfjs/cmaps/CNS1-V.bcmap": "42df8076aaa7574505e7304af83a3323ec032c4177d64b1309db8c043d594a8a",
+      "pdfjs/cmaps/CNS2-H.bcmap": "bc6024d274d440f0625c69e25f37036ef6cb6689432ceaa160d3432a2a716ca7",
+      "pdfjs/cmaps/CNS2-V.bcmap": "2e4f70a8afd23a121030fc2e5b5f3816e903b11e7ba8b8c09654b31c80399c38",
+      "pdfjs/cmaps/ETen-B5-H.bcmap": "87ee6b3f5bfda5fe26fa35431264c7d73070d10dbbf398a75185d63ae322c18d",
+      "pdfjs/cmaps/ETen-B5-V.bcmap": "47dc0d2c21e3bde317947aec1675ceabc1d5460a60bf9c24334b8c407a17172c",
+      "pdfjs/cmaps/ETenms-B5-H.bcmap": "d5f5a73da4173b7da9a3a20e16f26f9cd5d12deb1553409919e0cec6fd37fdee",
+      "pdfjs/cmaps/ETenms-B5-V.bcmap": "18252fca90f472f479af1bddd60d6ab51c8e1b55dcf6845951426504934543e0",
+      "pdfjs/cmaps/ETHK-B5-H.bcmap": "d2f10fa519336bc4efcc7b6deb9604b75429946b40d82e311cb3a97a1994c89a",
+      "pdfjs/cmaps/ETHK-B5-V.bcmap": "1fea3fd0d9f0f679f80505800851ef2e4131d81127e18c006938ffa2f4c8b247",
+      "pdfjs/cmaps/EUC-H.bcmap": "f9939cd57fccdc65c5d9f4c205fd497ebdbd283643308da5663801a8c1d9c595",
+      "pdfjs/cmaps/EUC-V.bcmap": "1283a50a706507c4436da83ede9ad7a4440be25378f2e96f6c81a430081426a3",
+      "pdfjs/cmaps/Ext-H.bcmap": "4000ed4e61a1c668ef453bbd0603cfa383defa793abd46a57ed870d7f527350b",
+      "pdfjs/cmaps/Ext-RKSJ-H.bcmap": "e0d2f0df337660e73813238dd4a725f11f0621b90f3273857db253d0e7694caa",
+      "pdfjs/cmaps/Ext-RKSJ-V.bcmap": "f617a22b6d67febb187990952006c91a9f5a4db21155d268c656252d0c21985d",
+      "pdfjs/cmaps/Ext-V.bcmap": "c2087fb845a9e3acea0c2922cd40e6af67e11957bec74dcd597f1285edd490ce",
+      "pdfjs/cmaps/GB-EUC-H.bcmap": "928bad06fd84a48f5ba7150d7716609119fb660f2aaa73eccad81ddab9b9d203",
+      "pdfjs/cmaps/GB-EUC-V.bcmap": "a9ad88ac2479da529b16dc48abc5952332e27bc355335f91df5729a587533324",
+      "pdfjs/cmaps/GB-H.bcmap": "1018c777a8910b5bb46d7d54a4aee9d51ca5cff8addb2b41c969d9101cb3fd1c",
+      "pdfjs/cmaps/GB-V.bcmap": "0b96789143c0bbf9f1641ae7165b3456dccd14dabffcbb0bd654d5bf6f94f863",
+      "pdfjs/cmaps/GBK-EUC-H.bcmap": "2103fed28650ede096a2281104a1a8a4304dae0db414342c636867522307123b",
+      "pdfjs/cmaps/GBK-EUC-V.bcmap": "a7fd35dd14d9dbdb955f34e6c0630618b6620dfd09d4283b2f65a65ce77fcaea",
+      "pdfjs/cmaps/GBK2K-H.bcmap": "3d919ae72af16c5cc6846ec87a4326a9f125e493c59d3628429d35c2c95fe8c4",
+      "pdfjs/cmaps/GBK2K-V.bcmap": "b927fdfd595c07ce9158bf2ec13f4641b2e83b01c70989dadfabd6ed7c6ac2dc",
+      "pdfjs/cmaps/GBKp-EUC-H.bcmap": "d15ebd8e81fb4fe8a244f1b1e877922e03500ac69eddf5001093e502430451d2",
+      "pdfjs/cmaps/GBKp-EUC-V.bcmap": "fdc736d46e642625dccc8ad8c59f2c69fc7db7a13f2e799c6c6b779e707bb97a",
+      "pdfjs/cmaps/GBpc-EUC-H.bcmap": "3c4a4eb82f05abe51f6650985c630e180438bfdd491318f5d20d2ec29236e1c3",
+      "pdfjs/cmaps/GBpc-EUC-V.bcmap": "215bdfa2842705624b4cf4cd29b8e3c720f1e192365e0305c11030a424c84d7c",
+      "pdfjs/cmaps/GBT-EUC-H.bcmap": "dc5f44e48a39f3367ae28665027d8ab1d8cedb5a9dcc5068a900acd6709f60f9",
+      "pdfjs/cmaps/GBT-EUC-V.bcmap": "a1ad24e63653b8aa388c18fa5e498f007564e43dde699a9f91ccb4645c999be8",
+      "pdfjs/cmaps/GBT-H.bcmap": "8afda745a505763f3ff54c8126eeb48ef376ea9ed07d9f42ff9a22c5c547ec57",
+      "pdfjs/cmaps/GBT-V.bcmap": "cdc2ec5c3c7c7033290c9a8894878202f08674eb9b1ae7d36218430326768771",
+      "pdfjs/cmaps/GBTpc-EUC-H.bcmap": "7b23e2f7bfdb6c918f567b7324bf858f398bd8cd5f268d74ece19a3c91bf4f32",
+      "pdfjs/cmaps/GBTpc-EUC-V.bcmap": "d7a1b13ead9ab511cf2cd01de6ce8b02aa8e8767e84895337d7a3b67f039f93b",
+      "pdfjs/cmaps/H.bcmap": "a0233e21047ec00b852125b243cbcf30abee511155b6d8159c24f944384bc9ee",
+      "pdfjs/cmaps/Hankaku.bcmap": "b454701f7aecd7856769016dfd04ca64280a060f2c67a2466d50b4395d24974e",
+      "pdfjs/cmaps/Hiragana.bcmap": "2ed669394756dd9458651cd9995ab29ab691ecb7686659003306cdf22767a414",
+      "pdfjs/cmaps/HKdla-B5-H.bcmap": "5242bce18fb13ab4cc59b146a03eba36e4ce42667eeff09e10981a9d2aa4996b",
+      "pdfjs/cmaps/HKdla-B5-V.bcmap": "2e0537f786c0791d41a925f72bad2d4e7268aa6cbf15a1400a722672cec38e2c",
+      "pdfjs/cmaps/HKdlb-B5-H.bcmap": "fdc8159984bf5dbe475c0d5dfcb621ecee4dea07c38c668bd77f4c679e23b9b3",
+      "pdfjs/cmaps/HKdlb-B5-V.bcmap": "b249eb9dcb915ab45057c5d4d7aa55ef88d0efbb092af6bae0b2d4705d139abf",
+      "pdfjs/cmaps/HKgccs-B5-H.bcmap": "ab64c7fc5e9b2e97750cc4f269b0da14fd8649e49151b7598c8df86599bac591",
+      "pdfjs/cmaps/HKgccs-B5-V.bcmap": "02ebdf7cdffb5395fb21091cd58a013a18ae5388922822f9dc6292ef16b98956",
+      "pdfjs/cmaps/HKm314-B5-H.bcmap": "bfd8bbde6b36a9da4c1c902c74121a30d9807a7079a00eeea218be6adc223cef",
+      "pdfjs/cmaps/HKm314-B5-V.bcmap": "2a64a815cfb6fdd480674a868762e3d161fda17543b20c9209978559f0667164",
+      "pdfjs/cmaps/HKm471-B5-H.bcmap": "49d7c037758826b5b6c0fa329c35bbf25d3943197754e72ecd30c6fb04d745e6",
+      "pdfjs/cmaps/HKm471-B5-V.bcmap": "be24c109e78aa4fe3c1f27d30aab3ed0741e783fa1b6b6c2719741072b54b132",
+      "pdfjs/cmaps/HKscs-B5-H.bcmap": "08599378f41d96b40537adef6e6edcc4a787bc63f5accf47c026df4905a13914",
+      "pdfjs/cmaps/HKscs-B5-V.bcmap": "d073542b7dad1c4cbf01c1af5f0cd13218d1281a491956e310c55702fc8705c4",
+      "pdfjs/cmaps/Katakana.bcmap": "3b6ca6642fbf8822da00d5e58a8aa275216d5c32dbf2bd73e934197fc9fc5c53",
+      "pdfjs/cmaps/KSC-EUC-H.bcmap": "6784e16dbc5861c036c23d3e55f0d4ba0975a3e464da0ee8e49bcfff0be070c4",
+      "pdfjs/cmaps/KSC-EUC-V.bcmap": "fdb36bad85e9924823d49db374067988e024cf80fc894711f2c9178951cbbe95",
+      "pdfjs/cmaps/KSC-H.bcmap": "c1f6d61f1d3304fd539a65ae72624fa567ecc3853bf52e283958a7a2515b3eee",
+      "pdfjs/cmaps/KSC-Johab-H.bcmap": "939993d213f68db763bf156217c217ae23af082b91a0eacecf3d11eb4ff8ef8c",
+      "pdfjs/cmaps/KSC-Johab-V.bcmap": "5d61967aac0e666def721e8b8d0fed8f95a879a14f2e76ce516c3d11c621e519",
+      "pdfjs/cmaps/KSC-V.bcmap": "d7da5afd9f1fe74816d79c9325f0139a4efb6438664ebfdf9a7aa92f3034360f",
+      "pdfjs/cmaps/KSCms-UHC-H.bcmap": "5b70d8f6a4fa9e2283dc649f0ff95d906d56efbee50a20e8d2faec3a8fed078e",
+      "pdfjs/cmaps/KSCms-UHC-HW-H.bcmap": "a5e6ba22aceb02fdedee11bfb9ed138463d89e85b87810b9f075b469d936f8ec",
+      "pdfjs/cmaps/KSCms-UHC-HW-V.bcmap": "890332a6a26880d463a12f2a6ff048bf9cf7e45077cfb1ca8815b89baa7bf411",
+      "pdfjs/cmaps/KSCms-UHC-V.bcmap": "1631b531c9a40c8cbe24c2317dba107362e49fa6e18af620414d627c111d570c",
+      "pdfjs/cmaps/KSCpc-EUC-H.bcmap": "709480682c55cedbb0124b9960d78e28febeee0df2e34607d61aac6601647ec7",
+      "pdfjs/cmaps/KSCpc-EUC-V.bcmap": "031707887d6fc2378a36cdb6775334fd7a236c3f95048d8436abf43fe26fc49d",
+      "pdfjs/cmaps/LICENSE": "aa92ab5a472974865a96fd4a4e9c13bb41bf6fe1b309cb6b8da48bc9e19839a2",
+      "pdfjs/cmaps/NWP-H.bcmap": "286c6c9e335da330928a01edc3c97a3a623f1f7f3c42762b0a7dc2f651b1a78f",
+      "pdfjs/cmaps/NWP-V.bcmap": "3a75fb7b59adfb172710758c425d8ac6c93fd5360a64dd4afd5dd04e60ab4b4d",
+      "pdfjs/cmaps/RKSJ-H.bcmap": "a70de61a22a898f693f02cc011c3e3cff2e10aaa7cddb4661e456a21ae859f78",
+      "pdfjs/cmaps/RKSJ-V.bcmap": "68c1a64506471a524ea5cfc3b3a9f8f70031989a6bd95427b1351f33ccf50b06",
+      "pdfjs/cmaps/Roman.bcmap": "1c6b3ef9d9e5cb1aa329142ce9414b90f9b6d7f9182a2a9e927378dab8f0d43f",
+      "pdfjs/cmaps/UniCNS-UCS2-H.bcmap": "779428116752f34e2490a1941d24e4634c71e3c22d053b811d2090ae2fb3c704",
+      "pdfjs/cmaps/UniCNS-UCS2-V.bcmap": "1e5cc184b850ea44abc2df8ae5674279df668e8edf5e2a1a2ea2bd77adbd280f",
+      "pdfjs/cmaps/UniCNS-UTF16-H.bcmap": "32ff139b3c7b91d6ad25f994701f3ce7b242906022c418fd73e6493fc228bfe5",
+      "pdfjs/cmaps/UniCNS-UTF16-V.bcmap": "278eb1e68d1a236c60ef59472cf0176ee0d45f364285e76ca12419a08d46fb9a",
+      "pdfjs/cmaps/UniCNS-UTF32-H.bcmap": "bf26eb67fe19ee5ba915799e80ca72408400aa8342fdf6a244a4f44de8f97336",
+      "pdfjs/cmaps/UniCNS-UTF32-V.bcmap": "f7da3caf83ceb1cb37936fa10700d9ba6e9c3f72c5bc9724e3ac79bff0c0179e",
+      "pdfjs/cmaps/UniCNS-UTF8-H.bcmap": "2f2a742bcd1a84a148a4a518b9eed51a8f9c6ca5ed3bc5e2e41fff97de5dc2d8",
+      "pdfjs/cmaps/UniCNS-UTF8-V.bcmap": "b7c3f10780a8c62dd1c8ff6c30dc1e4e23b6cdc87c3a96fcd514cc98ffd3af9d",
+      "pdfjs/cmaps/UniGB-UCS2-H.bcmap": "9201569b402e81ad8860650bd86350c4fa28e5dd5971f05fcacaf40f51de18ed",
+      "pdfjs/cmaps/UniGB-UCS2-V.bcmap": "f10282335e4d64203bc2a653a3a47d745ec76c8ae04549f4d50180c1899be216",
+      "pdfjs/cmaps/UniGB-UTF16-H.bcmap": "386fd39581245c034da016a92d23f3df1117d169f996100050b264fc09a84e35",
+      "pdfjs/cmaps/UniGB-UTF16-V.bcmap": "0473cfbba612b92dd9918f0ff8aee9112897c48e0ffdc0eb82da3144ed8ea84a",
+      "pdfjs/cmaps/UniGB-UTF32-H.bcmap": "f48a145dc4e3ed1dca1dde7111716a72306a2a4191ab05c6bae3a5c3a961cd2f",
+      "pdfjs/cmaps/UniGB-UTF32-V.bcmap": "106acc49b7118bdef944e32107b4f348238f3929a0a15d3b7aab7b9101535993",
+      "pdfjs/cmaps/UniGB-UTF8-H.bcmap": "f217b439c80ee5fa1bc2cf6d1defcc319f8d84483d166a00ee199e05a68588df",
+      "pdfjs/cmaps/UniGB-UTF8-V.bcmap": "a64df947632878eacc532fa193c735c92a383b7d66e6f8374ac193af7c64fc63",
+      "pdfjs/cmaps/UniJIS-UCS2-H.bcmap": "ad2352f40870880fbf7f8ee5abadff743fbd025fbf9830b8ada472d1c5e4da0b",
+      "pdfjs/cmaps/UniJIS-UCS2-HW-H.bcmap": "16e87edca954177c0881c874859d6783220925d821b5cdfb8755b61ebd93f9ce",
+      "pdfjs/cmaps/UniJIS-UCS2-HW-V.bcmap": "1973457e2c0192819947e56068625b34fb9a72ecc8a476ce6d7eaae5f73e2e5c",
+      "pdfjs/cmaps/UniJIS-UCS2-V.bcmap": "42a133d8e2ce9dd6d2288018e01592d2bf2435b326d39b94ea0b6e6a44ac33d3",
+      "pdfjs/cmaps/UniJIS-UTF16-H.bcmap": "f6a89c5688978548c83fcee990e205bc63c74274d5c69b49032a3bd4c49a05ee",
+      "pdfjs/cmaps/UniJIS-UTF16-V.bcmap": "c67126fc7c73850855186bb0d6482ac0a365057e0b58778c4ab9f234683fef53",
+      "pdfjs/cmaps/UniJIS-UTF32-H.bcmap": "96195950ce0fe24443d8eb426fa6b88534ec421d7bef9046f0b2362809cfba73",
+      "pdfjs/cmaps/UniJIS-UTF32-V.bcmap": "ed4dafda402bdd19c4d5d8bf2ab41473c0f86f384552b4c7b963d6627daedeb1",
+      "pdfjs/cmaps/UniJIS-UTF8-H.bcmap": "798fb0bf06ab0788d1f6a91c2db7de581612eef03c628f10e8f7ecd8f70ab448",
+      "pdfjs/cmaps/UniJIS-UTF8-V.bcmap": "1021611424f913b2df0bfdbe94bd327c04e224ec89d8e821c6501ea3d21f4265",
+      "pdfjs/cmaps/UniJIS2004-UTF16-H.bcmap": "710a32d7cb43fd6bd9dbf30da5971f8c941590f74441e208d852c2be0e74cc97",
+      "pdfjs/cmaps/UniJIS2004-UTF16-V.bcmap": "3b149aff5c5707b57fb3215d1775852c8b1f413ec0f679ea628f25cf87fe098d",
+      "pdfjs/cmaps/UniJIS2004-UTF32-H.bcmap": "8d2658e18741af7937d586a57c89729a6fec0d86121197c1f8518aa58b29cdfb",
+      "pdfjs/cmaps/UniJIS2004-UTF32-V.bcmap": "6dd475782f2897648a683c48b2fa015a15b8f06856760bddc8a17a63f418bacb",
+      "pdfjs/cmaps/UniJIS2004-UTF8-H.bcmap": "691c614ce432b3e62486efb54e5c84c6da5afe9b51b21253bde4758feb484183",
+      "pdfjs/cmaps/UniJIS2004-UTF8-V.bcmap": "40a8c7ea2d46711c5f78fc9a878a7db68b1543ba5cd60ecf14f519a2deb829b7",
+      "pdfjs/cmaps/UniJISPro-UCS2-HW-V.bcmap": "6826f94d789d7bf1960668c1c5819c34c9585c1b23152fbc19ee81c7df08524b",
+      "pdfjs/cmaps/UniJISPro-UCS2-V.bcmap": "493de9fd1a08f7946065d8ab58f0c3c9fe489f5a0f109f2d05a3169b4bd5789f",
+      "pdfjs/cmaps/UniJISPro-UTF8-V.bcmap": "6181d382cf736c5e09492e8be9f26f31fa25b7462253f23ab16646af432cad81",
+      "pdfjs/cmaps/UniJISX0213-UTF32-H.bcmap": "692044e1fb33445668632bc9fe7386805c624864be1ddeb29d65bb0c99fc630c",
+      "pdfjs/cmaps/UniJISX0213-UTF32-V.bcmap": "dd54e16ca7bffb3a886242549b2bf7d78a277087f7c60d2636f118c21a5b0646",
+      "pdfjs/cmaps/UniJISX02132004-UTF32-H.bcmap": "f80ea5a989be30ccda5a8804baef6d3b4b044d2b339bf8b31c671b2466171cf6",
+      "pdfjs/cmaps/UniJISX02132004-UTF32-V.bcmap": "94c22bd99e771c5fbe0dd8dc39850570d4db0075074aca13e272813edd7cc57f",
+      "pdfjs/cmaps/UniKS-UCS2-H.bcmap": "a1081396ab4adb6f4a5b6c15f896963c244c1c9bcb65ce5616d06096a1b9811c",
+      "pdfjs/cmaps/UniKS-UCS2-V.bcmap": "6cab547431958fbdc1d401d06ebd4dd61a73f5509a10f974df32bcbca11a2e43",
+      "pdfjs/cmaps/UniKS-UTF16-H.bcmap": "42d35b396286499dfae1737a07adb3a64500df37b426580bfb1d3ea872938519",
+      "pdfjs/cmaps/UniKS-UTF16-V.bcmap": "5bdb7390c80dcc136cb47d41dc7460082560969c17322ee739fe3020fb642410",
+      "pdfjs/cmaps/UniKS-UTF32-H.bcmap": "3a01ec51ed1b828101351e337ffb8250abe11880032e5210f881170fed2588de",
+      "pdfjs/cmaps/UniKS-UTF32-V.bcmap": "dfda895eceaed081af030dbbb962b49629eea817fc3c02bae15db93d0c68acd7",
+      "pdfjs/cmaps/UniKS-UTF8-H.bcmap": "3fac9c65145f72d7d42157a3b9c5ed6904632184e6a0888f2b828699afd2002f",
+      "pdfjs/cmaps/UniKS-UTF8-V.bcmap": "9ecc6cf30dd354b9778ddba163b6cc7302b087ce9f39d1ba73472d2b75ed13ca",
+      "pdfjs/cmaps/V.bcmap": "b9ad1c0c09ff14bca52f9a28a9767eb857ad0e8946e64ba14c7387a7eb69866a",
+      "pdfjs/cmaps/WP-Symbol.bcmap": "543923bead225732aba30976690ee89095a19628277b5863efecc2c728d5d7bf",
+      "pdfjs/iccs/CGATS001Compat-v2-micro.icc": "73e1ba37d2bad5bab2a964f40a9eed96209666efc067c3322626214bbef234a0",
+      "pdfjs/iccs/LICENSE": "286e4fd7b447330b2c88e23890e3cd0a9d38cb398d4a59cb247f578ccbda3213",
+      "pdfjs/standard_fonts/FoxitDingbats.pfb": "845c752392b6c914fb989c75a08b7792b88f542d2499042ef2889f8c814a16ed",
+      "pdfjs/standard_fonts/FoxitFixed.pfb": "b6c8fe53f134b8b6d4578cd2d544df4cee9624c4efa8d51a560fb40ea296101b",
+      "pdfjs/standard_fonts/FoxitFixedBold.pfb": "f1b7159702973f54fc86254ea38bcf3712b2a736eb3a0995751e9f4bb45ad603",
+      "pdfjs/standard_fonts/FoxitFixedBoldItalic.pfb": "8a000945843bd31add06aee63bf9fd41b7578b4f3242a4b7cd46349ad9d24d4d",
+      "pdfjs/standard_fonts/FoxitFixedItalic.pfb": "5007faf8320fa1fcc08b8894b356ad976f60b992ba29ee5272578bbdebaf3876",
+      "pdfjs/standard_fonts/FoxitSerif.pfb": "4f57d2b9d884af8f907bf22df6019b52d86cbf6214fdbd02b1ae05472a543f35",
+      "pdfjs/standard_fonts/FoxitSerifBold.pfb": "0bdf4b04e964139818d51eda03d566ba999fc3ba2421b1c6c51f9dc969022e80",
+      "pdfjs/standard_fonts/FoxitSerifBoldItalic.pfb": "a406cac82583bf98175cb62c87ed5e95c45fbb34eece63a10b0a13e793cb2e10",
+      "pdfjs/standard_fonts/FoxitSerifItalic.pfb": "610ae0687198045c4db5d1a6650fd5e92536631706382eb8b72e38df578d0ae9",
+      "pdfjs/standard_fonts/FoxitSymbol.pfb": "47967d055530e7357088a08403115425643ec2cdfd6201ba8af0fbd7116c1539",
+      "pdfjs/standard_fonts/LiberationSans-Bold.ttf": "361c61b82d575c5c35fd9157fda8b0194bcfcd0d88ea8521a4fb5dd53d33dddc",
+      "pdfjs/standard_fonts/LiberationSans-BoldItalic.ttf": "a224075ac17495ad0a3af3bc0a419ac0704a8b3fd1095456201fb9b095fc281d",
+      "pdfjs/standard_fonts/LiberationSans-Italic.ttf": "832b4406dbef23628800d3aaad21048534ac84d7e3ad955be83b8172ed8ef512",
+      "pdfjs/standard_fonts/LiberationSans-Regular.ttf": "f8ace1f892b2bd9dc1792ba7f097fa7588f84fed48321480e04de5390828221f",
+      "pdfjs/standard_fonts/LICENSE_FOXIT": "b578cdd2345840ada550bd12519533812320d5f1d21cf4c1c7e1b1b0a31c98b7",
+      "pdfjs/standard_fonts/LICENSE_LIBERATION": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b",
+      "pdfjs/wasm/jbig2.wasm": "e6bee67724a7b5436fe8162638e3708cfc8d52b6342db69a49715e30ff27cfdc",
+      "pdfjs/wasm/jbig2_nowasm_fallback.js": "04c795a6657a4553a64b781ea3e85256203d913c3b71b72b85fa3ce00622f458",
+      "pdfjs/wasm/LICENSE_JBIG2": "9e66b7f1b934a28b37f3bc4dac97915de1674271e79a0a88182a18ed9731b4d1",
+      "pdfjs/wasm/LICENSE_OPENJPEG": "a6af136f3e15038a666b61f376612a07d9a4e48cb7c01adbf3e33b3f14ab49b6",
+      "pdfjs/wasm/LICENSE_PDFJS_JBIG2": "aad3cce09842e00e9e11ad5e8fef8cc02fbc3a3768fe2f007443b9cee37aaee5",
+      "pdfjs/wasm/LICENSE_PDFJS_OPENJPEG": "717fc62da03292dbb4dd0c8280bd4ce7bb8550dcf31d772bc93455fb50313425",
+      "pdfjs/wasm/LICENSE_PDFJS_QCMS": "eb5104ca33552be007857a28351bc408f379ddd4bfacab1226b09c6d1e9fd7c4",
+      "pdfjs/wasm/LICENSE_QCMS": "36d847ae882f6574ebc72f56a4f354e4f104fde4a584373496482e97d52d31bc",
+      "pdfjs/wasm/openjpeg.wasm": "004a0e62db930ba9ff2a22212f4554d0bb57a0635a8287caf70f98117cee14ba",
+      "pdfjs/wasm/openjpeg_nowasm_fallback.js": "0f998419819da4491d8302222aa9e2ff2494685641aa2a6c21c3760c29f3e319",
+      "pdfjs/wasm/qcms_bg.wasm": "bfdaeb649178748e54bcdaa819bcd5c5c5a4278c8eaaf5feb5a26071e1c25bfc",
+      "pdfjs/wasm/quickjs-eval.js": "fe7930418e869791ce892567dbd0bc4698152b7e550b5cefa553992c56ddc325",
+      "pdfjs/wasm/quickjs-eval.wasm": "7bcacc9f22cacf7e9b23866d2a6d1639693d40c7f144e41b7c69ed37ba9cbe8f"
+    },
+    "sha256": "1c039feb68a13deef51d4beeb090313dae7aedc035e4173b48adc8521841bce1"
+  },
+  "review": {
+    "verdict": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "candidate_sha256": "1c039feb68a13deef51d4beeb090313dae7aedc035e4173b48adc8521841bce1",
+    "reviewer": "/root/verify_annotation_and_comparison",
+    "calls_first": 6,
+    "calls_followup": 4,
+    "technical_truncation_correction": 1,
+    "backend_tests": 27,
+    "frontend_tests": 39,
+    "scope": "annotation display, overlapping comments, duplicate protection, cached comparison review and isolation; scientific semantics remain human review"
+  },
+  "installation": {
+    "database_backup": "D:\\LiteratureWorkbenchData\\backups\\pre-annotation-repair-20261027-103926.sqlite3",
+    "frontend_backup": "D:\\LiteratureWorkbenchData\\backups\\pre-annotation-repair-20261027-103926-web.zip",
+    "pid": 63688
+  },
+  "production": {
+    "old_rows_preserved": true,
+    "protected_files_match": true,
+    "tables": {
+      "research_entries": {
+        "before": 0,
+        "after": 0,
+        "all_old_retained": true
+      },
+      "reading_groups": {
+        "before": 0,
+        "after": 0,
+        "all_old_retained": true
+      },
+      "document_relations": {
+        "before": 0,
+        "after": 0,
+        "all_old_retained": true
+      },
+      "relation_analyses": {
+        "before": 0,
+        "after": 0,
+        "all_old_retained": true
+      },
+      "relation_candidates": {
+        "before": 0,
+        "after": 0,
+        "all_old_retained": true
+      },
+      "translation_cache": {
+        "before": 75,
+        "after": 76,
+        "all_old_retained": true
+      },
+      "full_text_study_cache": {
+        "before": 0,
+        "after": 0,
+        "all_old_retained": true
+      },
+      "full_text_study_documents": {
+        "before": 0,
+        "after": 0,
+        "all_old_retained": true
+      },
+      "reading_records": {
+        "before": 13,
+        "after": 13,
+        "all_old_retained": true
+      },
+      "translation_memory": {
+        "before": 13,
+        "after": 14,
+        "all_old_retained": true
+      },
+      "pdf_annotation_baselines": {
+        "before": 4,
+        "after": 4,
+        "all_old_retained": true
+      },
+      "pdf_annotation_mutations": {
+        "before": 41,
+        "after": 41,
+        "all_old_retained": true
+      },
+      "documents": {
+        "before": 227,
+        "after": 227,
+        "all_old_retained": true
+      },
+      "libraries": {
+        "before": 2,
+        "after": 2,
+        "all_old_retained": true
+      },
+      "contents": {
+        "before": 240,
+        "after": 240,
+        "all_old_retained": true
+      },
+      "document_versions": {
+        "before": 285,
+        "after": 285,
+        "all_old_retained": true
+      },
+      "jobs": {
+        "before": 368,
+        "after": 370,
+        "all_old_retained": true
+      }
+    },
+    "runtime_changes": [
+      {
+        "table": "documents",
+        "key": [
+          "01dd5b5b-32f7-4837-86cc-16adf0a9bb55"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "0234d321-cdcf-41a7-91b9-1065ca5c2872"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "02530ead-12f0-4134-82b9-e06c5d523dce"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "03b85914-03c6-4bc0-bd62-d65439ca9afe"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "0699842e-e8c1-45e7-8ba9-fc69b161fe77"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "09b49789-2633-4673-8451-cf5df89a34ac"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "0ae8e500-364a-498a-96b5-b774d67cc276"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "0fd2936c-5cfe-4144-9c8a-6ac110d2ce73"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "1011d2f8-7aca-4090-814a-67c6988d79ad"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "13507427-f019-4fff-a645-f8c4e94e76ee"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "137d0f9e-2bb4-476f-ab1a-be7ae23fb58a"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "154ff1f8-5c70-4c92-b68a-d2962981d01d"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "156315c1-2f8e-4dee-a7a9-6e10114a0778"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "166b9a88-54f0-4a45-b5e3-bf744f50e401"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "16a55564-3195-4607-bb2f-d4d24095fab2"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "18b5bf79-1fa6-47ee-91fb-5f3705e0b521"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "19ba342b-4cf2-4dbc-98de-dced23046398"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "1a92dcc3-563b-4b47-8e9e-742324547726"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "1b13a017-f1d5-4f5e-9c6d-539009580387"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "1bafbf43-ce49-4d6d-9263-9ece4f477305"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "1cc790b5-db23-4237-9fa3-1c4b62fcb4c7"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "1ddf0868-3002-4eaa-a7df-b610ce0cfaac"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "1e48d507-dbe0-4e6e-9d79-35f3d3d63094"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "1f8785b2-2d9a-41d5-816a-53f811e3a6e3"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "2002e7b0-9325-4e02-a455-48dbbd3e5f43"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "20e9a2c9-483e-439e-bf74-b8d139a07ef5"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "214b8b64-3e37-4c6c-ac4a-7e2a2f5ca92e"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "2174453d-2b7d-4dfe-9974-272f9c9b82b0"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "21d39228-e3ed-4383-832a-135248d531d7"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "23a61c3f-a929-4584-bbc6-43d483ff5453"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "2404a7a4-95fc-421c-88d7-5dafcf63464b"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "24f9b281-a8f2-4369-abc2-3d5fdb3c3d95"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "2541da8c-1e9d-4379-b3e1-4f3411f61fb1"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "26b6ebe6-f8e5-4ea9-bc28-214790424cd2"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "27a9919b-973a-475e-87a3-86bdf63a7dda"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "27de1ff9-6bd1-4c02-936a-1b26109d3715"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "294d69bf-8d10-4915-8939-fbdf1c8c78f5"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "29556445-2a74-4faa-a5a4-c18a132bfca4"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "2b973389-d818-4690-badf-2c0af526d49f"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "2bb002be-efbf-498c-8209-fd114d77f63f"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "33741d2c-293a-4580-babe-c672461ccad7"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "34059a1c-4782-4d51-a6ed-f767db6a9cb5"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "3a9cac6b-747f-4382-b80b-25c21d6ba7a9"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "3e6cb574-ebe5-4c2f-916a-75925be8389d"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "3e70fe29-fafc-4737-a874-13b9cf87e80d"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "3edb6130-0e70-4d90-9a62-be9438e2cbaf"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "3ef34584-178f-42fb-bfb4-b66d8a566f22"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "3f0e9c48-48a6-4008-9587-b6bdca61a3e6"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "3f2bfc74-2af6-462d-a20e-df93f18a4aee"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "3f6b141a-401d-4d09-aa6c-13e0d5b2a365"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "3ffa12e3-3270-4e6c-88c2-e6e0104d65ed"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "4250fb15-62b9-40b0-b7d1-6f1ad4c4588a"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "42fa748e-2f6b-495b-82f8-c88ca34a2318"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "43812401-640f-43f9-b486-8e314da73a9d"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "43caf4f6-174d-4256-a49d-26e152ea60d7"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "4422f0c6-f93d-4e9b-a9fe-3eb5492778f7"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "452e6b01-1d84-4900-ad07-a2005d75c081"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "46292b56-0a0d-433e-b1be-ba6e5ba67585"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "46927095-6ba1-4e3f-8fa9-5ea8a0b5507a"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "47eb700f-d20a-49f4-926f-68f1f3d1c620"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "4888bbc5-1a07-49cd-b1ce-0b623a5b2404"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "48963b6d-e85f-450a-8667-ba5f70f7bf55"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "4a73644c-d996-4165-b431-888c4dc251f6"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "4df14b20-6a03-44bb-9db0-d697cc44dcfa"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "4e5fb55e-e74f-41f8-b8d7-4b13c6473794"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "4ef89d22-49fe-4b1e-81ed-ff6da4b64ab2"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "5115701e-3421-4c93-b2ab-e28bc3391849"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "5123c418-4f15-4fc4-b289-5cedbea26dc5"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "54c94f69-3120-44de-8c79-c29a62b5bda9"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "565d473e-3a4a-44eb-b18e-278459745910"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "57189bf8-5eb1-4ece-ac77-4f8a913cfddc"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "57811b55-e2d4-4f7b-bcb9-568e6e9e3429"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "58bf6670-1978-4d07-8461-22bf3d816dbf"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "5a7bc367-8a1a-4c9f-a2d8-8ded9a8f2d18"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "5b8d39d4-80eb-4ba2-b7e7-1151f360e81c"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "5cb8dd71-51af-49f0-9358-33b7dc8d1c3c"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "5db013c2-8cf2-4e2e-b0f7-cf16e8455e33"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "5db2fe3e-6f90-4855-bccc-c650466c9b4c"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "6076aea8-41f1-4cc7-8c28-7b67452dd71e"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "60cb088c-c605-4deb-9812-66ffeee30e68"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "636a9200-1cc3-46f7-87c6-c8126c7d0a8d"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "64db014c-ef64-465b-aa6a-d4529cbea8e6"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "652263aa-22b9-4b25-a85a-bd545356aecb"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "65c072c3-2efd-4985-a86b-80e2a03c0932"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "66f1264f-5ac5-454a-950d-0ebaabd20cef"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "6746413b-0d3b-4ef8-afbc-1c4183231ab8"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "67722c23-d767-451d-9fc7-231a04843204"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "68695bfc-d73d-4aba-9d07-150b1c958571"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "69a93a9f-9690-4e22-a079-4e4ed7feb727"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "6c21f5c4-f258-44cb-a8e3-3abb88c49176"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "6ccee848-a888-47b4-b9a7-b5e90920f28d"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "6e69353e-fbc2-40f4-8910-7a33933265e5"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "72d97613-fea4-421f-a9e3-6fc93cea2eba"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "7328d8cb-bf2a-4e6f-bb42-0157dee62218"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "74b083dc-adb6-4b78-8bf5-fd4c6cb0dfc1"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "74bd58a8-7ed0-4e9f-b495-a0bf16ba3395"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "758f96e5-8a4b-4e06-b6ad-af04e417e632"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "766b8ddc-9a4c-4452-96a0-7865409f8c96"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "76d4f0ba-56a2-4385-98ad-6dce54ca22cf"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "77119123-96d9-4f4b-888c-71cc74145c03"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "78fbd4ef-1849-49dd-b58e-cdd37e458979"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "78fc0377-079c-4b16-91ae-1c8e34174bac"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "79055d28-764f-42bb-ad3b-9984c8076f6d"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "7baf4f49-a9b3-45ec-90c3-0709b030ad66"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "7bc58963-ed2b-4f48-9f39-659f8401edfb"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "7c553e3b-3e45-402c-a7e5-9ce47234b591"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "7d01f304-edd7-4ed5-ba7f-59c672f7aa19"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "7d3b5a72-c68a-4f94-8b73-edcefa451ca5"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "7dd13dd8-5629-4ae2-b916-0562297d3660"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "7e0164f4-ef55-4cf1-8670-6d001eed934c"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "7ef8997e-c3d0-463d-9f9b-54571fa81a55"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "8227ca67-b17e-4e97-827c-80e74912d2b1"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "83dcd8b0-fea6-41aa-8959-288a2b7808ed"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "841b39a7-5507-4914-8666-f12978608486"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "85293edf-c3f5-4ff6-98fa-eeeed26e7394"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "872a9540-109f-474f-ad6a-2da63724645f"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "88263dd2-ce52-49f3-b49e-ef8e6b846d99"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "885bc6b9-3798-4281-ba83-42d9c223f147"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "88a14008-46e1-44a1-922b-22952009dcee"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "89a3da42-4ea1-464e-9941-97de2148f33d"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "8a16ab5c-9c9d-4871-9bae-1befd47bfee7"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "8a79d30c-cac6-403e-84c1-f78b6e2844f0"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "8b5e3419-d5c6-4787-91ce-bfdeea7fc3ae"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "8c14da45-9ca3-4aea-88c5-56b97bfc7909"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "9062a40d-3d72-4a11-908c-0e4d22a2a2e0"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "929455f9-0ad6-4ba0-9370-19524f2aaf66"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "92c95817-c46e-4cab-8f4d-5781f9a62906"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "92d2b97d-911b-4565-a498-f4ef0416e9e9"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "933b754a-0e6e-42a7-a436-868499c9760a"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "939d6812-7ad8-46f8-853f-52a7e89da25e"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "93c5db33-da23-4583-bfca-3a58ac1ef728"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "95205f8a-b7d0-48bb-b55d-ddc2c059edf6"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "957b65c2-4650-4da3-b18b-a676017aa3b6"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "95893c36-54c8-4dc8-a4fa-1fee3d774619"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "96e55b5b-d316-4df2-9c4e-def6781ea598"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "98581c68-492e-4e4a-aa32-3ef672a570bc"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "98d3e43a-3f38-45b6-8065-17c768410ea7"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "a017d27f-8b29-4a1f-9c77-89f35565d353"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "a16cf0f8-622f-40cd-980c-691b042e04a9"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "a31583ac-23cc-4674-bc5b-6fe449be72a4"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "a57cdb7a-0cec-471a-8854-7f0c8ac32cfe"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "a655b041-bc61-4b98-983f-fc593eb57ba3"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "a6e3226c-7c9c-4ea2-aa37-3ba31e4e5e6e"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "a7074d6c-7a27-404d-b9e4-3fc8fe3e0150"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "a8315680-ac5a-46af-a2e2-de6223fdd671"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "a92e7ac7-8c64-42e9-a6b0-38c101353208"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "a935f916-0b59-4970-93c0-7f7383f33388"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ab062aa3-2304-423d-8e77-8af9550bec23"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ab938907-d70c-4094-9ed9-d34bb5f7bc36"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ac95e79a-1e72-4fc4-b319-f4c9ebbe48f5"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "acaa8c52-091f-406d-8d98-97b9ab40b193"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ad035f66-ff34-45bd-8dfe-1b67b3633094"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "add7c2de-254a-407b-8dd9-1c632930e544"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ae9bd6a6-031e-44a9-afd8-ebfb986e2545"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "b28d42a1-3614-4a52-b2bb-8effe4fa1048"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "b3a220eb-9d6b-4003-aae4-811107e74761"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "b4e9b5f0-d13a-454c-a3ca-2231b6a3a3e1"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "b663762c-01f8-4f23-9d0d-d7b4273c86e3"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "b8d69340-5684-4bc4-b941-defdcc138b0e"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "b9f64abc-2007-46db-9df3-62a1b01f6340"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ba826128-c135-4559-a423-84654c685f8f"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "bf3ebe35-7b42-4370-9d92-e2e274a252eb"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c041ef14-bdc6-4990-8261-17de69518db3"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c151ab7a-bd7a-40b4-a780-2a72b28f02b9"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c174f306-ff33-41b6-b3ea-1a4c22ec1381"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c20f95e3-05d0-4894-9c8b-42ae38210258"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c3d325ff-b80c-4f2e-8663-b476525f7e47"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c3fad326-6b0d-4b8c-ae96-98280b2355a2"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c57e0eba-cb27-49f0-b313-017a972c4414"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c6c5300f-4d87-442b-8308-e80b66d0115e"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c7eb1aea-4a63-4fab-a080-be980909e260"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c7f36544-591b-4f2c-9162-9033358a5e94"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "c947897a-b932-42cb-bc54-1e710fbe684f"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ca85dbf5-f3fd-4310-9b2c-a9f483372572"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ca9cceb8-d829-4f28-bf23-cddf31c99973"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "cac94c83-ff68-4d88-ac5f-16130479bff0"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ccaa9b89-8ea1-4771-8009-afe279a65ef3"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "cd39e7fa-6212-49b3-a0b2-20406d72b7f7"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "cd6ec027-f441-4c42-b5b9-689ebcd29605"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "cdd614a2-3bd0-4a71-b8b1-6894237c1b17"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d01a3965-32c5-424d-a061-6d5b35ac4d78"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d0318255-02d3-4f24-beb3-9cd37879906c"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d053e4e7-e3db-40a3-be1e-4422d6a0dd93"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d0846801-5c7a-4f07-a8e6-928b3cba2655"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d13979db-937d-41c9-9e15-dac798273bf0"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d14ff78e-d663-46ee-a6bf-0ddf4808c109"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d17fc130-0e50-4bdc-a8ad-a12537bfae31"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d44b1ba1-e12b-4685-8ab3-0cd6d12d3788"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d46376b4-adc8-448c-8f92-268cb6220af3"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d5b8f8b0-e21d-4b24-a082-c97d499d1fcd"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d6d5b221-b375-422c-a613-ab087375336a"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d7510998-187f-419b-9302-89c74b532278"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d7cfd3f9-5db0-430b-a8fc-5b1887205b83"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d80d9cec-d332-490c-a9d9-71880434d65a"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "d8448d43-eed4-4bf6-948e-40fde8f61166"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "dad98b2b-0d5d-43cb-a68b-71deea40c47b"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "dadbe2cf-7cab-486c-b09c-cac89258edb6"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "db6cd062-3f3e-430b-8350-d11521e4a341"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "dd35a8dd-06ca-4923-80cb-9b6acb2ef3e4"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "dd70a5e9-ab5a-46bd-a81e-c3003fc037f0"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ddce059e-a8eb-4b8e-931e-0d80b5f490e4"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "deee002b-de04-4a58-b2ad-83867f70e5c1"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "df2001fd-990f-460c-9ee2-e09b095dbb62"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "df6a5fc9-f014-4eb8-a033-f70e0c42c781"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "df83a69d-ed83-4ca2-8d40-de32bd76abeb"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "df8c128a-83da-42c9-aa85-85a1086b005e"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "e2133988-66ce-409f-be68-d712665670d5"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "e3602d68-38f6-4f53-9502-dbb52f01bd74"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:24:14.316078+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "e443fec1-3d49-48e4-9e84-de594fb7b95a"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "e52abd2d-d71e-4cc9-be50-853c2ebe98b5"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "e7d4a0cb-1b24-48f3-a184-624cb3331d14"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "e7f6e1bc-fd68-411e-b609-bc35181a04a8"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "e88a7f5e-5031-4377-99ab-4cd89138ec66"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "e8fe1b95-f8a9-42f6-ad46-1dfab91cf570"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ec04cb92-84fa-4292-aecf-81a13854f914"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ec9c6897-3b56-4979-be5d-20d22f9013a9"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "f0e03a5c-c6c7-422d-be78-970ec0652c5f"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "f12d6a73-ee8f-4424-8aac-cd853efb7c79"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "f282b891-46a8-4e4f-9829-08baee2bdd61"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "f314135f-92e7-4e28-9da1-8b44dbae1dff"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "f3bdcb42-969b-4822-93cf-b76c9ea3868f"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "fa49a2ac-bd2b-4cfe-8ffd-c31866284d7a"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "fb3a033a-c8b9-455f-b8d3-2c7f23de1757"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "fba5f863-17b7-4e72-a1a2-0668414e8239"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      },
+      {
+        "table": "documents",
+        "key": [
+          "ffd49047-570d-409d-874d-341648dec5de"
+        ],
+        "changes": {
+          "updated_at": [
+            "2026-10-27T02:13:39.824782+00:00",
+            "2026-10-27T02:39:34.401418+00:00"
+          ]
+        }
+      }
+    ],
+    "candidate_and_assets_match": true,
+    "database_integrity": "ok"
+  },
+  "production_browser": {
+    "new_comparison_tab": true,
+    "statuses": {
+      "/api/health": 200,
+      "/api/documents": 200,
+      "/api/workspace/graph": 200,
+      "/api/workspace/notebook/index?limit=1": 200,
+      "/api/workspace/comparisons": 200
+    },
+    "blocked_business_writes": 0,
+    "page_errors": [],
+    "paid_calls": 0
+  },
+  "browser_left": {
+    "comment_underline_highlight_visible": true,
+    "comment_hover": true,
+    "marked_text_selectable": true,
+    "duplicate_count": 3,
+    "errors": [],
+    "blocked_business_writes": 7,
+    "paid_calls": 0
+  },
+  "browser_right": {
+    "right_comment_and_underline": true,
+    "right_preview": true,
+    "errors": [],
+    "blocked_business_writes": 7,
+    "paid_calls": 0
+  },
+  "cached_comparison": {
+    "cached_real_response": true,
+    "condition_source_visible": true,
+    "unreviewed_draft_hidden": true,
+    "paid_calls": 0
+  },
+  "pixels": {
+    "initial": {
+      "red": 0,
+      "yellow": 0,
+      "ink": 2183
+    },
+    "underline": {
+      "red": 451,
+      "yellow": 0,
+      "ink": 2176
+    },
+    "highlight": {
+      "red": 451,
+      "yellow": 6342,
+      "ink": 2176
+    },
+    "paid_calls": 0
+  },
+  "checks": {
+    "backend": 27,
+    "frontend": 45,
+    "typescript": "pass",
+    "mypy_annotation": "pass",
+    "ruff_annotation": "pass"
+  },
+  "concurrent_translation": {
+    "time_singapore": "2026-10-27 10:38:12",
+    "audit_purpose": "translate_selection",
+    "outcome": "succeeded",
+    "total_tokens": 641,
+    "recorded_cost_nano_cny": 1077000,
+    "pricing_version": "deepseek-cny-2026-07-17",
+    "actual_bill_unverified": true,
+    "initiator_unknown": true,
+    "tests_sent_request": false
+  },
+  "recorded_utc": "2026-10-27T02:41:13.762229+00:00",
+  "cleanup": {
+    "files": 478,
+    "links_unlinked": 59,
+    "bytes": 37989480,
+    "temporary_root_absent": true,
+    "old_protected_file_hashes_match": true,
+    "notes_annotations_study_cache_old_rows_match": true,
+    "candidate_and_assets_match": true,
+    "verified_utc": "2026-10-27T02:41:38.678809+00:00"
+  }
+}

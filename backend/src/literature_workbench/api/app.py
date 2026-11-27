@@ -6,6 +6,12 @@ from fastapi import FastAPI
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from literature_workbench.api.health import router as health_router
+from literature_workbench.api.backups import router as backups_router
+from literature_workbench.features.backups import BackupError, BackupService
+from literature_workbench.api.workspace import router as workspace_router
+from literature_workbench.api.reading_graph import router as reading_graph_router
+from literature_workbench.api.relation_review import router as relation_review_router
+from literature_workbench.api.comparison import router as comparison_router
 from literature_workbench.api.imports import router as imports_router
 from literature_workbench.api.pdf_files import router as pdf_files_router
 from literature_workbench.api.parsing import router as parsing_router
@@ -14,6 +20,8 @@ from literature_workbench.api.libraries import router as libraries_router
 from literature_workbench.api.documents import router as documents_router
 from literature_workbench.api.session import router as session_router
 from literature_workbench.api.settings import router as settings_router
+from literature_workbench.api.research import library_router as research_library_router
+from literature_workbench.api.research import router as research_router
 from literature_workbench.api.translations import router as translations_router
 from literature_workbench.api.annotations import router as annotations_router
 from literature_workbench.config import AppSettings
@@ -25,6 +33,9 @@ from literature_workbench.features.settings.service import SettingsService
 from literature_workbench.features.egress.gateway import DeepSeekGateway
 from literature_workbench.features.models.qwen_local import QwenLocalClient
 from literature_workbench.features.models.qwen_process import QwenProcessManager
+from literature_workbench.features.research.repository import RagChunkRepository
+from literature_workbench.features.research.retriever import RagRetriever
+from literature_workbench.features.research.service import ResearchService
 from literature_workbench.features.translation.repository import TranslationRepository
 from literature_workbench.features.translation.service import TranslationService
 from literature_workbench.features.annotations.service import PdfAnnotationService
@@ -80,6 +91,7 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         trusted_root = TrustedImportRoot.create(resolved.data_root)
         library_watcher: WatcherManager | None = None
+        backup_service: BackupService | None = None
         supervisor_lock = trusted_root.mutex("api-supervisor")
         try:
             supervisor_lock.acquire(timeout=0)
@@ -91,6 +103,12 @@ def create_app(
             database = Database.open(resolved.database_path)
             run_migrations(database)
             app.state.database = database
+            try:
+                backup_service = BackupService(database, resolved.data_root, resolved_inspector)
+            except (BackupError, OSError):
+                # Optional backup storage must not make reading/research unavailable.
+                backup_service = None
+            app.state.backup_service = backup_service
             app.state.trusted_import_root = trusted_root
             queue_clock = _utc_now
             task_queue = TaskQueue(database, queue_clock)
@@ -122,13 +140,31 @@ def create_app(
                 resolved_secret_store,
                 deepseek_gateway,
             )
+            qwen_local_client = QwenLocalClient()
+            qwen_process_manager = QwenProcessManager(
+                resolved.qwen_runtime_dir,
+                exe_path=resolved.qwen_exe,
+                model_path=resolved.qwen_model,
+                mmproj_path=resolved.qwen_mmproj,
+            )
+            app.state.qwen_process_manager = qwen_process_manager
             app.state.translation_service = TranslationService(
                 TranslationRepository(database, queue_clock),
                 SettingsRepository(database),
                 task_queue,
                 deepseek_gateway,
-                QwenLocalClient(),
-                QwenProcessManager(resolved.qwen_runtime_dir),
+                qwen_local_client,
+                qwen_process_manager,
+            )
+            rag_chunk_repository = RagChunkRepository(database)
+            app.state.research_service = ResearchService(
+                database,
+                rag_chunk_repository,
+                RagRetriever(rag_chunk_repository),
+                SettingsRepository(database),
+                deepseek_gateway,
+                qwen_local_client,
+                qwen_process_manager,
             )
             library_repository = LibraryRepository(database, task_queue)
             app.state.library_repository = library_repository
@@ -167,8 +203,17 @@ def create_app(
             if register_initial_library and library_repository.count() == 0:
                 app.state.library_root_service.register_initial_approved_library()
             await library_watcher.reconcile_active_libraries()
+            # Watch notifications do not include changes made while the app was closed.
+            for library in library_repository.list_active():
+                if library.discovery_mode == "monitored":
+                    task_queue.enqueue(
+                        "scan_library", f"scan_library:{library.id}",
+                        {"library_id": str(library.id)},
+                    )
             yield
         finally:
+            if backup_service is not None:
+                backup_service.close()
             if library_watcher is not None:
                 await library_watcher.shutdown()
             supervisor_lock.release()
@@ -193,10 +238,17 @@ def create_app(
     app.add_middleware(LocalApiSecurityMiddleware, session=resolved_session)
     app.add_middleware(OriginGuardMiddleware)
     install_validation_error_handler(app)
+    app.include_router(workspace_router)
+    app.include_router(reading_graph_router)
+    app.include_router(relation_review_router)
+    app.include_router(comparison_router)
     app.include_router(health_router)
+    app.include_router(backups_router)
     app.include_router(session_router)
     app.include_router(settings_router)
     app.include_router(translations_router)
+    app.include_router(research_router)
+    app.include_router(research_library_router)
     app.include_router(annotations_router)
     app.include_router(libraries_router)
     app.include_router(documents_router)

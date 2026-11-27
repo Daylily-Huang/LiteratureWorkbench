@@ -1,0 +1,111 @@
+{
+  "implementation_hashes": {
+    "backend/src/literature_workbench/features/research/study_library.py": "3150fee6a34dfd29f32231bb2ad46a5ddfc5daa5508f492f6924ee11946d3be8",
+    "backend/src/literature_workbench/api/research.py": "199b1e07db2bc97d5975c621e0a091a41e4fe4b5762aa005e26b0473c65b4087",
+    "backend/src/literature_workbench/features/research/service.py": "4905abad76895dbcd3d3dc9d73225f9e853fd0b35c950023b73efb95fb74d50e",
+    "backend/tests/research/test_library_service.py": "031e6eb6a2c867313c994ba86d93f1cbd7e57870a694de11292071ef5e788273",
+    "backend/tests/api/test_research.py": "325657356080371d7bc8346bfadbcccd801f039ebb7f15b8ac95573ef634ffee",
+    "web/src/features/research/StudyHistory.tsx": "437810c0caf662d1035802980224e860842a80b329a0ced1b6fe3e266a31ca7d",
+    "web/src/features/research/StudyHistory.test.tsx": "a9c8666757265f911e9c977b72246467c7b10c95a907c380eeb1d3bea6b64f81",
+    "web/src/features/library/LiteratureDesk.tsx": "b21b1071804a6cfd035e74ae629bdc65510772f15a28e72d86189a9e136b2621",
+    "web/src/features/research/AssistantPanel.tsx": "9421edc4172ad9ae7ad27a0525878ad2cfee45ded4df29680b279857304468ce",
+    "web/src/app/Workbench.tsx": "91db80c71e5da4446728f6b3f685137037243e2b167fdb9baf5a8826b4021718",
+    "web/src/app/App.css": "bb523aea16b32e778eb25695e6b3091efa49747eedfb6c2edf198051117b3fa6"
+  },
+  "manifest_sha256": "37112f1da2631bc1abdf18fd65fd9f89de4eb6ef65adc35aa682eeac6f1ed322",
+  "review": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "verdict": "GO",
+    "independent_backend_tests": 5,
+    "independent_frontend_tests": 5,
+    "tool_calls": 6,
+    "browser_independently_rerun": false
+  },
+  "self_checks": {
+    "backend_related": 139,
+    "frontend": 204,
+    "frontend_files": 42,
+    "mypy_source_files": 81,
+    "ruff": "passed",
+    "typescript": "passed",
+    "production_build": "passed"
+  },
+  "browser_phase1": {
+    "list_badges_and_filter": true,
+    "cache_browse_no_model_call": true,
+    "original_group_not_recast_as_single_paper": true,
+    "verified_page_jump": true,
+    "reread_requires_explicit_preflight_and_submit": true,
+    "reread_targets_single_paper": true,
+    "list_auto_refresh_after_answer": true,
+    "source_change_marks_stale_and_disables_unverified_jump": true,
+    "model_calls": 2,
+    "page_errors": []
+  },
+  "browser_phase2": {
+    "cache_and_badges_persist_after_actual_restart": true,
+    "history_browse_still_no_model_call": true,
+    "model_calls": 2,
+    "page_errors": []
+  },
+  "installation": {
+    "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-study-library-20261023-020031.sqlite3",
+    "snapshots": {
+      "research_entries": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_groups": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "document_relations": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_analyses": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_candidates": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "translation_cache": {
+        "count": 68,
+        "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+      },
+      "full_text_study_cache": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "full_text_study_documents": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    },
+    "candidate_manifest_sha256": "37112f1da2631bc1abdf18fd65fd9f89de4eb6ef65adc35aa682eeac6f1ed322"
+  },
+  "production": {
+    "url": "http://127.0.0.1:60599",
+    "asset_checks": {
+      "index-DqJjWBRB.js": true,
+      "PdfReader-Cw2QgjT4.js": true,
+      "index-DB-3Eb_f.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200,
+      "/api/libraries/full-text/studies": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0015_study_documents",
+    "study_cache_rows": 0,
+    "member_rows": 0
+  }
+}

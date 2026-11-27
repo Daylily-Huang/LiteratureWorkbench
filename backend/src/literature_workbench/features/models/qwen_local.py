@@ -29,11 +29,15 @@ class QwenLocalClient:
         self._transport = transport
         self._total_timeout_seconds = total_timeout_seconds
 
-    def translate(self, prompt: str) -> str:
+    def complete(self, user_prompt: str, system_prompt: str | None = None) -> str:
+        messages: list[dict[str, str]] = []
+        if system_prompt is not None:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
         body = json.dumps(
             {
                 "model": QWEN_ALIAS,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": messages,
                 "stream": False,
             },
             ensure_ascii=False,
@@ -84,3 +88,6 @@ class QwenLocalClient:
         except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
             raise QwenLocalError("invalid_qwen_response") from None
         return content
+
+    def translate(self, prompt: str) -> str:
+        return self.complete(prompt)

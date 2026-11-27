@@ -42,7 +42,19 @@ _PRICES: dict[str, PricingSnapshot] = {
 }
 
 
-def price_usage(model: str, usage: DeepSeekTokenUsage) -> UsageCharge:
+def price_usage(model: str, usage: DeepSeekTokenUsage, *, purpose: str = "") -> UsageCharge:
+    if purpose == "research_comparison":
+        # Conservative peak-rate estimate, checked against the official CNY
+        # price page on 2026-10-24. Existing historical accounting stays intact.
+        pricing = {"deepseek-flash": PricingSnapshot(40, 2_000, 8_000),
+                   "deepseek-v4-flash": PricingSnapshot(40, 2_000, 8_000),
+                   "deepseek-v4-pro": PricingSnapshot(300, 9_000, 27_000)}.get(model)
+        if pricing is None:
+            return UsageCharge(usage, None, None, None)
+        cost = (usage.prompt_cache_hit_tokens * pricing.cache_hit_nano_cny_per_token
+                + usage.prompt_cache_miss_tokens * pricing.cache_miss_nano_cny_per_token
+                + usage.completion_tokens * pricing.output_nano_cny_per_token)
+        return UsageCharge(usage, cost, "comparison-peak-upper-cny-2026-10-24", pricing)
     pricing = _PRICES.get(model)
     if pricing is None:
         return UsageCharge(usage, None, None, None)

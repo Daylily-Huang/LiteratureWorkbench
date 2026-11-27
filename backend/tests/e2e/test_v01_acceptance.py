@@ -188,7 +188,9 @@ def test_v01_isolated_library_translation_fallback_cache_and_restart(tmp_path: P
     completed = fallback.process_task(fallback_task.id)
     assert completed.provider == "qwen"
     assert completed.fallback_reason == "deepseek_total_timeout"
-    assert len(transient.calls) == len(qwen.calls) == qwen_process.calls == 1
+    # One bounded retry precedes the fallback, so DeepSeek sees two attempts.
+    assert len(transient.calls) == 2
+    assert len(qwen.calls) == qwen_process.calls == 1
 
     database_path = database.path
     del service, fallback, database, queue, repository, scanner, parser
@@ -204,6 +206,6 @@ def test_v01_isolated_library_translation_fallback_cache_and_restart(tmp_path: P
     with reopened_database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 2
 
-    with pytest.raises(SelectionRejected, match="selection_not_current"):
+    with pytest.raises(SelectionRejected, match="selection_text_mismatch"):
         restarted.submit("session-b", _request(row, "must never leave this machine"))
     assert restarted_deepseek.calls == []

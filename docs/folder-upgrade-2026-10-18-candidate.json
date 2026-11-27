@@ -1,0 +1,16 @@
+{
+  "backend/src/literature_workbench/api/app.py": "b7d6241b730472a28b179e6301c4493bcae4210e5b60c715c610bb8baac88e22",
+  "backend/src/literature_workbench/api/documents.py": "17c960976ef502301e8733ab305f8eb977e9f56a3c740c7bc20f388dd93d41d5",
+  "backend/src/literature_workbench/api/libraries.py": "cc2da8de66c7053ea929e2fe5716a467b49a65690de4e17db167e1cc369ac9e1",
+  "backend/src/literature_workbench/features/library/repository.py": "4e65b27d42f24ede58162e5d5aae93047967e5d3bd6f6f4b3e710e0aee012232",
+  "backend/tests/library/test_documents_api.py": "01703ecd6c6175c79eb0e57fc17950bc7cd2376d542f6acddae012add926579f",
+  "backend/tests/library/test_folder_management.py": "63c3c7e5a52fb691641037d36c22e90843bb79f9465827251459983ded72fa64",
+  "web/src/app/App.css": "43bba86894d78a60dd4b6101ef6a3a2cd909c25ce66343bf0ea5601ab97b2b60",
+  "web/src/features/library/documents.ts": "1050b2e75a87520bde579446fdada030cf513e2a7be9832822efd0172efca283",
+  "web/src/features/library/DocumentTree.tsx": "8fc4bae55f3e73fc5e6a9237a0abf079474078dbadf6cb95a157089560ad06a1",
+  "web/src/features/library/DocumentTree.test.tsx": "74d21f752ac723d792fef81f4284d6ee6aa1333278dcbf97ee4b6fe2af3f2189",
+  "web/src/features/library/LibraryPanel.tsx": "857828e4606753e35bc5183c76b933ef80a770456823a5aafabcccafedb5685f",
+  "web/src/features/library/folders.ts": "7fee68a87cd2fbcaae0e26ed230bb05145655b86d446ba2b2e93e7eea004705e",
+  "web/src/features/library/FolderManager.tsx": "4ea4e4f86bcf9d2bb1f0a0257d4af1de64c1cb70a8c6ef88935fa78b0112d45d",
+  "web/src/features/library/FolderManager.test.tsx": "b7c7679bd1a31764887f34300345a72fd6876107614719a0e301e3dab9a0f28a"
+}

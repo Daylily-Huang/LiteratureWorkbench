@@ -8,6 +8,7 @@ import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
+from literature_workbench.platform.windows.paths import io_path
 from uuid import UUID
 
 from literature_workbench.platform.windows.filesystem import (
@@ -357,7 +358,7 @@ class TrustedImportFile:
         self, destination: Path, durable_parent: Win32OwnedFileHandle
     ) -> None:
         self.flush()
-        encoded = str(destination).encode("utf-16-le")
+        encoded = str(io_path(destination)).encode("utf-16-le")
         offset = _FILE_RENAME_INFO.FileName.offset
         buffer = ctypes.create_string_buffer(offset + len(encoded) + 2)
         info = _FILE_RENAME_INFO.from_buffer(buffer)
@@ -438,7 +439,7 @@ class TrustedImportRoot:
         handles: list[Win32OwnedFileHandle] = []
         try:
             for directory in (data_root, imports, incoming, library, locks):
-                directory.mkdir(exist_ok=True)
+                io_path(directory).mkdir(exist_ok=True)
                 handle = provider.open_directory(directory, share_delete=False)
                 handles.append(handle)
                 metadata = handle.metadata
@@ -465,7 +466,7 @@ class TrustedImportRoot:
 
     def open_durable_directory(self, path: Path) -> Win32OwnedFileHandle:
         raw = _CreateFileW(
-            str(path),
+            str(io_path(path)),
             GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             None,
@@ -527,8 +528,8 @@ class TrustedImportRoot:
             raise ValueError("invalid_final_directory")
         year_path = self.library_directory / year
         month_path = year_path / month
-        year_path.mkdir(exist_ok=True)
-        month_path.mkdir(exist_ok=True)
+        io_path(year_path).mkdir(exist_ok=True)
+        io_path(month_path).mkdir(exist_ok=True)
         provider = Win32FileMetadataProvider()
         year_handle = provider.open_directory(year_path, share_delete=False)
         try:
@@ -555,7 +556,7 @@ class TrustedImportRoot:
         held_directories: tuple[Win32OwnedFileHandle, ...] = (),
     ) -> TrustedImportFile:
         raw = _CreateFileW(
-            str(path),
+            str(io_path(path)),
             GENERIC_READ | GENERIC_WRITE | DELETE,
             FILE_SHARE_READ,
             None,

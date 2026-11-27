@@ -1,0 +1,140 @@
+{
+  "implementation_hashes": {
+    "backend/src/literature_workbench/api/workspace.py": "5031e6e6f31f5f828ae0af527c732c0492d36340a8ba5363e353636c05dd0406",
+    "backend/src/literature_workbench/features/research/evidence_matrix.py": "a772b47eee3f9b96d23b52dadf786ec7d22098cb2789e4b64b9b99e2ca6f3601",
+    "backend/tests/api/test_evidence_matrix.py": "5e4c53a7a079478b53fcc02abf9216661a7925dffafc07a5f22662158bc40f99",
+    "web/src/features/research/EvidenceMatrix.tsx": "3175b3541eabcc5d25dbd8e0cb7cc176739b823d7fc49baeb4d3e024e6169d43",
+    "web/src/features/research/EvidenceMatrix.test.tsx": "2d2870cba015a4fdab08927774a64fd66ec08b07607ad8e2f733bf7123071cbf",
+    "web/src/features/research/ResearchStudio.tsx": "a2f5ab2b6e65416ea2642beb0a93bd53880c3b5466c1c04b4d7625d5d583f018",
+    "web/src/features/research/ResearchStudio.test.tsx": "2835a0268baf73c67dd47d5bf7c284a1db5d541158a1612504809b773610109f",
+    "web/src/features/ui/exportText.ts": "f05a990a1366a749afef6f53ff2f79792ade5cbc4f3d1b33a1f246098f61a5dc",
+    "web/src/app/App.css": "79e4fd0fa580f8cd69503d95be5cb01326b3c4bb3b5c6213a2c6bf3f44d93170"
+  },
+  "manifest_sha256": "6b0db256de68467dd14f4fd4854f81733401291f40ccaccba604adc875d196cc",
+  "review": {
+    "verdict": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "manifest_sha256": "6b0db256de68467dd14f4fd4854f81733401291f40ccaccba604adc875d196cc",
+    "initial_calls": 6,
+    "targeted_rereview_calls": 1,
+    "independent_backend_tests": 12,
+    "independent_frontend_tests": 11,
+    "started_utc": "2026-10-22 21:21:47 UTC",
+    "completed_utc": "2026-10-22 21:23:08 UTC",
+    "fixture_issue": "First backend run did not enter product tests because reviewer parent directory was missing; creation followed by sole targeted rerun passed. No product changes.",
+    "inherited_evidence": "824 backend baseline, 261 frontend full suite, types/build/static checks, real Chrome/230-record author evidence.",
+    "unverified": "Production installation, long-term operation, real model scientific quality and root cause of prior sporadic reader-tab test fluctuation."
+  },
+  "self_tests": {
+    "backend_baseline": 824,
+    "backend_deselected": 2,
+    "final_related_backend": 12,
+    "frontend": 261,
+    "frontend_files": 49,
+    "ruff": "passed",
+    "mypy_source_files": 88,
+    "typescript": "passed",
+    "build": "passed",
+    "scope": "Full backend suite before final export completion metadata/zero-value formatting hardening; final related 12 and Ruff/Mypy passed. One initial full frontend run had transient old reader-tab test failure, isolated 15 and two later full runs passed; cause not verified, no reader source changes."
+  },
+  "browser": {
+    "long_answer_records": 230,
+    "no_legacy_whole_notebook_fetch": true,
+    "no_matrix_prefetch_during_reading": true,
+    "matrix_max_response_bytes": 13244,
+    "scoped_pagination_and_old_answer_quote_search": true,
+    "complete_json_records": 230,
+    "filtered_markdown_keeps_original_context": true,
+    "outside_sources_and_missing_coverage_preserved": true,
+    "actual_pdf_page_and_version_navigation": true,
+    "old_notebook_detail_by_id": true,
+    "failed_read_retry": true,
+    "cancelled_export_not_downloaded": true,
+    "changed_sources_kept_historical": true,
+    "mobile_no_horizontal_overflow": true,
+    "paid_ai_calls": 0,
+    "page_errors": []
+  },
+  "installation": {
+    "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-evidence-matrix-20261023-052351.sqlite3",
+    "snapshots": {
+      "research_entries": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_groups": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "document_relations": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_analyses": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_candidates": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "translation_cache": {
+        "count": 68,
+        "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+      },
+      "full_text_study_cache": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "full_text_study_documents": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_records": {
+        "count": 11,
+        "sha256": "ffc62427f79bc573d4cb2fdcd03f6b108437fe3528e41cffd85f6de97b896aa2"
+      },
+      "translation_memory": {
+        "count": 6,
+        "sha256": "9792d7d36ab0684af6b13dd73a215353ad86cef7c1e95c2cf54b0354549d408a"
+      },
+      "pdf_annotation_baselines": {
+        "count": 4,
+        "sha256": "096565e1997824c15cdb571b43c79395344d987dfeebdd79dfeb740091530663"
+      },
+      "pdf_annotation_mutations": {
+        "count": 14,
+        "sha256": "2a02593f7a4a2398fbb15b8f9f9be30a1b1ff5e77f7bec1d2c5b12967d0c844f"
+      }
+    },
+    "candidate_manifest_sha256": "6b0db256de68467dd14f4fd4854f81733401291f40ccaccba604adc875d196cc"
+  },
+  "production": {
+    "url": "http://127.0.0.1:59978",
+    "asset_checks": {
+      "index-l6s5-6eY.js": true,
+      "PdfReader-9DRAdiNY.js": true,
+      "index-XSZABAoG.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200,
+      "/api/libraries/full-text/studies": 200,
+      "/api/data/overview": 200,
+      "/api/data/context": 200,
+      "/api/workspace/notebook/index": 200,
+      "scoped_evidence": 200,
+      "readonly_evidence_export": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0015_study_documents",
+    "study_cache_rows": 0,
+    "member_rows": 0,
+    "existing_full_backup_sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9"
+  }
+}

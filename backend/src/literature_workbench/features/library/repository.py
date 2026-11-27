@@ -62,6 +62,8 @@ class LibraryRepository:
                     identity.file_id,
                 ):
                     raise ValueError("registered_root_identity_changed")
+                if existing.recursive != recursive:
+                    raise ValueError("library_recursive_mismatch")
                 return existing
 
             active_roots = connection.execute(

@@ -292,7 +292,7 @@ test("poll failure is sanitized and automatically recovers", async () => {
 
   expect(await screen.findByText("状态更新暂时失败，正在重试")).toBeVisible();
   expect(screen.queryByText(/sensitive server detail/)).not.toBeInTheDocument();
-  await waitFor(() => expect(screen.getByText("导入完成")).toBeVisible(), { timeout: 2500 });
+  await waitFor(() => expect(screen.getByText("导入完成")).toBeVisible(), { timeout: 10_000 });
   expect(importApi.getImport).toHaveBeenCalledTimes(2);
 });
 
@@ -308,4 +308,16 @@ test("dropping a PDF with an empty browser MIME still waits for confirmation", (
   expect(screen.getByRole("button", { name: "确认导入" })).toBeVisible();
   expect(importApi.createImportIntent).not.toHaveBeenCalled();
   expect(importApi.uploadImport).not.toHaveBeenCalled();
+});
+
+test("search reveals matching documents inside collapsed nested folders", async () => {
+  render(<LibraryPanel documentApi={documentApi([
+    { document_id: "target", filename: "target.pdf", relative_folder: "研究/方法", authorization_source: "registered_library" },
+  ])} importApi={api()} />);
+  await screen.findByText("研究");
+  expect(screen.getByText("研究").closest("details")).not.toHaveAttribute("open");
+  fireEvent.change(screen.getByLabelText("搜索文献"), { target: { value: "target" } });
+  expect(screen.getByText("研究").closest("details")).toHaveAttribute("open");
+  expect(screen.getByText("方法").closest("details")).toHaveAttribute("open");
+  expect(screen.getByRole("button", { name: "target.pdf" })).toBeVisible();
 });

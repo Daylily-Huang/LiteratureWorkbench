@@ -65,6 +65,37 @@ def _session_generation(request: Request) -> UUID:
     return UUID(request.app.state.local_session.session_generation)
 
 
+@router.get("")
+def list_libraries(request: Request) -> Response:
+    with request.app.state.database.connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT l.id,l.root_path,l.recursive,
+              (SELECT COUNT(*) FROM documents d WHERE d.library_id=l.id
+                AND d.format='pdf' AND d.status IN ('candidate_pdf','valid_pdf')) AS document_count,
+              (SELECT j.status FROM jobs j WHERE j.dedup_key='scan_library:' || l.id
+                ORDER BY j.created_at DESC,j.rowid DESC LIMIT 1) AS scan_state,
+              s.value_json AS scan_summary,s.updated_at AS last_synced_at
+            FROM libraries l LEFT JOIN app_settings s ON s.key='library_scan_status:' || l.id
+            WHERE l.status='active' AND l.discovery_mode='monitored'
+            ORDER BY l.created_at,l.id
+            """
+        ).fetchall()
+    items = []
+    for row in rows:
+        summary = json.loads(row["scan_summary"]) if row["scan_summary"] else {}
+        items.append({
+            "library_id": str(row["id"]),
+            "display_path": str(row["root_path"]),
+            "recursive": bool(row["recursive"]),
+            "document_count": int(row["document_count"]),
+            "scan_state": row["scan_state"] or "idle",
+            "last_synced_at": row["last_synced_at"],
+            "warnings": summary.get("warnings", []),
+        })
+    return JSONResponse({"items": items})
+
+
 @router.post("/select-root")
 def select_root(request: Request) -> Response:
     try:
@@ -109,6 +140,7 @@ async def register_library(request: Request, payload: RegisterLibraryRequest) ->
             "overlapping_library_root",
             "private_data_root_not_allowed",
             "registered_root_identity_changed",
+            "library_recursive_mismatch",
         }:
             return JSONResponse({"code": code}, status_code=409)
         raise

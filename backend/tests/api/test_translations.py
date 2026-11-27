@@ -66,9 +66,40 @@ def test_translation_api_rejects_wrong_target_and_forged_text_without_task(clien
     assert client.post("/api/translations", headers=_headers(authenticated), json=wrong).status_code == 422
     response = client.post("/api/translations", headers=_headers(authenticated), json=forged)
     assert response.status_code == 409
-    assert response.json() == {"code": "selection_not_current"}
+    assert response.json() == {"code": "selection_text_mismatch"}
     with client.app.state.database.connect() as connection:
         assert connection.execute("SELECT count(*) FROM translation_tasks").fetchone()[0] == before
+
+
+def test_translation_api_reports_parse_pending_distinctly(client, authenticated) -> None:
+    ids = _register_page(client)
+    with client.app.state.database.transaction() as connection:
+        connection.execute(
+            "UPDATE parse_runs SET status='failed' WHERE id=?", (ids["run"],)
+        )
+        connection.execute(
+            "UPDATE contents SET current_parse_run_id=NULL WHERE sha256=?", (ids["content"],)
+        )
+
+    response = client.post("/api/translations", headers=_headers(authenticated), json=_payload(ids))
+
+    assert response.status_code == 409
+    assert response.json() == {"code": "selection_parse_pending"}
+
+
+def test_translation_api_reports_stale_version_distinctly(client, authenticated) -> None:
+    ids = _register_page(client)
+    now = datetime.now(UTC).isoformat()
+    with client.app.state.database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO document_versions VALUES(?,?,?,1,2,'v','f2',1,?)",
+            (str(uuid4()), ids["document"], ids["content"], now),
+        )
+
+    response = client.post("/api/translations", headers=_headers(authenticated), json=_payload(ids))
+
+    assert response.status_code == 409
+    assert response.json() == {"code": "selection_version_stale"}
 
 
 def test_translation_get_hides_unknown_task(client, authenticated) -> None:

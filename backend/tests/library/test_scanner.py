@@ -569,7 +569,7 @@ def test_real_held_directory_chain_blocks_swap_before_scandir(tmp_path: Path) ->
 
     def racing_scandir(path: Path):
         nonlocal race_attempted, swap_succeeded
-        if Path(path) == nested and not race_attempted:
+        if Path(path).as_posix().removeprefix("//?/") == nested.as_posix() and not race_attempted:
             race_attempted = True
             try:
                 nested.rename(parked)
@@ -979,7 +979,7 @@ def test_incremental_stat_error_marks_only_affected_document_incomplete(
     original_lstat = scanner_module.os.lstat
 
     def failing_lstat(path: Path):
-        if Path(path) == affected:
+        if Path(path).as_posix().removeprefix("//?/") == affected.as_posix():
             raise OSError("injected incremental stat failure")
         return original_lstat(path)
 
@@ -1106,7 +1106,7 @@ def test_intermediate_replacement_after_empty_enumeration_preserves_known_rows(
     monkeypatch.setattr(
         scanner_module.os,
         "scandir",
-        lambda path: Entries((NestedEntry(),)) if Path(path) == root else Entries(()),
+        lambda path: Entries((NestedEntry(),)) if Path(path).as_posix().removeprefix("//?/") == root.as_posix() else Entries(()),
     )
     scanner = LibraryScanner(database, repository, IntermediateSwappingInspector(), queue)
 

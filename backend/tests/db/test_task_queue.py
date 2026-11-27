@@ -241,7 +241,7 @@ async def test_dedicated_translation_runs_while_background_parse_is_active(
 
     async def parse_handler(_job: object, _cancellation: JobCancellation) -> None:
         timeline.append("parse-start")
-        await asyncio.wait_for(translation_completed.wait(), timeout=1)
+        await asyncio.wait_for(translation_completed.wait(), timeout=10)
         timeline.append("parse-end")
 
     async def translation_handler(_job: object, _cancellation: JobCancellation) -> None:

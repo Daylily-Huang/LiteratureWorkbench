@@ -19,6 +19,10 @@ SCHEMA_V05_PATH = Path(__file__).with_name("schema_v05_deepseek_billing.sql")
 SCHEMA_V05_VERSION = "0005_deepseek_billing"
 SCHEMA_V06_PATH = Path(__file__).with_name("schema_v06_deepseek_usage_optional.sql")
 SCHEMA_V06_VERSION = "0006_deepseek_usage_optional"
+SCHEMA_V07_PATH = Path(__file__).with_name("schema_v07_rag_chunks.sql")
+SCHEMA_V07_VERSION = "0007_rag_chunks"
+SCHEMA_V08_PATH = Path(__file__).with_name("schema_v08_rag_trigram_rects.sql")
+SCHEMA_V08_VERSION = "0008_rag_trigram_rects"
 
 
 def _split_sql_script(script: str) -> list[str]:
@@ -45,6 +49,15 @@ def run_migrations(db: Database) -> None:
             (SCHEMA_V04_VERSION, SCHEMA_V04_PATH),
             (SCHEMA_V05_VERSION, SCHEMA_V05_PATH),
             (SCHEMA_V06_VERSION, SCHEMA_V06_PATH),
+            (SCHEMA_V07_VERSION, SCHEMA_V07_PATH),
+            (SCHEMA_V08_VERSION, SCHEMA_V08_PATH),
+            ("0009_research_workspace", Path(__file__).with_name("schema_v09_research_workspace.sql")),
+            ("0010_reading_graph", Path(__file__).with_name("schema_v10_reading_graph.sql")),
+            ("0011_question_evidence", Path(__file__).with_name("schema_v11_question_evidence.sql")),
+            ("0012_relation_review", Path(__file__).with_name("schema_v12_relation_review.sql")),
+            ("0013_translation_memory", Path(__file__).with_name("schema_v13_translation_memory.sql")),
+            ("0014_study_cache", Path(__file__).with_name("schema_v14_study_cache.sql")),
+            ("0015_study_documents", Path(__file__).with_name("schema_v15_study_documents.sql")),
         ):
             migrations_table_exists = connection.execute(
                 """

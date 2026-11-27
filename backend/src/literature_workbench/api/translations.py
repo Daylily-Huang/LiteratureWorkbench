@@ -30,6 +30,7 @@ class TranslationCreate(BaseModel):
     content_id: str = Field(min_length=1, max_length=128)
     physical_page: int = Field(ge=1)
     selected_text: str = Field(min_length=1, max_length=8_000)
+    prefer_exact: bool = False
     target_language: Literal["zh-CN"]
 
 
@@ -50,6 +51,8 @@ def _body(task: TranslationTask) -> dict[str, object]:
         "model": task.model,
         "fallback_reason": task.fallback_reason,
         "error_code": task.error_code,
+        "cache_hit": task.reuse_details.get("mode") in {"exact", "reference"},
+        "reuse": task.reuse_details,
     }
 
 
@@ -60,8 +63,8 @@ def create_translation(request: Request, payload: TranslationCreate) -> JSONResp
             request.app.state.local_session.session_generation,
             TranslationRequest(**payload.model_dump()),
         )
-    except SelectionRejected:
-        return JSONResponse({"code": "selection_not_current"}, status_code=409)
+    except SelectionRejected as error:
+        return JSONResponse({"code": str(error)}, status_code=409)
     return JSONResponse(_body(task), status_code=202 if task.status == "queued" else 200)
 
 

@@ -1,0 +1,82 @@
+{
+  "candidate_manifest_sha256": "fb8578821c196cbe6a4c0b0aaf84c563dd4243212278a605bbde2113bfedb0a1",
+  "files": {
+    "backend/src/literature_workbench/features/research/full_text.py": "37bf6d1214a88fe0fb15673f13e90c001b6b833b62133479df0d4a34a30e3733",
+    "backend/src/literature_workbench/features/research/service.py": "e1c2678a0f724f7755d04ac1d9fc69191ca40e46668de18c7bbbec52667b394c",
+    "backend/src/literature_workbench/features/egress/gateway.py": "479aa34dad375076156db32a5991ac9c5ff928dd1edc0623cb78d1c804aaab94",
+    "backend/src/literature_workbench/api/research.py": "fb3435a4763621a880e5ac63411845baa840b689df82423405a76795f2d2e7c0",
+    "backend/tests/research/test_library_service.py": "dd8f16887ffc82cfedef6e1b405b1cb2764f65fc57bacec221d570641d3607ae",
+    "backend/tests/api/test_research.py": "aeb5b742ab835a2d119571d56828fa63e40613b8aeb7ab40861683eae1e12ad6",
+    "backend/tests/egress/test_gateway.py": "385fa35ab99e9ca575a9121d966118214cb038efe81acbb4465056faaedf149b",
+    "web/src/features/research/AssistantPanel.tsx": "c497e14ae84ab05f589d022a9893993f17707fe1bf39d4741e805fc16c00bf7e",
+    "web/src/features/research/fullTextStudy.tsx": "01e16b96375e19bc5f911bc423b5682660d5a8dacdf26eab0f5f971ef65905c4",
+    "web/src/features/research/fullTextStudy.test.tsx": "985bac8adf3cff4f5c3c5ab857ee5192b4c8df8db8b840e604ce0538ea674087",
+    "web/src/features/research/AssistantPanel.test.tsx": "2a3bef91c26a3d618acdd4375faa284eb88d025c7a436d1be7e650dc484f16b9",
+    "web/src/features/research/ResearchNotebook.tsx": "c25d700ba39bd9996ab93b1ded0c7da937d9558d4e36fed895900b43273186d2",
+    "web/src/app/App.css": "52b66b55d410081e962f70d9f497f92e860f5d674b7e1d9a0ee384accbf0e603"
+  },
+  "independent_review": {
+    "result": "GO",
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "backend_tests": 78,
+    "frontend_tests": 19
+  },
+  "production": {
+    "url": "http://127.0.0.1:54219",
+    "asset_checks": {
+      "index-C8Muv8UL.js": true,
+      "PdfReader-B1dvcZzF.js": true,
+      "index-CpZwU5-O.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68
+  },
+  "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-full-text-study-20261022-233316.sqlite3",
+  "preserved_tables": {
+    "research_entries": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "reading_groups": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "document_relations": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "relation_analyses": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "relation_candidates": {
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "translation_cache": {
+      "count": 68,
+      "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+    }
+  },
+  "isolated_browser": {
+    "default_full_text": true,
+    "preflight_without_model": true,
+    "all_four_pages_supplied": true,
+    "last_page_evidence_verified": true,
+    "notebook_keeps_coverage": true,
+    "source_link_page_two": true,
+    "question_change_invalidates_check": true,
+    "forged_quote_blocked_and_not_archived": true,
+    "source_change_blocked_before_model": true,
+    "controlled_model_calls": 2,
+    "page_errors": []
+  }
+}

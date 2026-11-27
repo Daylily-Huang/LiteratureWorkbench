@@ -32,12 +32,22 @@ class DeepSeekResponse:
 
 
 class DeepSeekAdapter:
-    def build_request(self, *, model: str, prompt: str) -> dict[str, object]:
+    def build_request(
+        self,
+        *,
+        model: str,
+        prompt: str,
+        system_prompt: str | None = None,
+    ) -> dict[str, object]:
         if _SAFE_MODEL.fullmatch(model) is None:
             raise InvalidDeepSeekModel("invalid_deepseek_model")
+        messages: list[dict[str, str]] = []
+        if system_prompt is not None:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
         return {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "stream": False,
         }
 

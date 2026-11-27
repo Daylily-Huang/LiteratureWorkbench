@@ -1,0 +1,158 @@
+{
+  "implementation_hashes": {
+    "backend/src/literature_workbench/api/backups.py": "e8a6cd0418b078cc0372215603010ae67200579ef0876812a2f67ea1ea96920e",
+    "backend/src/literature_workbench/features/backups.py": "31c229612067f3b9b8818d47d4f5cce391c1691d56acb20658e38885e3813a70",
+    "backend/src/literature_workbench/api/app.py": "804e046b5a91e047e45d3dbc0a12fbe9fa59088ab9b9f7c8dbf77e9d64f94f96",
+    "backend/tests/api/test_backups.py": "4551cad2bd52ba5d9bcf7464cca82eb5b736bdcecbb3d42f63c69f631727b8f6",
+    "web/src/features/settings/DataCenter.tsx": "04e7b9f42205aad9d10d91064cf6d575dfb866dd65f9f9f8de290f793af54c08",
+    "web/src/features/settings/DataCenter.test.tsx": "52a602bb19a127a75f03a104bbe03f0299ace1a9991a0ae988f45c8c6371f5bd",
+    "web/src/app/Workbench.tsx": "4c7ac484d402fb9bc8004ed27bb5a32085ad716ac48600a0d8f483c2a508cb48",
+    "web/src/app/App.css": "800c814f9f40c4b290c879fdf801f2fcb4107268bf80531026690d692e142709"
+  },
+  "manifest_sha256": "9e0728eb310f1fefe4fa06812841daa5958dfaef3fe4feadfb1a173159cc966a",
+  "review": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "verdict": "GO",
+    "first_review_tools": 6,
+    "recheck_tools": 4,
+    "first_backend": 13,
+    "first_frontend": 5,
+    "recheck_backend": 2,
+    "recheck_frontend": 6,
+    "independent_attacks": [
+      "unsafe_zip_names",
+      "zip_symlink",
+      "missing_pdf_coverage",
+      "windows_junction"
+    ],
+    "not_independently_rerun": [
+      "browser",
+      "production_preflight",
+      "production_installation"
+    ]
+  },
+  "self_checks": {
+    "full_backend_before_final_hardening": 775,
+    "excluded_backend": 2,
+    "final_backup_tests": 15,
+    "final_frontend": 210,
+    "frontend_files": 43,
+    "mypy_source_files": 83,
+    "ruff": "passed",
+    "typescript": "passed",
+    "build": "passed"
+  },
+  "browser_phase1": {
+    "full_backup_id": "0838e719-0da6-448e-9cbf-3ecdf8f09dcf",
+    "full_pdf_count": 4,
+    "cache_and_notes_preserved": true,
+    "background_job_survives_dialog_close": true,
+    "download_and_verify": true,
+    "isolated_restore_preserves_live_newer_note": true,
+    "restore_preview": "D:\\_scratch\\2026-10-23-data-center\\data\\backups\\workspace\\restore-previews\\56f4a8ce-aaa7-423e-890f-7869a14268a4",
+    "mobile_no_page_overflow": true,
+    "model_calls": 1,
+    "page_errors": []
+  },
+  "browser_phase2": {
+    "backup_and_restore_metadata_persist_after_actual_restart": true,
+    "model_calls": 1,
+    "page_errors": []
+  },
+  "installation": {
+    "backup": "D:\\LiteratureWorkbenchData\\backups\\pre-data-center-20261023-023154.sqlite3",
+    "snapshots": {
+      "research_entries": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_groups": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "document_relations": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_analyses": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "relation_candidates": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "translation_cache": {
+        "count": 68,
+        "sha256": "c5a8292af0222b05269455468357cd7aa30f9fed3e4f78f8d12b1c04afb9b5c0"
+      },
+      "full_text_study_cache": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "full_text_study_documents": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "reading_records": {
+        "count": 11,
+        "sha256": "ffc62427f79bc573d4cb2fdcd03f6b108437fe3528e41cffd85f6de97b896aa2"
+      },
+      "translation_memory": {
+        "count": 6,
+        "sha256": "9792d7d36ab0684af6b13dd73a215353ad86cef7c1e95c2cf54b0354549d408a"
+      },
+      "pdf_annotation_baselines": {
+        "count": 4,
+        "sha256": "096565e1997824c15cdb571b43c79395344d987dfeebdd79dfeb740091530663"
+      },
+      "pdf_annotation_mutations": {
+        "count": 14,
+        "sha256": "2a02593f7a4a2398fbb15b8f9f9be30a1b1ff5e77f7bec1d2c5b12967d0c844f"
+      }
+    },
+    "candidate_manifest_sha256": "9e0728eb310f1fefe4fa06812841daa5958dfaef3fe4feadfb1a173159cc966a"
+  },
+  "production": {
+    "url": "http://127.0.0.1:54433",
+    "asset_checks": {
+      "index-DqDQkVwC.js": true,
+      "PdfReader-nxhYeJEE.js": true,
+      "index-CZwc1GTE.css": true
+    },
+    "readonly_api_checks": {
+      "/api/documents": 200,
+      "/api/workspace/notebook": 200,
+      "/api/workspace/graph": 200,
+      "/api/libraries/full-text/studies": 200,
+      "/api/data/overview": 200
+    },
+    "database_integrity": "ok",
+    "snapshots_preserved": true,
+    "translation_cache_count": 68,
+    "schema": "0015_study_documents",
+    "study_cache_rows": 0,
+    "member_rows": 0
+  },
+  "production_preflight": {
+    "active_pdfs": 190,
+    "source_pdf_bytes": 433738260,
+    "annotation_recovery_files": 18,
+    "issues": [],
+    "read_only": true
+  },
+  "real_backup": {
+    "backup_path": "D:\\LiteratureWorkbenchData\\backups\\workspace\\51ec07f5-dfee-4344-8d16-9f5f8a5614da.lwb.zip",
+    "backup_id": "51ec07f5-dfee-4344-8d16-9f5f8a5614da",
+    "pdf_count": 190,
+    "file_count": 325,
+    "size_bytes": 552962965,
+    "sha256": "bee2ed4df1af6916be9419096dab6a8144a2b7c985d9812f55a1b94e2ccecea9",
+    "verification_status": "passed",
+    "download_hash_matched": true,
+    "translation_cache_count": 68,
+    "live_data_restore_performed": false
+  }
+}

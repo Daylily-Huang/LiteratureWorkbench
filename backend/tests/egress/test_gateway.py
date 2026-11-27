@@ -401,6 +401,23 @@ def test_successful_gateway_response_records_provider_usage(
     assert tuple(row) == (80, 20, 10, 41_600, "deepseek-cny-2026-07-17")
 
 
+def test_comparison_has_bounded_non_thinking_json_request_and_conservative_price(database: Database) -> None:
+    calls = []
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.read());calls.append(body)
+        assert body['max_tokens']==6000 and body['thinking']=={'type':'disabled'}
+        assert body['response_format']=={'type':'json_object'}
+        return httpx.Response(200,json={'choices':[{'message':{'content':'{"cells":[]}'}}],
+            'usage':{'prompt_tokens':100,'prompt_cache_hit_tokens':80,'prompt_cache_miss_tokens':20,'completion_tokens':10,'total_tokens':110}},request=request)
+    gateway=_gateway(database,handler)
+    gateway.answer_question(task_id='comparison-test',document_id=None,content_sha256=None,
+        display_file_name=None,model='deepseek-v4-flash',prompt='Verify bounded comparison',purpose='research_comparison')
+    with database.connect() as c:
+        charge=c.execute('SELECT cost_nano_cny,pricing_version FROM deepseek_usage').fetchone()
+    assert tuple(charge)==(123_200,'comparison-peak-upper-cny-2026-10-24')
+    assert len(calls)==1
+
+
 def test_success_without_provider_usage_records_unknown_usage(
     database: Database,
     proof: VerifiedSelectionProof,
@@ -490,6 +507,44 @@ def test_selection_in_layout_block_survives_interleaved_page_text(
 
     assert _gateway(database, handler).translate_selection(proof) == TRANSLATED_TEXT
     assert len(calls) == 1
+
+
+def test_reordered_selection_survives_when_tokens_stay_in_one_window(
+    database: Database,
+    proof: VerifiedSelectionProof,
+) -> None:
+    calls: list[httpx.Request] = []
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE pages SET normalized_text=?,raw_text=? WHERE parse_run_id=?",
+            (
+                "one bounded verified source text two three four five",
+                "one bounded verified source text two three four five",
+                str(PARSE_RUN_ID),
+            ),
+        )
+    reordered = VerifiedSelectionProof(
+        **(proof.model_dump() | {"verified_text": "bounded verified text source two three"})
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return _success_response(request)
+
+    assert _gateway(database, handler).translate_selection(reordered) == TRANSLATED_TEXT
+    assert len(calls) == 1
+
+
+def test_forged_selection_fails_with_text_mismatch(
+    database: Database,
+    proof: VerifiedSelectionProof,
+) -> None:
+    forged = VerifiedSelectionProof(
+        **(proof.model_dump() | {"verified_text": "bounded verified entirely forged trailing"})
+    )
+
+    with pytest.raises(EgressRejected, match="selection_text_mismatch"):
+        _gateway(database, lambda request: _success_response(request)).translate_selection(forged)
 
 
 def test_client_disables_environment_and_redirects_and_bounds_timeouts(
@@ -678,3 +733,65 @@ def test_configuration_probe_marks_unexpected_reply_failed_without_echo(
     assert sentinel not in str(caught.value)
     assert row is not None
     assert tuple(row) == ("failed", "configuration_probe_failed")
+
+
+def test_full_text_budget_is_scoped_to_full_text_purpose_and_still_bounded(database):
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return _success_response(request)
+    gateway = _gateway(database, handler)
+    kwargs = dict(task_id="full-text-test", document_id=None, content_sha256=None,
+                  display_file_name=None, model="deepseek-chat", prompt="x" * 70000)
+    with pytest.raises(EgressRejected, match="deepseek_request_too_large"):
+        gateway.answer_question(**kwargs)
+    assert not calls
+    assert gateway.answer_question(**kwargs, purpose="research_full_text") == TRANSLATED_TEXT
+    assert len(calls) == 1
+    assert len(calls[0].content) > 64 * 1024
+    with pytest.raises(EgressRejected, match="deepseek_request_too_large"):
+        gateway.answer_question(**{**kwargs, "prompt": "x" * 262144}, purpose="research_full_text")
+    assert len(calls) == 1
+    with database.connect() as c:
+        audit = c.execute("SELECT purpose,payload_bytes FROM egress_audit WHERE task_id='full-text-test'").fetchone()
+    assert audit["purpose"] == "research_full_text" and audit["payload_bytes"] > 64 * 1024
+
+
+
+def test_translation_prompt_includes_server_verified_context_and_glossary(
+    database: Database,
+    proof: VerifiedSelectionProof,
+) -> None:
+    from literature_workbench.features.settings.repository import SettingsRepository
+
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE contents SET title=? WHERE sha256=?",
+            ("Noninvasive genetic sampling", CONTENT_SHA256),
+        )
+        connection.execute(
+            "UPDATE pages SET normalized_text=?, raw_text=? WHERE content_sha256=? AND physical_page=1",
+            (
+                f"Intro before context. {SOURCE_TEXT} Trailing after context.",
+                f"Intro before context. {SOURCE_TEXT} Trailing after context.",
+                CONTENT_SHA256,
+            ),
+        )
+    SettingsRepository(database).update(
+        translation_glossary="allelic dropout = 等位基因脱扣"
+    )
+    captured_prompt: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        captured_prompt.append(body["messages"][0]["content"])
+        return _success_response(request)
+
+    assert _gateway(database, handler).translate_selection(proof) == TRANSLATED_TEXT
+    assert len(captured_prompt) == 1
+    sent = captured_prompt[0]
+    assert "Paper title: Noninvasive genetic sampling" in sent
+    assert "Intro before context." in sent
+    assert "Trailing after context." in sent
+    assert "allelic dropout = 等位基因脱扣" in sent
+    assert f"<selection>\n{SOURCE_TEXT}\n</selection>" in sent

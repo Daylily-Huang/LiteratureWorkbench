@@ -5,13 +5,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from literature_workbench.platform.windows.powershell import (
+    default_powershell_candidates,
+)
+
 
 FIXED_DIALOG_SCRIPT = (
     "Add-Type -AssemblyName System.Windows.Forms; "
+    "$owner = New-Object System.Windows.Forms.Form; "
+    "$owner.TopMost = $true; "
+    "$owner.StartPosition = 'CenterScreen'; "
+    "$owner.ShowInTaskbar = $true; "
     "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; "
+    "$dialog.Description = '选择要关联到文献工作台的本地文件夹'; "
+    "$dialog.UseDescriptionForTitle = $true; "
     "$dialog.ShowNewFolderButton = $false; "
-    "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { "
-    "[Console]::Out.WriteLine($dialog.SelectedPath) }"
+    "try { "
+    "if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { "
+    "[Console]::Out.WriteLine($dialog.SelectedPath) } "
+    "} finally { $dialog.Dispose(); $owner.Dispose() }"
 )
 
 
@@ -49,12 +61,17 @@ class FolderDialog:
         self._runner = runner or SubprocessCommandRunner()
 
     def select(self) -> Path | None:
-        try:
-            result = self._runner.run(
-                ["pwsh.exe", "-NoProfile", "-STA", "-Command", FIXED_DIALOG_SCRIPT]
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            raise FolderDialogError from None
+        result: CommandResult | None = None
+        for executable in default_powershell_candidates():
+            try:
+                result = self._runner.run(
+                    [executable, "-NoProfile", "-STA", "-Command", FIXED_DIALOG_SCRIPT]
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            break
+        if result is None:
+            raise FolderDialogError
         if result.returncode != 0:
             raise FolderDialogError
         selected = result.stdout.rstrip("\r\n")

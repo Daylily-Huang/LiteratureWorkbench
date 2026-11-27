@@ -1,9 +1,13 @@
+import { cleanPdfCopyText } from "./copyText";
+
 export type SelectedText = {
   documentId: string;
   documentVersionId: string;
   contentId: string;
   pdfPage: number;
   text: string;
+  rawText?: string;
+  copyText?: string;
   contextBefore: string;
   contextAfter: string;
   rects: Array<{ x: number; y: number; width: number; height: number }>;
@@ -25,7 +29,7 @@ export type SelectionCapture = {
 
 
 export const MAX_TRANSLATION_CODE_POINTS = 8000;
-const MAX_VISIBLE_RECTS = 200;
+const MAX_VISIBLE_RECTS = 1000;
 const MAX_CONTEXT_CODE_POINTS = 500;
 const SELECTION_HINT = "请在同一栏选择一句或一段";
 
@@ -198,6 +202,8 @@ export function captureSamePageSelection(
       ...metadata,
       pdfPage,
       text: normalized,
+      rawText: selection.toString(),
+      copyText: cleanPdfCopyText(selection.toString(), startLayer.textContent ?? ""),
       contextBefore: context.before,
       contextAfter: context.after,
       rects,

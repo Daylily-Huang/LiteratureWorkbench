@@ -30,8 +30,24 @@ EXPECTED_TABLES = {
     "pdf_annotation_mutations",
     "pages",
     "parse_runs",
+    "reading_groups",
+    "document_relations",
+    "relation_analyses",
+    "relation_candidates",
+    "reading_records",
+    "research_entries",
+    "rag_chunks",
+    "rag_chunks_fts",
+    "rag_chunks_fts_config",
+    "rag_chunks_fts_content",
+    "rag_chunks_fts_data",
+    "rag_chunks_fts_docsize",
+    "rag_chunks_fts_idx",
     "schema_migrations",
     "translation_cache",
+    "translation_memory",
+    "full_text_study_cache",
+    "full_text_study_documents",
     "translation_tasks",
 }
 
@@ -83,6 +99,15 @@ def test_migration_creates_current_tables_and_is_idempotent(tmp_path: Path) -> N
         "0004_pdf_annotations",
         "0005_deepseek_billing",
         "0006_deepseek_usage_optional",
+        "0007_rag_chunks",
+        "0008_rag_trigram_rects",
+        "0009_research_workspace",
+        "0010_reading_graph",
+        "0011_question_evidence",
+        "0012_relation_review",
+        "0013_translation_memory",
+        "0014_study_cache",
+        "0015_study_documents",
     ]
     with db.connect() as connection:
         columns = {
@@ -201,8 +226,37 @@ def test_existing_v01_database_upgrades_fail_closed_and_remains_idempotent(
         "0004_pdf_annotations",
         "0005_deepseek_billing",
         "0006_deepseek_usage_optional",
+        "0007_rag_chunks",
+        "0008_rag_trigram_rects",
+        "0009_research_workspace",
+        "0010_reading_graph",
+        "0011_question_evidence",
+        "0012_relation_review",
+        "0013_translation_memory",
+        "0014_study_cache",
+        "0015_study_documents",
     ]
     assert tuple(legacy) == (0, "source_claim", None, None)
+
+
+def test_v08_recreates_fts_with_trigram_and_rects_column(tmp_path: Path) -> None:
+    db = Database.open(tmp_path / "db.sqlite3")
+    run_migrations(db)
+
+    with db.connect() as connection:
+        fts_sql = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name='rag_chunks_fts'"
+        ).fetchone()
+        chunk_columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(rag_chunks)")
+        }
+        leftover = connection.execute("SELECT count(*) FROM rag_chunks").fetchone()
+
+    assert fts_sql is not None
+    assert "trigram" in str(fts_sql["sql"])
+    assert "rects_json" in chunk_columns
+    # Pre-v08 chunks are cleared so the block-aware chunker rebuilds them.
+    assert leftover[0] == 0
 
 
 def test_database_connections_enable_wal_foreign_keys_and_busy_timeout(tmp_path: Path) -> None:

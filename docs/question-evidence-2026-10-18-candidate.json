@@ -1,0 +1,15 @@
+{
+  "backend/src/literature_workbench/api/reading_graph.py": "7ea11d40c94b82eb40bbfdfdb0872659fa3223f60296790631dfb1896233d4ed",
+  "backend/src/literature_workbench/db/migrations.py": "45378e664e44bcc16867826f8b8eedec5d26b8df8330961c8d37f581caf44cef",
+  "backend/src/literature_workbench/db/schema_v11_question_evidence.sql": "37deb2254069e8f2225a27b0a24f1c15a3b9ff0194f2a32c1add39fc1b8c828a",
+  "backend/tests/api/test_reading_graph.py": "fefa594c4827bd3ab3f6cdda5685541cd8bdb13109f76ceacfb3cad7ce30e999",
+  "backend/tests/db/test_migrations.py": "ff6d54e4c1d57b252bbe0bef6f347e892b2375bad90da1d7856fdcda97e42c29",
+  "web/src/app/App.css": "0c3fbd057e68b0048afd13f65aae24ef0c8da06ad5d293832f2b11e8291ea7cc",
+  "web/src/features/research/ResearchStudio.tsx": "9535bbef551bc9bad40db511b7c94c2297695ce19cc9cfb47e4697a4c26e015a",
+  "web/src/features/research/ResearchStudio.test.tsx": "6f412f460afa4e31becce87a1045d7cf0ee6ad2bbd4fc26cabcdc5fcf687b26e",
+  "web/src/features/research/graphModel.ts": "698962937cb7f31533c671f45f478e52393768ca69229a3d45230b3cc4eaead4",
+  "web/src/features/research/graphModel.test.ts": "ecc65c5828fe532d2a3c2683adc77426978f4b1479f20f69171a34564779a7f0",
+  "web/src/features/research/KnowledgeGraph.tsx": "03d0ab277a8f8cb1c56416a5f9f42ece3e2d299e7a1e6e4de13ce31397f246fb",
+  "web/src/features/research/QuestionEvidence.tsx": "76e8f53319e57efd25f91c762ded77dccbd942c3472cc3d66ccbb20b9d1303e9",
+  "web/src/features/research/QuestionEvidence.test.tsx": "5b371af90d4aa8bfc3912afcb1541bebabdc983b05bc8fcd3f937674c353d0cc"
+}

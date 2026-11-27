@@ -124,3 +124,29 @@ def test_transport_and_response_failures_are_sanitized(response: object) -> None
         QwenLocalClient(transport=transport).translate("fixed")
     assert "secret diagnostic" not in str(caught.value)
     assert "not json" not in str(caught.value)
+
+
+def test_complete_sends_structured_system_and_user_roles() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        body = json.loads(request.content)
+        assert body == {
+            "model": "literature-workbench-qwen",
+            "messages": [
+                {"role": "system", "content": "You are a research assistant."},
+                {"role": "user", "content": "What is RAG?"},
+            ],
+            "stream": False,
+        }
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "RAG is retrieval augmented generation."}}]},
+            request=request,
+        )
+
+    client = QwenLocalClient(transport=httpx.MockTransport(handler))
+    res = client.complete("What is RAG?", system_prompt="You are a research assistant.")
+    assert res == "RAG is retrieval augmented generation."
+    assert len(calls) == 1
