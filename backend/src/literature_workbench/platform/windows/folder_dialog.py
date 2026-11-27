@@ -12,10 +12,18 @@ from literature_workbench.platform.windows.powershell import (
 
 FIXED_DIALOG_SCRIPT = (
     "Add-Type -AssemblyName System.Windows.Forms; "
+    "$owner = New-Object System.Windows.Forms.Form; "
+    "$owner.TopMost = $true; "
+    "$owner.StartPosition = 'CenterScreen'; "
+    "$owner.ShowInTaskbar = $true; "
     "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; "
+    "$dialog.Description = '选择要关联到文献工作台的本地文件夹'; "
+    "$dialog.UseDescriptionForTitle = $true; "
     "$dialog.ShowNewFolderButton = $false; "
-    "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { "
-    "[Console]::Out.WriteLine($dialog.SelectedPath) }"
+    "try { "
+    "if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { "
+    "[Console]::Out.WriteLine($dialog.SelectedPath) } "
+    "} finally { $dialog.Dispose(); $owner.Dispose() }"
 )
 
 
